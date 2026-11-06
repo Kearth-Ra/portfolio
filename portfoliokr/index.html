@@ -318,6 +318,66 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
 .fx.in { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .fx { opacity: 1; transform: none; transition: none; } .rv-in { transition: none; } }
 @media print { .top { display: none !important; } .fx { opacity: 1; transform: none; } }
+
+/* Programm Führen mit KI */
+.prog { background: var(--soft); }
+.prog-top { display: grid; grid-template-columns: 1.15fr .85fr; gap: 56px; align-items: end; margin-bottom: 44px; }
+.prog-top h2 { font-size: clamp(36px, 4.4vw, 56px); letter-spacing: -.02em; margin-bottom: 16px; }
+.prog-claim { font-size: 23px; line-height: 1.35; font-weight: 600; margin-bottom: 14px; }
+.prog-top p { color: var(--muted); }
+.prog-top .btn { margin: 6px 10px 0 0; }
+.prog-nums { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--ink); margin-bottom: 56px; }
+.prog-nums div { padding: 18px 18px 0 0; }
+.prog-nums div + div { padding-left: 18px; border-left: 1px solid var(--line); }
+.prog-nums b { display: block; font-size: 52px; line-height: 1; font-weight: 700; color: var(--blue); margin-bottom: 8px; }
+.prog-nums strong { display: block; font-size: 18px; }
+.prog-nums span { font-size: 15.5px; color: var(--muted); }
+.prog h3.prog-h { font-size: 24px; margin: 0 0 6px; }
+.prog-sub { color: var(--muted); margin: 0 0 20px; max-width: 760px; }
+.prog-table { width: 100%; border-collapse: collapse; font-size: 16px; background: #fff; border: 1px solid var(--line); }
+.prog-table th { text-align: left; font-size: 14px; font-weight: 600; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--ink); background: #fff; }
+.prog-table td { padding: 12px 14px; vertical-align: top; border-bottom: 1px solid var(--line); }
+.prog-table tr:last-child td { border-bottom: 0; }
+.prog-table td:first-child { width: 128px; }
+.prog-table td:first-child b { display: block; font-size: 20px; color: var(--blue); line-height: 1.2; }
+.prog-table td:first-child span { font-size: 14px; color: var(--muted); }
+.prog-table td b.t { display: block; }
+.prog-table .team { display: block; margin-top: 4px; font-size: 15px; font-weight: 600; color: var(--blue); }
+.prog-table td:last-child { width: 34%; color: var(--muted); font-size: 15px; }
+.prog-table td:last-child em { font-style: normal; font-weight: 600; color: var(--ink); }
+.prog-table tr.pv td { background: #F7F8FA; }
+.prog-table a { font-weight: 600; }
+.prog-note { font-size: 14.5px; color: var(--muted); margin: 10px 0 56px; }
+.prog-three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin-bottom: 56px; }
+.prog-three > div { border-top: 1px solid var(--ink); padding-top: 14px; }
+.prog-three small { display: block; font-size: 14px; font-weight: 600; color: var(--blue); }
+.prog-three h4 { margin: 4px 0 10px; font-size: 21px; }
+.prog-three ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 16px; }
+.prog-stufen { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.prog-stufen div { border-top: 1px solid var(--line); padding-top: 14px; }
+.prog-stufen b { font-size: 34px; color: var(--blue); line-height: 1; margin-right: 8px; }
+.prog-stufen strong { font-size: 19px; }
+.prog-stufen small { display: block; margin: 6px 0 4px; font-size: 14px; font-weight: 600; color: var(--blue); }
+.prog-stufen span { font-size: 15.5px; color: var(--muted); }
+.prog-end { margin-top: 48px; padding: 28px 30px; background: var(--dark); color: #fff; border-radius: var(--r); display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; }
+.prog-end p { margin: 0; color: rgba(255,255,255,.85); }
+.prog-end b { display: block; color: #fff; font-size: 20px; margin-bottom: 4px; }
+.prog-end .btn { background: #fff; color: var(--ink); border-color: #fff; }
+.prog-end .btn.sec { background: transparent; color: #fff; border-color: rgba(255,255,255,.6); }
+.prog-end div:last-child { display: flex; flex-wrap: wrap; gap: 10px; }
+@media (max-width: 900px) {
+  .prog-top, .prog-three, .prog-stufen, .prog-end { grid-template-columns: 1fr; gap: 24px; }
+  .prog-nums { grid-template-columns: 1fr 1fr; }
+  .prog-nums div, .prog-nums div + div { padding: 16px 12px 16px 0; border-left: 0; }
+  .prog-table, .prog-table tbody, .prog-table tr, .prog-table td { display: block; width: auto !important; }
+  .prog-table thead { display: none; }
+  .prog-table tr { border-bottom: 1px solid var(--line); padding: 8px 0; }
+  .prog-table td { border: 0; padding: 4px 14px; }
+}
+.live-cards { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 1000px) { .live-cards { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .live-cards { grid-template-columns: 1fr; } }
+.lk-group { grid-column: 1 / -1; font-size: 15px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -327,12 +387,11 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
     <a class="brand" href="#start"><span class="brand-mark">KR</span>Kerstin Rafai</a>
     <nav class="nav" aria-label="Bereiche">
       <a href="#angebot">Angebot</a>
-      <a href="#ausprobieren">Ausprobieren</a>
-      <a href="#live">Live-Kurse</a>
+      <a href="#live">Beispielkurse</a>
+      <a href="#ausprobieren">Methoden</a>
       <a href="#designs">Designs</a>
       <a href="#videos">Videos</a>
-      <a href="#konzepte">Konzepte</a>
-      <a href="#ki">KI</a>
+            <a href="#programm">Führen mit KI</a>
     </nav>
     <a class="btn" href="#kontakt">Erstgespräch<span class="hide-s">&nbsp;anfragen</span></a>
   </div>
@@ -354,7 +413,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
       <ul class="hero-facts">
         <li>Fertig als SCORM-Paket für Ihr Lernsystem</li>
         <li>Erklärvideos als Erklärvideo, Motion oder Scribble</li>
-        <li>KI-Themen für Führungskräfte</li>
+        <li>Programm „Führen mit KI“ als Blended Learning</li>
       </ul>
     </div>
     <figure class="hero-photo">
@@ -431,11 +490,71 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
 <div class="band">
   <div class="wrap">
     <div class="fx" style="--i:0"><b>10 bis 45 Min.</b><span>vom Microlearning bis zum Kompaktkurs</span></div>
-    <div class="fx" style="--i:1"><b>Einzeln oder Programm</b><span>Ein E-Learning oder ein ganzes Programm, z. B. „Führen mit KI“ mit 21 Einheiten</span></div>
+    <div class="fx" style="--i:1"><b>Einzeln oder Programm</b><span>Ein E-Learning oder ein ganzes Programm, z. B. „Führen mit KI“ mit 23 Einheiten</span></div>
     <div class="fx" style="--i:2"><b>Barrierearm</b><span>Kontrast, Tastatur und Untertitel geprüft</span></div>
     <div class="fx" style="--i:3"><b>KI-gekennzeichnet</b><span>nach Artikel 50 der KI-Verordnung</span></div>
   </div>
 </div>
+
+<section id="programm" class="prog" aria-labelledby="h-prog">
+  <div class="wrap">
+    <div class="prog-top fx">
+      <div>
+        <div class="eyebrow">Programm für Führungskräfte · Blended Learning</div>
+        <h2 id="h-prog">Führen mit KI</h2>
+        <p class="prog-claim">Ihre Teams nutzen KI. Ob daraus bessere Arbeit wird, entscheidet die Führung.</p>
+      </div>
+      <div>
+        <p>Das Programm macht Führungskräfte in zwei Richtungen sicher: in der eigenen Arbeit mit KI und in der Führung ihres Teams durch den Wandel. Mit Live-Tagen, kurzen E-Learnings und Transfer, der im Team ankommt.</p>
+        <a class="btn" href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht (PDF)</a><a class="btn sec" href="#live">Zwei Einheiten ausprobieren</a>
+      </div>
+    </div>
+    <div class="prog-nums fx">
+      <div><b>7</b><strong>Live-Tage</strong><span>5 in Präsenz, 2 virtuell</span></div>
+      <div><b>23</b><strong>E-Learnings</strong><span>je 10 bis 20 Minuten</span></div>
+      <div><b>10</b><strong>Monate</strong><span>mit Transfer zwischen den Tagen</span></div>
+      <div><b>1</b><strong>Nachweis je Person</strong><span>nach Art. 4 KI-Verordnung</span></div>
+    </div>
+
+    <h3 class="prog-h">Vom eigenen Können zum Team</h3>
+    <p class="prog-sub">Grundlagen und Regeln zuerst, dann die eigene KI-Praxis, dann die Führung des Teams. Fokus A: KI für die eigenen Führungsaufgaben. Fokus B: Führung im KI-Wandel. Nach jedem Live-Tag handelt die Führungskraft sichtbar im eigenen Team, höchstens 15 Minuten.</p>
+    <table class="prog-table fx">
+      <thead><tr><th>Etappe</th><th>Live-Tag und danach im Team</th><th>E-Learnings vorab</th></tr></thead>
+      <tbody>
+          <tr class="pv"><td><b>Vorphase</b><span>3 Wochen</span></td><td><b class="t">Vorgespräch, Praxis-Check, Eingangsdiagnose</b>Sechs Micro-E-Learnings zu KI-Kompetenz, Rechtsrahmen und Verantwortung.</td><td><em>6 Einheiten, ca. 91 Min.</em><br>0.1 Wahrscheinlich ist nicht wahr · 0.2 Die drei Prüffragen · 0.3 Grenzen und Lernroutine · <a href="#live" data-live="fmk-hebel">0.4 Der Hebel bist du</a> · 0.5 Der Rechtsrahmen in zehn Minuten · 0.6 Verantwortungskette und Ethik</td></tr>
+          <tr><td><b>Live 0</b><span>Präsenz</span></td><td><b class="t">KI verstehen und sicher nutzen</b>Wie Sprachmodelle arbeiten, Fehlerlabor mit sechs Fehlertypen, Regeln an Fällen, KI für die eigene Routinearbeit. Nachweis Stufe Basis.<span class="team">Im Team: Spielregeln vorstellen</span></td><td>Abgedeckt durch die Vorphase</td></tr>
+          <tr><td><b>Live 1</b><span>Präsenz, Fokus A</span></td><td><b class="t">Gespräche vorbereiten mit KI</b>„Erst ich, dann KI, dann ich“: Gegenhypothesen, Einstieg in vier Sätzen, Generalprobe mit echten Fällen.<span class="team">Im Team: Eigene Nutzung zeigen</span></td><td><em>1 Einheit, ca. 13 Min.</em><br>1.1 Was Führung bleibt</td></tr>
+          <tr><td><b>Live 2</b><span>Präsenz, Fokus A</span></td><td><b class="t">Feedback, Ziele und Beurteilung mit KI</b>Feedback zu KI-gestützter Arbeit, KI-Erwartungen je Rolle im Zielgespräch, was KI bei Beurteilungen darf.<span class="team">Im Team: Qualitätskriterium vereinbaren</span></td><td><em>4 Einheiten, ca. 58 Min.</em><br><a href="#live" data-live="fmk-workslop">2.1 Workslop erkennen und benennen</a> · 2.2 Die Zeit-Dividende · 2.3 Ziele, Leistung, Laufbahnen · 2.4 Feedback zu KI-Arbeit</td></tr>
+          <tr><td><b>Live 3</b><span>virtuell, Fokus A</span></td><td><b class="t">Meetings und Entscheidungen mit KI</b>Vorlagen auf Annahmen prüfen, Übervertrauen erkennen, wann der Mensch Pflicht ist, KI-Beteiligung offenlegen.<span class="team">Im Team: Anwendungsfälle sammeln</span></td><td><em>2 Einheiten, ca. 31 Min.</em><br>3.1 Cognitive Surrender · 3.2 Wann Mensch Pflicht ist</td></tr>
+          <tr><td><b>Live 4</b><span>Präsenz, Fokus B</span></td><td><b class="t">Widerstände verstehen, Veränderung kommunizieren</b>Sorgengespräch in vier Schritten, Veränderung ehrlich ankündigen, Gespräch über Schatten-KI.<span class="team">Im Team: Sorgen sammeln und beantworten</span></td><td><em>3 Einheiten, ca. 44 Min.</em><br>4.1 Diagnose: Können × Wollen × Dürfen · 4.2 Sorgen ernst nehmen · 4.3 Ehrlich kommunizieren</td></tr>
+          <tr><td><b>Live 5</b><span>virtuell, Fokus B</span></td><td><b class="t">Lernen im Team gestalten</b>Experimentierzeit, Lern-Tandems, Reaktion auf KI-Fehler, eigene Nutzung sichtbar vorleben.<span class="team">Im Team: Experimentierzeit einführen</span></td><td><em>2 Einheiten, ca. 34 Min.</em><br>5.1 Psychologische Sicherheit · 5.2 Vorleben, Experimentierräume, Mythen</td></tr>
+          <tr><td><b>Live 6</b><span>Präsenz, Fokus B</span></td><td><b class="t">KI-Einführung im Team führen</b>Rollen klären, Agenten delegieren und prüfen, Nutzen messen, Spielregeln-Canvas. Nachweis Anwendung und Governance.<span class="team">Im Team: Teamworkshop Spielregeln</span></td><td><em>2 Einheiten, ca. 33 Min.</em><br>6.1 Aufgaben, Rollen, Übergaben · 6.2 Kriterien und Kennzeichnung</td></tr>
+          <tr class="pv"><td><b>Nachlauf</b><span>12 Wochen</span></td><td><b class="t">Fallberatung und Nachgespräch</b>Kollegiale Fallberatung, Nachgespräch und Nachher-Messung.</td><td><em>1 Einheit, ca. 19 Min.</em><br>7.1 Vom Kontrolleur zum Orchestrator</td></tr>
+      </tbody>
+    </table>
+    <p class="prog-note">Abstand zwischen den Live-Tagen drei bis fünf Wochen. Dazu zwei freiwillige Vertiefungen à rund 90 Minuten: „Teams durch den KI-Wandel führen“ und „KI als Führungskraft wertschöpfend nutzen“.</p>
+
+    <div class="prog-three">
+      <div class="fx"><small>E-Learning</small><h4>Kurz und aktiv</h4><ul><li>10 bis 20 Minuten je Einheit, etwa wöchentlich</li><li>Entscheiden an echten Fällen statt Lesen</li><li>Chats, Szenen, Schätzfragen, Sortieren</li><li>Am Rechner und am Handy, als SCORM für Ihr LMS</li></ul></div>
+      <div class="fx"><small>Live-Tage</small><h4>Fälle statt Folien</h4><ul><li>Fehlerlabor: KI-Fehler selbst auslösen</li><li>Generalprobe mit eigenen Fällen</li><li>Virtuelle Tage: 180 Minuten mit Breakouts</li><li>Jeder Tag endet mit einem Wenn-dann-Plan</li></ul></div>
+      <div class="fx"><small>Im Team</small><h4>Sichtbar handeln</h4><ul><li>Nach jedem Live-Tag 15 Minuten im eigenen Team</li><li>Tandem, Übungsraum, Abruf-Impulse an Tag 2, 7 und 21</li><li>Am Ende Spielregeln, die das Team selbst aushandelt</li><li>Teamworkshop mit Moderationskit</li></ul></div>
+    </div>
+
+    <h3 class="prog-h">Nachweisbar nach Art. 4 KI-Verordnung</h3>
+    <p class="prog-sub">Eine dokumentierte, rollenbezogene Maßnahme. Nachgewiesen wird je Person: wer, welche Bausteine, für welchen KI-Einsatz. Gemessen wird Verhalten: Teambefragung vorher und zwölf Wochen nach dem letzten Live-Tag.</p>
+    <div class="prog-stufen">
+      <div class="fx"><b>1</b><strong>Basis</strong><small>Vorphase und Live 0</small><span>Funktionsweise und Fehler von Sprachmodellen, Datenregeln, Rechtsrahmen, Meldeweg</span></div>
+      <div class="fx"><b>2</b><strong>Anwendung</strong><small>Fokus A, Live 1 bis 3</small><span>KI für Gespräche, Feedback, Ziele, Meetings und Entscheidungen</span></div>
+      <div class="fx"><b>3</b><strong>Governance</strong><small>Fokus B, Live 4 bis 6</small><span>Veränderung führen, Lernen im Team, Spielregeln, Agenten delegieren und prüfen</span></div>
+    </div>
+
+    <div class="prog-end fx">
+      <p><b>Als Gesamtprogramm oder in Modulen</b>Zum Einstieg reichen Vorphase und Live 0, sie decken die Basisstufe für den Art.-4-Nachweis ab. Die Workshops lassen sich auch einzeln beauftragen, alle Konzepte passe ich an Ihr Haus, Ihr Werkzeug und Ihre Regeln an.</p>
+      <div><a class="btn" href="#kontakt">Erstgespräch anfragen</a><a class="btn sec" href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">PDF</a></div>
+    </div>
+  </div>
+</section>
+
 
 <section id="ausprobieren" class="try" aria-labelledby="h-try">
   <div class="wrap">
@@ -528,10 +647,14 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
 <section id="live" class="live" aria-labelledby="h-live">
   <div class="wrap">
     <div class="sec-head fx">
-      <div><div class="eyebrow">Live-Kurse</div><h2 id="h-live">Kurse zum Durchklicken</h2></div>
-      <p>Vier Kurse aus meinem Autorentool, so wie sie später in Ihrem Lernsystem laufen. Als Leseprobe sind jeweils die ersten fünf Folien offen. Ihre Antworten bleiben in Ihrem Browser.</p>
+      <div><div class="eyebrow">Beispielkurse</div><h2 id="h-live">Beispielkurse zum Durchklicken</h2></div>
+      <p>Beispielkurse aus meinem Angebot, so wie sie in Ihrem Lernsystem laufen: zwei Einheiten aus dem Programm „Führen mit KI“ und vier Kurse zu Führung, Gesprächen und digitalem Lernen. Als Leseprobe sind jeweils die ersten fünf Folien offen.</p>
     </div>
     <div class="live-cards">
+      <div class="lk-group">Aus dem Programm „Führen mit KI“</div>
+      <button class="lk fx" type="button" aria-pressed="false" data-kurs="fmk-hebel" data-titel="Führen mit KI 0.4: Der Hebel bist du"><img src="kurse/fmk-hebel.jpg" alt="" loading="lazy"><span class="lk-b"><span class="lk-meta">Einheit 0.4 · Vorphase · Microlearning</span><span class="h3" role="heading" aria-level="3">Der Hebel bist du</span><span class="lk-p">Alle haben eine Copilot-Lizenz, zwei nutzen sie. Woran liegt das, und was tun Sie als Führungskraft?</span><span class="lk-go">Kurs starten</span></span></button>
+      <button class="lk fx" type="button" aria-pressed="false" data-kurs="fmk-workslop" data-titel="Führen mit KI 2.1: Workslop erkennen und benennen"><img src="kurse/fmk-workslop.jpg" alt="" loading="lazy"><span class="lk-b"><span class="lk-meta">Einheit 2.1 · vor Live 2 · Microlearning</span><span class="h3" role="heading" aria-level="3">Workslop erkennen und benennen</span><span class="lk-p">Vier Seiten, fehlerfrei, und die Frage bleibt offen. Woran Sie Workslop erkennen und was Sie als Erstes sagen.</span><span class="lk-go">Kurs starten</span></span></button>
+      <div class="lk-group">Führung, Gespräche, digitales Lernen</div>
       <button class="lk fx" style="--i:0" type="button" aria-pressed="false" data-kurs="konflikt" data-titel="Abstieg in die Tiefen eines Konflikts"><img src="kurse/konflikt.jpg" alt="" loading="lazy"><span class="lk-b"><span class="lk-meta">Stil Nacht · ca. 17 Min.</span><span class="h3" role="heading" aria-level="3">Abstieg in die Tiefen eines Konflikts</span><span class="lk-p">Ein 3D-Abstieg durch die neun Eskalationsstufen nach Glasl. Auf jeder Tiefe entscheiden Sie, wer noch helfen kann.</span><span class="lk-go">Kurs starten</span></span></button>
       <button class="lk fx" style="--i:1" type="button" aria-pressed="false" data-kurs="feedback" data-titel="Feedback, das ankommt"><img src="kurse/feedback.jpg" alt="" loading="lazy"><span class="lk-b"><span class="lk-meta">Lektionen zum Scrollen</span><span class="h3" role="heading" aria-level="3">Feedback, das ankommt</span><span class="lk-p">Ein Kurs zum Scrollen wie eine Reportage: mit Lernbuch, Chat im Handy, Karten zum Entscheiden und Abschlusscheck.</span><span class="lk-go">Kurs starten</span></span></button>
       <button class="lk fx" style="--i:2" type="button" aria-pressed="false" data-kurs="klar-ansprechen" data-titel="Klar ansprechen: SAG ES"><img src="kurse/klar-ansprechen.jpg" alt="" loading="lazy"><span class="lk-b"><span class="lk-meta">Reihe · Teil 1 von 5 · ca. 16 Min.</span><span class="h3" role="heading" aria-level="3">Klar ansprechen: SAG ES</span><span class="lk-p">Tom kommt seit drei Monaten zu spät. Sie führen das Gespräch, Schritt für Schritt mit der SAG-ES-Methode.</span><span class="lk-go">Kurs starten</span></span></button>
@@ -540,17 +663,17 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
     <div class="stage fx" data-stage>
       <div class="stage-bar">
         <span class="stage-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="stage-title" data-stage-title>Abstieg in die Tiefen eines Konflikts</span>
+        <span class="stage-title" data-stage-title>Führen mit KI 0.4: Der Hebel bist du</span>
         <span class="stage-dev" role="group" aria-label="Ansicht">
           <button type="button" aria-pressed="true" data-dev="desk">Rechner</button>
           <button type="button" aria-pressed="false" data-dev="phone">Handy</button>
         </span>
-        <a class="stage-new" href="kurse/konflikt/index.html" target="_blank" rel="noopener" data-stage-new>Im neuen Fenster ↗</a>
+        <a class="stage-new" href="kurse/fmk-hebel/index.html" target="_blank" rel="noopener" data-stage-new>Im neuen Fenster ↗</a>
       </div>
       <div class="stage-view" data-stage-view>
         <iframe title="Kursvorschau" data-stage-frame></iframe>
-        <div class="stage-poster" data-stage-poster style="background-image:url(kurse/konflikt.jpg)">
-          <div><b>Abstieg in die Tiefen eines Konflikts</b><p>Oder wählen Sie oben einen anderen Kurs.</p><button class="btn" type="button" data-stage-start>Kurs hier starten</button></div>
+        <div class="stage-poster" data-stage-poster style="background-image:url(kurse/fmk-hebel.jpg)">
+          <div><b>Führen mit KI 0.4: Der Hebel bist du</b><p>Oder wählen Sie oben einen anderen Kurs.</p><button class="btn" type="button" data-stage-start>Kurs hier starten</button></div>
         </div>
       </div>
     </div>
@@ -656,22 +779,6 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
   </div>
 </section>
 
-<section id="ki" class="ki" aria-labelledby="h-ki">
-  <div class="wrap ki-grid">
-    <div class="fx">
-      <div class="eyebrow">KI</div>
-      <h2 id="h-ki">KI im Führungsalltag</h2>
-      <p class="lead" style="margin-top:18px">KI verändert, wie Teams arbeiten und wie Leistung entsteht. Ich unterstütze Führungskräfte dabei, KI wertschöpfend einzusetzen, Ergebnisse zu prüfen und klare Spielregeln im Team zu vereinbaren.</p>
-      <a class="btn" href="#kontakt" style="margin-top:8px">KI-Angebot anfragen</a>
-    </div>
-    <div class="ki-list">
-      <div class="ki-item fx" style="--i:0"><span class="ki-ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><div><b>E-Learnings und Microlearning-Reihen</b><span>Zum Beispiel „Führen mit KI“ in 21 Einheiten oder „KI als Führungskraft wertschöpfend nutzen“.</span></div></div>
-      <div class="ki-item fx" style="--i:1"><span class="ki-ico"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span><div><b>KI-Kompetenz nach Artikel 4 KI-Verordnung</b><span>Schulungen, die Ihre Pflicht erfüllen und im Alltag helfen: Prüfen, Kennzeichnen, Datenschutz.</span></div></div>
-      <div class="ki-item fx" style="--i:2"><span class="ki-ico"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15 14.5c3 0 6 1.8 6 5"/></svg></span><div><b>Impulse und Workshops für Führungsteams</b><span>Spielregeln für die Arbeit mit KI im Team, Feedback zu KI-Ergebnissen, Sorgen ernst nehmen.</span></div></div>
-    </div>
-  </div>
-</section>
-
 <section aria-labelledby="h-ablauf">
   <div class="wrap">
     <div class="sec-head fx">
@@ -713,7 +820,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
         <button type="button" aria-pressed="false">E-Learning</button>
         <button type="button" aria-pressed="false">Erklärvideo</button>
         <button type="button" aria-pressed="false">Konzept und Storyboard</button>
-        <button type="button" aria-pressed="false">KI für Führungskräfte</button>
+        <button type="button" aria-pressed="false">Programm „Führen mit KI“</button>
       </div>
       <label for="f-thema">Ihr Thema</label>
       <input id="f-thema" name="thema" placeholder="z. B. Feedbackgespräche für neue Führungskräfte">
@@ -874,7 +981,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
     if (scroll) stg.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
   }
   $$('.lk').forEach(function (c) { c.addEventListener('click', function () { loadKurs(c.dataset.kurs, c.dataset.titel, true); }); });
-  $('[data-stage-start]').addEventListener('click', function () { loadKurs('konflikt', 'Abstieg in die Tiefen eines Konflikts', false); });
+  $$('[data-live]').forEach(function (a) { a.addEventListener('click', function (e) { var c = $('.lk[data-kurs="' + a.dataset.live + '"]'); if (c) { e.preventDefault(); loadKurs(c.dataset.kurs, c.dataset.titel, true); } }); });
+  $('[data-stage-start]').addEventListener('click', function () { loadKurs('fmk-hebel', 'Führen mit KI 0.4: Der Hebel bist du', false); });
   $$('[data-dev]').forEach(function (b) { b.addEventListener('click', function () {
     $$('[data-dev]').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
     view.classList.toggle('phone', b.dataset.dev === 'phone');
@@ -895,7 +1003,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
   var REPLY = [
     'Das kenne ich. Dagegen helfen Entscheidungen mit Folgen statt Folien. <a href="#ausprobieren">Probieren Sie es aus</a>.',
     'Dann übernehme ich Konzept, Storyboard und Umsetzung, Sie geben frei. <a href="#konzepte">So arbeite ich</a>.',
-    'Dazu habe ich fertige Reihen und baue Kurse zu Ihren Spielregeln. <a href="#ki">Zu den KI-Angeboten</a>.'
+    'Dazu habe ich fertige Reihen und baue Kurse zu Ihren Spielregeln. <a href="#programm">Zum Programm „Führen mit KI“</a>.'
   ];
   function closeKf() { kf.hidden = true; kfo.hidden = false; kfo.focus(); }
   function openKf() { kf.hidden = false; kfo.hidden = true; }
