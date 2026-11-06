@@ -2233,5 +2233,59 @@ html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
 <script src="course.js"></script>
 <script src="player.js"></script>
 <script>kursPlayer(window.COURSE, {"standard":"1.2"});</script>
+<script>
+/* Portfolio-Fassung: nur die ersten fuenf Folien, danach Gespraechsangebot */
+(function () {
+  var css = '.kp-toc-fs,[data-fullscreen]{display:none!important}' +
+    '.kr-gate{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;padding:20px;background:rgba(20,24,30,.72)}' +
+    '.kr-gate-box{max-width:520px;width:100%;background:#fff;color:#1d2228;border-radius:6px;padding:34px 32px 28px;font:16px/1.6 "Segoe UI",system-ui,sans-serif;box-shadow:0 30px 60px -20px rgba(0,0,0,.5)}' +
+    '.kr-gate-box small{display:block;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#2f5fb3;margin-bottom:10px}' +
+    '.kr-gate-box h2{margin:0 0 12px;font-size:28px;line-height:1.2;font-weight:700;color:#1d2228}' +
+    '.kr-gate-box p{margin:0 0 22px;color:#4a525c}' +
+    '.kr-gate-row{display:flex;flex-wrap:wrap;gap:10px}' +
+    '.kr-gate-row a,.kr-gate-row button{display:inline-flex;align-items:center;min-height:46px;padding:10px 20px;border-radius:4px;font:inherit;font-weight:600;text-decoration:none;cursor:pointer;border:1.5px solid #2f5fb3}' +
+    '.kr-gate-row .kr-main{background:#2f5fb3;color:#fff}' +
+    '.kr-gate-row .kr-sec{background:#fff;color:#2f5fb3}' +
+    '.kr-gate-back{margin-top:16px;padding:0;border:0;background:none;color:#4a525c;font:inherit;font-size:14px;text-decoration:underline;cursor:pointer}' +
+    '.kr-gate a:focus-visible,.kr-gate button:focus-visible{outline:3px solid #2f5fb3;outline-offset:2px}';
+  var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+  var open = false, box = null;
+  function show() {
+    if (open) return; open = true;
+    box = document.createElement('div');
+    box.className = 'kr-gate';
+    box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-labelledby', 'kr-gate-t');
+    box.innerHTML = '<div class="kr-gate-box"><small>Ende der Leseprobe</small>' +
+      '<h2 id="kr-gate-t">Weiter geht’s mit einem Gespräch.</h2>' +
+      '<p>Das waren die ersten fünf Folien. Stellen Sie mir Ihren Bedarf vor: Thema, Zielgruppe und Umfang. Den ganzen Kurs zeige ich Ihnen gern persönlich.</p>' +
+      '<div class="kr-gate-row"><a class="kr-main" href="../../index.html#kontakt" target="_top">Gespräch anfragen</a>' +
+      '<a class="kr-sec" href="mailto:kerstinrafai@gmail.com?subject=' + encodeURIComponent('Anfrage nach der Kursprobe: ' + document.title) + '">E-Mail schreiben</a></div>' +
+      '<button class="kr-gate-back" type="button">Zurück zu Folie 5</button></div>';
+    document.body.appendChild(box);
+    box.querySelector('.kr-gate-back').addEventListener('click', function () {
+      var b = document.querySelector('[data-back]');
+      close(); if (b) b.click();
+    });
+    box.addEventListener('keydown', function (e) {
+      if (e.key === 'Tab') {
+        var f = box.querySelectorAll('a,button'), first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+      e.stopPropagation();
+    }, true);
+    box.querySelector('.kr-main').focus();
+  }
+  function close() { if (box) box.remove(); box = null; open = false; }
+  function check() {
+    var end = document.getElementById('kr-ende') || document.querySelector('.kp-result');
+    if (end && end.getClientRects().length) show();
+    else if (!end && open) close();
+  }
+  new MutationObserver(check).observe(document.documentElement, { childList: true, subtree: true });
+  window.addEventListener('scroll', check, { passive: true });
+  check();
+})();
+</script>
 </body>
 </html>
