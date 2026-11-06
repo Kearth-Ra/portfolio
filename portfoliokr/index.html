@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kerstin Rafai · E-Learning, Erklärvideos, Konzepte</title>
-<meta name="description" content="Kerstin Rafai, KR Consulting: E-Learnings, Erklärvideos, Lernkonzepte und das Programm „Führen mit KI“. Beispielkurse zum Durchklicken.">
+<meta name="description" content="Kerstin Rafai: E-Learnings, Erklärvideos, Lernkonzepte und das Programm „Führen mit KI“. Beispielkurse zum Durchklicken.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap">
@@ -269,6 +269,47 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 .kf-open:hover img { transform: scale(1.06); }
 .kf-open[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .kf-bubble { animation: none; } }
+
+/* Angebot: drei Karten, darunter das Special */
+.offers { grid-template-columns: repeat(3, 1fr); gap: 20px; }
+@media (max-width: 1000px) { .offers { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .offers { grid-template-columns: 1fr; } }
+.special { display: grid; grid-template-columns: 260px 1fr auto; gap: 28px; align-items: center; margin-top: 20px; padding: 14px 28px 14px 14px; border-radius: var(--r); background: var(--night); color: var(--on-night); }
+.special-pic { border-radius: 10px; overflow: hidden; aspect-ratio: 16 / 9; }
+.special-pic img { width: 100%; height: 100%; object-fit: cover; object-position: 0 0; }
+.special-tag { display: inline-block; padding: 4px 12px; border-radius: 999px; background: var(--blue-ink); color: #fff; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.special h3 { margin: 10px 0 6px; font-size: clamp(22px, 2vw, 28px); font-stretch: 108%; letter-spacing: -.02em; }
+.special p { margin: 0; color: var(--on-night-2); font-size: 16.5px; max-width: 640px; }
+.special-links { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.special .btn { background: var(--on-night); border-color: var(--on-night); color: var(--ink); }
+.special .btn:hover { background: var(--blue-ink); border-color: var(--blue-ink); color: #fff; }
+.special-try { font-size: 15px; font-weight: 600; text-decoration: underline; }
+@media (max-width: 1000px) { .special { grid-template-columns: 200px 1fr; } .special-links { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; } }
+@media (max-width: 600px) { .special { grid-template-columns: 1fr; padding: 14px 14px 22px; } }
+
+/* Feinschliff */
+h1, h2, h3 { text-wrap: balance; }
+.intro, .offer ul, .special p { text-wrap: pretty; }
+.facts { display: block; margin-top: 24px; font-size: 15px; color: var(--muted); }
+.facts i { font-style: normal; margin: 0 8px; color: var(--blue-ink); }
+.light, .contact { border-radius: clamp(20px, 2.4vw, 36px); margin: 0 clamp(6px, 1vw, 14px); }
+.light + .light, .contact { margin-top: clamp(6px, 1vw, 14px); }
+.offer { transition: transform .35s var(--ease), box-shadow .35s var(--ease); }
+.offer:hover { transform: translateY(-4px); box-shadow: 0 22px 40px -28px rgba(21,24,29,.45); }
+.case { transition: border-color .3s, transform .35s var(--ease); }
+.case:hover { transform: translateY(-3px); }
+.steps em, .tag b { font-variant-numeric: tabular-nums; }
+.top.solid { background: rgba(20,23,28,.9); }
+.foot-nav { display: flex; flex-wrap: wrap; gap: 6px 22px; width: 100%; padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--line-night); }
+.foot-nav a { color: var(--on-night); text-decoration: none; font-weight: 600; }
+.foot-nav a:hover { color: var(--blue); }
+footer { padding: 34px 0 30px; }
+@media (prefers-reduced-motion: reduce) { .offer:hover, .case:hover { transform: none; } }
+
+.me2 { margin: 28px 0 0; max-width: 440px; }
+.me2 img { width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; object-position: 60% 20%; border-radius: var(--r); }
+.me2 figcaption { margin-top: 12px; font-size: 16px; color: rgba(255,255,255,.85); }
+.me2 b { display: block; font-size: 19px; color: #fff; }
 </style>
 </head>
 <body>
@@ -291,7 +332,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 
 <section class="hero" aria-labelledby="h-hero">
   <div class="wrap">
-    <div class="tag"><b>KR Consulting</b>Lernkonzepte und E-Learning für Führung und Personalentwicklung</div>
+    <div class="tag"><b>Kerstin Rafai</b>Lernkonzepte und E-Learning für Führung und Personalentwicklung</div>
     <h1 id="h-hero"><span class="ln"><span>Lernen, das man</span></span><span class="ln"><span><em>nicht</em> wegklickt.</span></span></h1>
     <div class="hero-row">
       <div class="rv">
@@ -364,17 +405,20 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
           <a class="more" href="#ablauf">So arbeite ich <span aria-hidden="true">→</span></a>
         </div>
       </article>
-      <article class="offer rv" style="--d:3">
-        <div class="offer-pic"><img src="kurse/fmk-workslop.jpg" alt="Titelfolie der Einheit „Workslop erkennen und benennen“ aus dem Programm Führen mit KI" loading="lazy"></div>
-        <div class="offer-body">
-          <span class="offer-num">04 · Programm</span>
-          <h3>Führen mit KI</h3>
-          <ul><li>Blended Learning für Führungskräfte über zehn Monate</li><li>7 Live-Tage und 23 kurze E-Learnings</li><li>Nachweis je Person nach Art. 4 KI-Verordnung</li></ul>
-          <a class="more" href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht (PDF) <span aria-hidden="true">→</span></a>
-        </div>
-      </article>
     </div>
-    <div class="facts rv"><span>Kontrast und Tastaturbedienung geprüft</span><span>KI-Einsatz gekennzeichnet nach Art. 50 KI-Verordnung</span><span>Auf Wunsch in Ihrem Corporate Design</span></div>
+    <article class="special rv">
+      <div class="special-pic"><img src="kurse/fmk-workslop.jpg" alt="Titelfolie der Einheit „Workslop erkennen und benennen“ aus dem Programm Führen mit KI" loading="lazy"></div>
+      <div class="special-body">
+        <span class="special-tag">Special · KI-Enablement</span>
+        <h3>Schulungsprogramm „Führen mit KI“</h3>
+        <p>Blended Learning für Führungskräfte über zehn Monate: 7 Live-Tage, 23 kurze E-Learnings und ein Nachweis je Person nach Art. 4 KI-Verordnung.</p>
+      </div>
+      <div class="special-links">
+        <a class="btn" href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht (PDF) <span class="arr" aria-hidden="true">→</span></a>
+        <a class="special-try" href="#kurse" data-live="fmk-hebel">Eine Einheit ausprobieren</a>
+      </div>
+    </article>
+    <p class="facts rv">Kontrast und Tastaturbedienung geprüft <i aria-hidden="true">·</i> KI-Einsatz gekennzeichnet nach Art. 50 KI-Verordnung <i aria-hidden="true">·</i> Auf Wunsch in Ihrem Corporate Design</p>
   </div>
 </section>
 
@@ -471,7 +515,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
     <div class="contact-grid">
       <div class="rv">
         <p>Erzählen Sie mir in einer halben Stunde, worum es geht und wer lernen soll. Danach schicke ich Ihnen ein Angebot mit Preis und Zeitplan.</p>
-        <div class="me"><img src="media/kerstin.jpg" alt=""><div><b>Kerstin Rafai</b>KR Consulting</div></div>
+        <figure class="me2"><img src="media/kerstin-2.jpg" alt="Kerstin Rafai erklärt im Seminar" loading="lazy" width="1200" height="1013"><figcaption><b>Kerstin Rafai</b>Personal- und Führungskräfteentwicklung</figcaption></figure>
       </div>
       <form class="ask rv" style="--d:1" data-ask>
         <h3>Ihre Anfrage in einer Minute</h3>
@@ -497,7 +541,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 
 <footer>
   <div class="wrap">
-    <span>© Kerstin Rafai · KR Consulting</span>
+    <nav class="foot-nav" aria-label="Fußzeile"><a href="#angebot">Angebot</a><a href="#kurse">Beispielkurse</a><a href="#videos">Videos</a><a href="#kontakt">Kontakt</a><a href="#start">Nach oben ↑</a></nav>
+    <span>© Kerstin Rafai</span>
     <span>Bilder in den Kursbeispielen: Pexels und Storyset (storyset.com). Erstellt mit KI-Unterstützung, von mir geprüft.</span>
   </div>
 </footer>
