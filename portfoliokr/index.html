@@ -371,13 +371,19 @@ footer { padding: 34px 0 30px; }
 video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offset: 3px; }
 .foot-nav a { display: inline-block; padding: 8px 0; }
 .stage-new { display: inline-block; padding: 8px 4px; }
+
+.brand { display: inline-flex; align-items: center; text-decoration: none; }
+.logo { position: relative; display: inline-grid; place-items: center; width: 46px; height: 46px; border: 2px solid currentColor; font-weight: 800; font-stretch: 125%; font-size: 17px; letter-spacing: -.03em; line-height: 1; }
+.logo::after { content: ''; position: absolute; right: -6px; bottom: -6px; width: 10px; height: 10px; background: #FD6E6E; }
+.brand:hover .logo { background: rgba(182,223,237,.12); }
+.brand .logo { color: #F3F9FB; }
 </style>
 </head>
 <body>
 
 <header class="top" data-top>
   <div class="wrap">
-    <a class="brand" href="#start">Kerstin Rafai<span>.</span></a>
+    <a class="brand" href="#start" aria-label="Kerstin Rafai, zur Startseite"><span class="logo" aria-hidden="true">KR</span></a>
     <nav class="nav" aria-label="Bereiche">
       <a href="#angebot">Angebot</a>
       <a href="#kurse">Beispielkurse</a>
@@ -393,7 +399,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 
 <section class="hero" aria-labelledby="h-hero">
   <div class="wrap">
-    <div class="tag"><b>Kerstin Rafai</b>Lernkonzepte und E-Learning für Führung und Personalentwicklung</div>
+    <div class="tag">Lernkonzepte und E-Learning für Führung und Personalentwicklung</div>
     <h1 id="h-hero"><span class="ln"><span>Lernen, das man</span></span><span class="ln"><span><em>nicht</em> wegklickt.</span></span></h1>
     <div class="hero-row">
       <div class="rv">
@@ -405,7 +411,6 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       </div>
       <figure class="portrait rv" style="--d:1">
         <img src="media/kerstin.jpg" alt="Kerstin Rafai im Workshop vor einem Flipchart" width="720" height="480" data-parallax>
-        <figcaption>Kerstin Rafai im Workshop</figcaption>
       </figure>
     </div>
   </div>

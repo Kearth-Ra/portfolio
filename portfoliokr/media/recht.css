@@ -20,3 +20,9 @@ mark { background: #FFE3E3; color: var(--navy); padding: 0 4px; }
 footer { background: var(--navy); color: rgba(243,249,251,.78); font-size: 15px; padding: 24px 0; }
 footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; max-width: 1320px; }
 footer a { display: inline-block; padding: 4px 0; color: #F3F9FB; font-weight: 600; text-decoration: none; }
+
+.brand { display: inline-flex; align-items: center; text-decoration: none; }
+.logo { position: relative; display: inline-grid; place-items: center; width: 46px; height: 46px; border: 2px solid currentColor; font-weight: 800; font-stretch: 125%; font-size: 17px; letter-spacing: -.03em; line-height: 1; }
+.logo::after { content: ''; position: absolute; right: -6px; bottom: -6px; width: 10px; height: 10px; background: #FD6E6E; }
+.brand:hover .logo { background: rgba(182,223,237,.12); }
+.brand .logo { color: #F3F9FB; }
