@@ -7,179 +7,221 @@
 <meta name="description" content="Kerstin Rafai, KR Consulting: E-Learnings, Erklärvideos, Lernkonzepte und das Programm „Führen mit KI“. Beispielkurse zum Durchklicken.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap">
 <style>
 :root {
-  --ink: #1D2228; --muted: #545C66; --line: #DCE0E5; --soft: #F3F4F6;
-  --blue: #2F5FB3; --blue-d: #234A8F; --blue-l: #8FB0E6; --dark: #1F2329;
-  --r: 4px; --maxw: 1160px; --side: clamp(16px, 4vw, 48px);
+  --night: #14171C; --night2: #1C2027; --night3: #262B33;
+  --paper: #F2F0EB; --ink: #15181D; --muted: #5A616B; --line: #D9D6CF;
+  --blue: #7FA2EE; --blue-ink: #2E5BB8; --sand: #E7E1D4;
+  --on-night: #F2F0EB; --on-night-2: rgba(242,240,235,.72); --line-night: rgba(242,240,235,.16);
+  --r: 14px; --maxw: 1320px; --side: clamp(18px, 4.5vw, 64px);
+  --ease: cubic-bezier(.2,.7,.2,1);
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 68px; }
-body { margin: 0; background: #fff; color: var(--ink); font: 18px/1.6 "Source Sans 3", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+body { margin: 0; background: var(--night); color: var(--on-night); font: 400 18px/1.6 "Archivo", "Helvetica Neue", Arial, sans-serif; font-stretch: 100%; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
 img, video { display: block; max-width: 100%; }
-a { color: var(--blue); text-underline-offset: 3px; }
-h1, h2, h3 { margin: 0; line-height: 1.15; }
-h2 { font-size: clamp(28px, 3vw, 38px); font-weight: 700; letter-spacing: -.01em; }
-h3 { font-size: 20px; font-weight: 700; }
+a { color: inherit; text-underline-offset: 4px; }
+h1, h2, h3 { margin: 0; font-weight: 700; line-height: 1.02; }
 p { margin: 0 0 12px; }
 .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--side); }
-section { padding: clamp(56px, 7vw, 88px) 0; }
-.label { margin-bottom: 10px; font-size: 15px; font-weight: 600; color: var(--blue); }
-.head { max-width: 720px; margin-bottom: 32px; }
-.head p { margin: 12px 0 0; color: var(--muted); font-size: 19px; }
-.btn { display: inline-flex; align-items: center; min-height: 46px; padding: 10px 20px; border: 1.5px solid var(--blue); border-radius: var(--r); background: var(--blue); color: #fff; font: inherit; font-weight: 600; font-size: 17px; text-decoration: none; cursor: pointer; }
-.btn:hover { background: var(--blue-d); border-color: var(--blue-d); }
-.btn.sec { background: transparent; color: var(--blue); }
-.btn.sec:hover { background: #EEF3FB; }
-:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
+.light { background: var(--paper); color: var(--ink); }
+.tag { display: flex; gap: 14px; align-items: baseline; margin-bottom: 22px; font-size: 15px; font-weight: 500; letter-spacing: .02em; }
+.tag b { font-weight: 700; color: var(--blue); }
+.light .tag b { color: var(--blue-ink); }
+.big { font-size: clamp(40px, 5.2vw, 80px); font-stretch: 112%; letter-spacing: -.03em; }
+.mid { font-size: clamp(32px, 4.2vw, 62px); font-stretch: 108%; letter-spacing: -.025em; }
+.intro { font-size: clamp(19px, 1.6vw, 22px); line-height: 1.5; color: var(--on-night-2); max-width: 620px; }
+.light .intro { color: var(--muted); }
+.btn { display: inline-flex; align-items: center; gap: 10px; min-height: 52px; padding: 12px 24px; border-radius: 999px; border: 1.5px solid var(--on-night); background: var(--on-night); color: var(--ink); font: inherit; font-weight: 600; font-size: 17px; text-decoration: none; cursor: pointer; transition: background .25s var(--ease), color .25s var(--ease), transform .25s var(--ease); }
+.btn:hover { background: var(--blue-ink); border-color: var(--blue-ink); color: #fff; }
+.btn.line { background: transparent; color: var(--on-night); border-color: var(--line-night); }
+.btn.line:hover { border-color: var(--on-night); background: transparent; color: var(--on-night); }
+.light .btn { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.light .btn:hover { background: var(--blue-ink); border-color: var(--blue-ink); }
+.btn .arr { transition: transform .25s var(--ease); }
+.btn:hover .arr { transform: translateX(4px); }
+:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
 
 /* Kopfleiste */
-.top { position: sticky; top: 0; z-index: 30; background: #fff; border-bottom: 1px solid var(--line); }
-.top .wrap { display: flex; align-items: center; gap: 24px; min-height: 60px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--ink); text-decoration: none; white-space: nowrap; }
-.brand i { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--dark); color: #fff; font-size: 12px; font-style: normal; letter-spacing: .04em; }
-.nav { display: flex; gap: 22px; margin-left: auto; }
-.nav a { color: var(--ink); text-decoration: none; font-weight: 500; font-size: 16px; }
-.nav a:hover { color: var(--blue); text-decoration: underline; }
-.top .btn { min-height: 38px; padding: 6px 14px; font-size: 16px; }
+.top { position: fixed; inset: 0 0 auto; z-index: 40; transition: background .3s, border-color .3s; border-bottom: 1px solid transparent; }
+.top.solid { background: rgba(20,23,28,.94); border-bottom-color: var(--line-night); backdrop-filter: blur(8px); }
+.top .wrap { display: flex; align-items: center; gap: 28px; min-height: 72px; }
+.brand { font-weight: 700; font-stretch: 112%; font-size: 19px; letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
+.brand span { color: var(--blue); }
+.nav { display: flex; gap: 28px; margin-left: auto; }
+.nav a { text-decoration: none; font-size: 16px; font-weight: 500; color: var(--on-night-2); }
+.nav a:hover { color: var(--on-night); }
+.top .btn { min-height: 42px; padding: 8px 18px; font-size: 15px; }
 @media (max-width: 900px) { .nav { display: none; } .top .btn { margin-left: auto; } }
 
 /* Titel */
-.hero { background: var(--soft); border-bottom: 1px solid var(--line); padding: 0; }
-.hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 52px; align-items: center; padding-top: 64px; padding-bottom: 64px; }
-.hero .label { color: var(--muted); }
-.hero h1 { font-size: clamp(38px, 5vw, 60px); font-weight: 700; letter-spacing: -.02em; line-height: 1.06; }
-.hero .lead { margin: 20px 0 28px; font-size: 20px; color: var(--muted); max-width: 600px; }
-.cta { display: flex; flex-wrap: wrap; gap: 10px; }
-.hero figure { margin: 0; }
-.hero figure img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; object-position: 55% 30%; border-radius: var(--r); }
-.hero figcaption { margin-top: 10px; font-size: 15px; color: var(--muted); }
-.hero figcaption b { color: var(--ink); }
-@media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr; gap: 28px; padding-top: 36px; padding-bottom: 44px; } }
+.hero { padding-top: clamp(120px, 15vw, 190px); padding-bottom: 0; }
+.hero h1 { font-size: clamp(48px, 9.4vw, 150px); font-stretch: 118%; letter-spacing: -.045em; line-height: .94; }
+.hero h1 .ln { display: block; overflow: hidden; padding-bottom: .04em; }
+.hero h1 .ln > span { display: inline-block; animation: up 1s var(--ease) both; }
+.hero h1 .ln:nth-child(2) > span { animation-delay: .12s; }
+.hero h1 em { font-style: normal; color: var(--blue); }
+@keyframes up { from { transform: translateY(105%); } to { transform: none; } }
+.hero-row { display: grid; grid-template-columns: 1fr 1.05fr; gap: clamp(32px, 6vw, 96px); align-items: center; margin-top: clamp(40px, 6vw, 80px); }
+.hero-row .intro { margin-bottom: 28px; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; }
+.portrait { position: relative; margin: 0; border-radius: var(--r); overflow: hidden; aspect-ratio: 4 / 3; }
+.portrait img { width: 100%; height: 112%; object-fit: cover; object-position: 55% 30%; transform: translateY(var(--py, 0)); }
+.portrait figcaption { position: absolute; left: 16px; bottom: 16px; padding: 8px 14px; border-radius: 999px; background: rgba(20,23,28,.82); font-size: 14px; }
+@media (max-width: 900px) { .hero-row { grid-template-columns: 1fr; } }
 
-/* Video */
-.film { background: var(--dark); color: #fff; }
-.film .wrap { display: grid; grid-template-columns: 1.6fr 1fr; gap: 44px; align-items: center; }
-.film video { width: 100%; aspect-ratio: 16 / 9; border-radius: var(--r); background: #111; }
-.film h2 { color: #fff; }
-.film .label { color: var(--blue-l); }
-.film p { color: rgba(255,255,255,.82); margin-top: 12px; }
-.film small { display: block; font-size: 14px; color: rgba(255,255,255,.6); }
-@media (max-width: 900px) { .film .wrap { grid-template-columns: 1fr; gap: 24px; } }
+/* Laufband */
+.ticker { margin-top: clamp(56px, 7vw, 96px); border-top: 1px solid var(--line-night); border-bottom: 1px solid var(--line-night); overflow: hidden; }
+.ticker-in { display: flex; width: max-content; animation: run 38s linear infinite; }
+.ticker:hover .ticker-in { animation-play-state: paused; }
+.ticker span { display: flex; align-items: center; gap: 36px; padding: 22px 18px; font-size: clamp(22px, 2.6vw, 38px); font-weight: 600; font-stretch: 112%; letter-spacing: -.02em; white-space: nowrap; }
+.ticker span::after { content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--blue); }
+@keyframes run { to { transform: translateX(-50%); } }
+
+/* Showreel */
+.reel { padding-top: clamp(56px, 7vw, 96px); }
+.reel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 28px; }
+.reel-head p { color: var(--on-night-2); max-width: 520px; margin: 0; }
+.reel-box { position: relative; border-radius: var(--r); overflow: hidden; background: #000; aspect-ratio: 16 / 9; }
+.reel-box video { width: 100%; height: 100%; }
+.reel-play { position: absolute; inset: 0; display: grid; place-items: end start; padding: clamp(18px, 3vw, 36px); border: 0; padding: 0; background: rgba(20,23,28,.25) center/cover; cursor: pointer; color: var(--on-night); }
+.reel-play span { display: grid; place-items: center; width: clamp(88px, 9vw, 120px); aspect-ratio: 1; border-radius: 50%; background: var(--blue-ink); color: #fff; font-weight: 700; font-size: 17px; transition: transform .35s var(--ease); }
+.reel-play:hover span { transform: scale(1.08); }
+.reel-play[hidden] { display: none; }
+@media (max-width: 600px) { .reel-play span { width: 64px; font-size: 13px; } .tag { flex-wrap: wrap; gap: 4px 12px; } }
 
 /* Angebot */
-.offers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
-.offer { display: flex; flex-direction: column; border-top: 3px solid var(--ink); padding-top: 14px; }
-.offer.prog { border-top-color: var(--blue); }
-.offer-pic { aspect-ratio: 16 / 10; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r); margin-bottom: 14px; background: var(--soft); }
-.offer-pic img, .offer-pic video { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0; }
-.offer small { font-size: 14px; font-weight: 600; color: var(--muted); }
-.offer h3 { margin: 4px 0 8px; }
-.offer p { font-size: 16.5px; color: var(--muted); }
-.offer .links { margin-top: auto; display: flex; flex-wrap: wrap; gap: 4px 16px; font-weight: 600; font-size: 16px; }
-.facts { margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px 32px; font-size: 16px; color: var(--muted); }
-.facts b { color: var(--ink); }
-@media (max-width: 1000px) { .offers { grid-template-columns: 1fr 1fr; gap: 36px 24px; } }
-@media (max-width: 560px) { .offers { grid-template-columns: 1fr; } }
+.bento { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; margin-top: 48px; }
+.tile { grid-column: span 6; position: relative; display: flex; flex-direction: column; border-radius: var(--r); overflow: hidden; background: #fff; border: 1px solid var(--line); }
+.tile.wide { grid-column: span 7; } .tile.narrow { grid-column: span 5; }
+.tile.dark { background: var(--night); color: var(--on-night); border-color: var(--night); }
+.tile-pic { aspect-ratio: 16 / 9; overflow: hidden; background: var(--sand); }
+.tile-pic img, .tile-pic video { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0; transition: transform .8s var(--ease); }
+.tile:hover .tile-pic img, .tile:hover .tile-pic video { transform: scale(1.04); }
+.tile-body { display: flex; flex-direction: column; flex: 1; padding: 24px 26px 26px; }
+.tile-num { font-size: 15px; font-weight: 600; color: var(--blue-ink); }
+.tile.dark .tile-num { color: var(--blue); }
+.tile h3 { margin: 8px 0 10px; font-size: clamp(24px, 2.2vw, 32px); font-stretch: 108%; letter-spacing: -.02em; line-height: 1.08; }
+.tile p { color: var(--muted); font-size: 17px; }
+.tile.dark p { color: var(--on-night-2); }
+.tile .links { margin-top: auto; padding-top: 10px; display: flex; flex-wrap: wrap; gap: 8px 22px; font-weight: 600; font-size: 16px; }
+.tile .links a { text-decoration: underline; }
+.facts { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.facts span { padding: 8px 16px; border: 1px solid var(--line); border-radius: 999px; font-size: 15px; color: var(--muted); }
+@media (max-width: 900px) { .tile, .tile.wide, .tile.narrow { grid-column: span 12; } }
 
 /* Beispielkurse */
-.live { background: var(--soft); }
-.picker { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 20px; }
-.lk { display: flex; flex-direction: column; padding: 0; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: #fff; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
-.lk:hover { border-color: #AEB6C0; }
-.lk[aria-pressed="true"] { border-color: var(--blue); box-shadow: inset 0 0 0 2px var(--blue); }
-.lk img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: 0 0; border-bottom: 1px solid var(--line); }
-.lk span { display: block; padding: 10px 12px 12px; }
-.lk small { display: block; font-size: 13px; color: var(--muted); }
-.lk b { display: block; font-size: 15.5px; line-height: 1.25; margin-top: 2px; }
-.lk.fmk small { color: var(--blue); font-weight: 600; }
-.stage { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: #fff; }
-.stage-bar { display: flex; align-items: center; gap: 14px; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+.cases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin: 48px 0 24px; }
+.case { position: relative; display: block; padding: 0; border: 1px solid var(--line-night); border-radius: var(--r); overflow: hidden; background: var(--night2); color: var(--on-night); font: inherit; text-align: left; cursor: pointer; transition: border-color .3s; }
+.case img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: 0 0; transition: transform .8s var(--ease), opacity .3s; opacity: .9; }
+.case:hover img { transform: scale(1.05); opacity: 1; }
+.case:hover, .case[aria-pressed="true"] { border-color: var(--blue); }
+.case span { display: flex; align-items: center; gap: 12px; padding: 16px 18px 18px; }
+.case small { display: block; font-size: 14px; color: var(--on-night-2); }
+.case b { display: block; font-size: 19px; font-stretch: 106%; letter-spacing: -.01em; line-height: 1.2; }
+.case i { margin-left: auto; flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line-night); font-style: normal; transition: background .3s, border-color .3s, transform .3s var(--ease); }
+.case:hover i, .case[aria-pressed="true"] i { background: var(--blue-ink); border-color: var(--blue-ink); transform: rotate(-45deg); }
+.case .chip { position: absolute; top: 12px; left: 12px; padding: 5px 12px; border-radius: 999px; background: var(--blue-ink); color: #fff; font-size: 13px; font-weight: 600; }
+.stage { border-radius: var(--r); overflow: hidden; border: 1px solid var(--line-night); background: var(--night2); }
+.stage-bar { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line-night); }
 .stage-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dev { display: flex; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-.dev button { border: 0; padding: 5px 11px; background: #fff; font: inherit; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
-.dev button[aria-pressed="true"] { background: var(--dark); color: #fff; }
+.dev { display: flex; border: 1px solid var(--line-night); border-radius: 999px; overflow: hidden; }
+.dev button { border: 0; padding: 6px 14px; background: none; font: inherit; font-size: 14px; font-weight: 600; color: var(--on-night-2); cursor: pointer; }
+.dev button[aria-pressed="true"] { background: var(--on-night); color: var(--ink); }
 .stage-new { font-size: 14px; font-weight: 600; white-space: nowrap; }
-.view { position: relative; display: flex; justify-content: center; background: var(--dark); height: min(78vh, 720px); }
-.view.phone { background: var(--soft); padding: 16px 0; }
+.view { position: relative; display: flex; justify-content: center; background: #0E1014; height: min(80vh, 760px); }
+.view.phone { padding: 18px 0; }
 .view iframe { width: 100%; height: 100%; border: 0; background: #fff; }
-.view.phone iframe { width: 390px; max-width: calc(100% - 40px); border-radius: 22px; box-shadow: 0 0 0 9px var(--dark); }
-.poster { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: #fff; background: center/cover no-repeat; }
-.poster::before { content: ''; position: absolute; inset: 0; background: rgba(31,35,41,.8); }
-.poster div { position: relative; max-width: 480px; }
-.poster b { display: block; font-size: clamp(22px, 2.4vw, 30px); line-height: 1.2; margin-bottom: 8px; }
-.poster p { color: rgba(255,255,255,.85); }
-.poster .btn { background: #fff; color: var(--ink); border-color: #fff; }
+.view.phone iframe { width: 390px; max-width: calc(100% - 40px); border-radius: 24px; box-shadow: 0 0 0 9px var(--night3); }
+.poster { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; background: center/cover no-repeat; }
+.poster::before { content: ''; position: absolute; inset: 0; background: rgba(14,16,20,.8); }
+.poster div { position: relative; max-width: 520px; }
+.poster b { display: block; font-size: clamp(24px, 2.8vw, 36px); font-stretch: 110%; letter-spacing: -.02em; line-height: 1.1; margin-bottom: 10px; }
+.poster p { color: var(--on-night-2); margin-bottom: 18px; }
 .poster[hidden] { display: none; }
-.note { margin-top: 12px; font-size: 15px; color: var(--muted); }
-@media (max-width: 1000px) { .picker { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 560px) { .picker { grid-template-columns: 1fr 1fr; } .dev { display: none; } .view { height: 78svh; } }
+.note { margin-top: 14px; font-size: 15px; color: var(--on-night-2); }
+@media (max-width: 1000px) { .cases { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .cases { grid-template-columns: 1fr; } .dev { display: none; } .view { height: 78svh; } }
 
-/* Looks und Videoarten */
-.row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
-.row3 + .row3 { margin-top: 32px; }
-.row3 figure { margin: 0; }
-.row3 img, .row3 video { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: 50% 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--soft); }
-.row3 video { aspect-ratio: 16 / 9; }
-.row3 figcaption { margin-top: 10px; font-size: 16px; color: var(--muted); }
-.row3 figcaption b { display: block; color: var(--ink); font-size: 17px; }
-.row-label { grid-column: 1 / -1; font-size: 15px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 6px; }
-@media (max-width: 760px) { .row3 { grid-template-columns: 1fr; gap: 20px; } }
+/* Looks */
+.split { display: grid; grid-template-columns: 1.5fr 1fr; gap: 28px 64px; align-items: end; }
+.looks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 48px; }
+.looks figure { margin: 0; }
+.looks .frame { border-radius: var(--r); overflow: hidden; border: 1px solid var(--line); background: var(--sand); aspect-ratio: 4 / 3; }
+.looks img, .looks video { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0; transition: transform .8s var(--ease); }
+.looks figure:hover img, .looks figure:hover video { transform: scale(1.04); }
+.looks figcaption { margin-top: 12px; font-size: 16px; color: var(--muted); }
+.looks figcaption b { display: block; color: var(--ink); font-size: 18px; font-stretch: 106%; }
+.looks + .looks { margin-top: 32px; }
+.row-name { grid-column: 1 / -1; display: flex; gap: 14px; align-items: baseline; font-size: 15px; font-weight: 600; color: var(--muted); }
+.row-name::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+@media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .looks { grid-template-columns: 1fr; } }
 
 /* Ablauf */
-.ablauf { background: var(--soft); }
-.flow { display: grid; grid-template-columns: repeat(5, 1fr); counter-reset: f; border-top: 1px solid var(--line); margin-bottom: 36px; }
-.flow div { padding: 16px 16px 16px 0; }
-.flow div + div { padding-left: 16px; border-left: 1px solid var(--line); }
-.flow div::before { counter-increment: f; content: counter(f); display: block; font-size: 15px; font-weight: 700; color: var(--blue); margin-bottom: 4px; }
-.flow b { display: block; }
-.flow span { color: var(--muted); font-size: 16px; }
-.faq { display: grid; grid-template-columns: 1fr 1fr; gap: 0 32px; }
-.faq details { border-top: 1px solid var(--line); }
-.faq summary { padding: 14px 32px 14px 0; cursor: pointer; font-weight: 600; list-style: none; position: relative; }
+.steps { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 56px; border-top: 1px solid var(--line-night); }
+.steps div { padding: 26px 20px 26px 0; }
+.steps div + div { padding-left: 20px; border-left: 1px solid var(--line-night); }
+.steps em { display: block; font-style: normal; font-size: clamp(38px, 4vw, 60px); font-weight: 700; font-stretch: 112%; color: var(--blue); line-height: 1; margin-bottom: 18px; }
+.steps b { display: block; font-size: 20px; margin-bottom: 6px; }
+.steps span { color: var(--on-night-2); font-size: 16px; }
+.faq { display: grid; grid-template-columns: 1fr 1fr; gap: 0 48px; margin-top: 56px; }
+.faq details { border-top: 1px solid var(--line-night); }
+.faq summary { padding: 18px 40px 18px 0; cursor: pointer; font-weight: 600; font-size: 18px; list-style: none; position: relative; }
 .faq summary::-webkit-details-marker { display: none; }
-.faq summary::after { content: '+'; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 22px; font-weight: 400; color: var(--blue); }
-.faq details[open] summary::after { content: '–'; }
-.faq details p { padding: 0 0 14px; margin: 0; color: var(--muted); font-size: 16.5px; }
-@media (max-width: 900px) { .flow { grid-template-columns: 1fr 1fr; } .flow div, .flow div + div { padding: 14px 12px 14px 0; border-left: 0; border-bottom: 1px solid var(--line); } .faq { grid-template-columns: 1fr; } }
-@media (max-width: 480px) { .flow { grid-template-columns: 1fr; } }
+.faq summary::after { content: '+'; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 26px; font-weight: 400; color: var(--blue); transition: transform .3s var(--ease); }
+.faq details[open] summary::after { transform: translateY(-50%) rotate(45deg); }
+.faq details p { padding: 0 0 18px; margin: 0; color: var(--on-night-2); font-size: 17px; }
+@media (max-width: 900px) { .steps { grid-template-columns: 1fr 1fr; } .steps div, .steps div + div { padding: 20px 14px 20px 0; border-left: 0; border-bottom: 1px solid var(--line-night); } .faq { grid-template-columns: 1fr; } }
+@media (max-width: 480px) { .steps { grid-template-columns: 1fr; } }
 
 /* Kontakt */
-.contact { background: var(--dark); color: #fff; }
-.contact h2 { color: #fff; }
-.contact .label { color: var(--blue-l); }
-.contact .wrap { display: grid; grid-template-columns: .85fr 1.15fr; gap: 52px; align-items: start; }
-.contact p { color: rgba(255,255,255,.85); margin-top: 14px; }
+.contact { background: var(--blue-ink); color: #fff; }
+.contact .tag b { color: #fff; }
+.contact h2 { font-size: clamp(44px, 7.6vw, 124px); font-stretch: 116%; letter-spacing: -.04em; line-height: .96; }
+.mail { display: inline-block; margin-top: 28px; font-size: clamp(22px, 2.6vw, 36px); font-weight: 600; font-stretch: 108%; letter-spacing: -.015em; text-decoration: underline; text-decoration-thickness: 2px; }
+.contact-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 56px; align-items: start; margin-top: 56px; }
+.contact-grid p { color: rgba(255,255,255,.88); font-size: 19px; }
 .me { display: flex; gap: 16px; align-items: center; margin-top: 24px; }
-.me img { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; object-position: 55% 25%; }
+.me img { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; object-position: 55% 25%; }
 .me b { display: block; font-size: 19px; }
-.me a { color: #fff; }
-.ask { background: #fff; color: var(--ink); border-radius: var(--r); padding: 26px; }
-.ask h3 { font-size: 22px; }
-.ask label, .ask .lbl { display: block; font-weight: 600; font-size: 16px; margin: 14px 0 6px; }
-.ask input, .ask textarea { width: 100%; padding: 10px 12px; border: 1px solid #C9CFD6; border-radius: var(--r); font: inherit; font-size: 17px; color: var(--ink); }
-.ask textarea { min-height: 88px; resize: vertical; }
+.ask { background: #fff; color: var(--ink); border-radius: var(--r); padding: 28px; }
+.ask h3 { font-size: 24px; font-stretch: 106%; letter-spacing: -.01em; }
+.ask label, .ask .lbl { display: block; font-weight: 600; font-size: 16px; margin: 16px 0 6px; }
+.ask input, .ask textarea { width: 100%; padding: 12px 14px; border: 1px solid #C9CCD2; border-radius: 10px; font: inherit; font-size: 17px; color: var(--ink); }
+.ask textarea { min-height: 92px; resize: vertical; }
 .choice { display: flex; flex-wrap: wrap; gap: 8px; }
-.choice button { padding: 7px 13px; border: 1px solid #C9CFD6; border-radius: var(--r); background: #fff; font: inherit; font-size: 15.5px; cursor: pointer; color: var(--ink); }
-.choice button[aria-pressed="true"] { border-color: var(--blue); background: var(--blue); color: #fff; }
-.ask .btn { margin-top: 18px; }
+.choice button { padding: 8px 15px; border: 1px solid #C9CCD2; border-radius: 999px; background: #fff; font: inherit; font-size: 15.5px; cursor: pointer; color: var(--ink); }
+.choice button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: #fff; }
+.ask .btn { margin-top: 20px; background: var(--ink); border-color: var(--ink); color: #fff; }
+.ask .btn:hover { background: var(--blue-ink); border-color: var(--blue-ink); }
 .ask small { display: block; margin-top: 10px; color: var(--muted); font-size: 14px; }
-@media (max-width: 900px) { .contact .wrap { grid-template-columns: 1fr; gap: 28px; } .ask { padding: 20px; } }
-footer { background: #171A1F; color: rgba(255,255,255,.65); font-size: 14px; padding: 22px 0; }
+@media (max-width: 900px) { .contact-grid { grid-template-columns: 1fr; gap: 32px; } .ask { padding: 22px; } }
+footer { background: var(--night); color: var(--on-night-2); font-size: 14px; padding: 26px 0; }
 footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: space-between; }
+
+/* Einblenden beim Scrollen */
+.rv { opacity: 0; transform: translateY(28px); transition: opacity .9s var(--ease), transform .9s var(--ease); transition-delay: calc(var(--d, 0) * 90ms); }
+.rv.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .rv { opacity: 1; transform: none; transition: none; }
+  .hero h1 .ln > span, .ticker-in { animation: none; }
+  .portrait img { transform: none; }
+}
 </style>
 </head>
 <body>
 
-<header class="top">
+<header class="top" data-top>
   <div class="wrap">
-    <a class="brand" href="#start"><i>KR</i>Kerstin Rafai</a>
+    <a class="brand" href="#start">Kerstin Rafai<span>.</span></a>
     <nav class="nav" aria-label="Bereiche">
       <a href="#angebot">Angebot</a>
       <a href="#kurse">Beispielkurse</a>
-      <a href="#looks">Looks und Videos</a>
+      <a href="#looks">Looks</a>
       <a href="#ablauf">Ablauf</a>
     </nav>
     <a class="btn" href="#kontakt">Erstgespräch</a>
@@ -190,93 +232,88 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 
 <section class="hero" aria-labelledby="h-hero">
   <div class="wrap">
-    <div>
-      <div class="label">Kerstin Rafai · KR Consulting</div>
-      <h1 id="h-hero">Lernen, das man nicht wegklickt.</h1>
-      <p class="lead">E-Learnings, Erklärvideos und Lernkonzepte für Führungskräfte und Fachleute. Ihre Mitarbeitenden entscheiden, üben am eigenen Fall und nehmen etwas mit, das am nächsten Arbeitstag hilft.</p>
-      <div class="cta">
-        <a class="btn" href="#kurse">Beispielkurs ansehen</a>
-        <a class="btn sec" href="#kontakt">Über Ihr Thema sprechen</a>
+    <div class="tag"><b>KR Consulting</b>Lernkonzepte und E-Learning für Führung und Personalentwicklung</div>
+    <h1 id="h-hero"><span class="ln"><span>Lernen, das man</span></span><span class="ln"><span><em>nicht</em> wegklickt.</span></span></h1>
+    <div class="hero-row">
+      <div class="rv">
+        <p class="intro">Viele E-Learnings werden durchgeklickt und sind am nächsten Tag vergessen. In meinen Kursen entscheiden Ihre Mitarbeitenden an Fällen aus ihrem Alltag und sehen, was daraus wird. Ich entwickle sie für Führungskräfte und Fachleute, vom Konzept bis zum fertigen Paket.</p>
+        <div class="cta">
+          <a class="btn" href="#kurse">Beispielkurse ansehen <span class="arr" aria-hidden="true">→</span></a>
+          <a class="btn line" href="#reel">Showreel ansehen</a>
+        </div>
       </div>
+      <figure class="portrait rv" style="--d:1">
+        <img src="media/kerstin.jpg" alt="Kerstin Rafai im Workshop vor einem Flipchart" width="720" height="480" data-parallax>
+        <figcaption>Kerstin Rafai im Workshop</figcaption>
+      </figure>
     </div>
-    <figure>
-      <img src="media/kerstin.jpg" alt="Kerstin Rafai im Workshop vor einem Flipchart" width="720" height="480">
-      <figcaption><b>Kerstin Rafai</b>, Personal- und Führungskräfteentwicklung. Konzept, Storyboard und Umsetzung aus einer Hand.</figcaption>
-    </figure>
   </div>
-</section>
-
-<section class="film" aria-labelledby="h-film">
-  <div class="wrap">
-    <video controls playsinline preload="none" poster="media/kerstin-rafai-e-learning.jpg" aria-describedby="film-text">
-      <source src="media/kerstin-rafai-e-learning.mp4" type="video/mp4">
-    </video>
-    <div>
-      <div class="label">In 78 Sekunden</div>
-      <h2 id="h-film">Kurz vorgestellt</h2>
-      <p id="film-text">Aufnahmen aus meinen Kursen: Fälle mit Folgen, Übungen am eigenen Fall, ein 3D-Modell, Arbeitsblätter, Prompts zum Kopieren und die Begleitung online oder in Präsenz.</p>
-      <small>Musik ohne Sprache. Kursaufnahmen von Kerstin Rafai, Videos von Pexels.</small>
+  <div class="ticker" aria-hidden="true">
+    <div class="ticker-in">
+      <span>E-Learning</span><span>Erklärvideo</span><span>Storyboard</span><span>Microlearning</span><span>Führen mit KI</span><span>SCORM und cmi5</span><span>Blended Learning</span>
+      <span>E-Learning</span><span>Erklärvideo</span><span>Storyboard</span><span>Microlearning</span><span>Führen mit KI</span><span>SCORM und cmi5</span><span>Blended Learning</span>
     </div>
   </div>
 </section>
 
-<section id="angebot" aria-labelledby="h-angebot">
+<section id="reel" class="reel" aria-labelledby="h-reel">
   <div class="wrap">
-    <div class="head">
-      <div class="label">Angebot</div>
-      <h2 id="h-angebot">Was ich für Sie entwickle</h2>
-      <p>Einzeln oder kombiniert, vom Microlearning bis zum ganzen Programm.</p>
+    <div class="reel-head rv">
+      <div><div class="tag"><b>(01)</b>Showreel · 78 Sekunden</div><h2 class="mid" id="h-reel">Kurz vorgestellt</h2></div>
+      <p>Alles in diesem Video stammt aus echten Kursen: ein Gespräch, das kippt, ein Motor in 3D, ein Prompt zum Kopieren und Arbeitsblätter für das eigene Team. Es läuft mit Musik, ohne Sprecher.</p>
     </div>
-    <div class="offers">
-      <article class="offer">
-        <div class="offer-pic"><img src="media/offer-elearning.jpg" alt="Kursseite: Lernende sprechen im Chat mit Tarek und wählen ihre Antwort" loading="lazy"></div>
-        <small>01 E-Learning</small>
-        <h3>E-Learnings, die man zu Ende macht</h3>
-        <p>Szenarien mit Folgen, Chats und Übungen am eigenen Fall. 10 bis 45 Minuten, als SCORM oder cmi5, am Rechner und am Handy.</p>
-        <div class="links"><a href="#kurse">Beispielkurse</a></div>
-      </article>
-      <article class="offer">
-        <div class="offer-pic"><video src="media/clip-erklaer.mp4" poster="media/clip-erklaer.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Erklärvideo"></video></div>
-        <small>02 Erklärvideo</small>
-        <h3>Erklärvideos, die ein Thema greifbar machen</h3>
-        <p>Erklärvideo, Motion oder Scribble, mit Sprecherstimme und Untertiteln. Für den Kurs, das Intranet oder den Kickoff.</p>
-        <div class="links"><a href="#looks">Videoarten</a></div>
-      </article>
-      <article class="offer">
-        <div class="offer-pic"><img src="media/offer-konzept.jpg" alt="Kursseite: zwei Menschen aus dem Fall erzählen, was bei ihnen getragen hat" loading="lazy"></div>
-        <small>03 Konzept und Storyline</small>
-        <h3>Lernkonzepte mit einer Geschichte</h3>
-        <p>Lernziele, ein Fall mit Figuren als roter Faden und ein Storyboard zur Freigabe, auch wenn Sie selbst umsetzen.</p>
-        <div class="links"><a href="#ablauf">So arbeite ich</a></div>
-      </article>
-      <article class="offer prog">
-        <div class="offer-pic"><img src="kurse/fmk-workslop.jpg" alt="Titelfolie der Einheit „Workslop erkennen und benennen“ aus dem Programm Führen mit KI" loading="lazy"></div>
-        <small>04 Programm für Führungskräfte</small>
-        <h3>Führen mit KI</h3>
-        <p>Blended Learning über zehn Monate: 7 Live-Tage, 23 E-Learnings, Transfer ins Team und ein Nachweis je Person nach Art. 4 KI-Verordnung.</p>
-        <div class="links"><a href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht (PDF)</a><a href="#kurse" data-live="fmk-hebel">Einheit ausprobieren</a></div>
-      </article>
+    <div class="reel-box rv">
+      <video controls playsinline preload="none" poster="media/kerstin-rafai-e-learning.jpg" data-reel aria-label="Showreel: E-Learning, das man zu Ende macht">
+        <source src="media/kerstin-rafai-e-learning.mp4" type="video/mp4">
+      </video>
+      <button class="reel-play" type="button" data-reel-play style="background-image:url(media/kerstin-rafai-e-learning.jpg)" aria-label="Showreel abspielen"><span>Abspielen</span></button>
     </div>
-    <div class="facts"><span><b>Barrierearm:</b> Kontrast, Tastatur und Untertitel geprüft</span><span><b>KI-gekennzeichnet</b> nach Artikel 50 der KI-Verordnung</span><span><b>Ihr Design:</b> Farben, Schriften und Logo auf Wunsch</span></div>
   </div>
 </section>
 
-<section id="kurse" class="live" aria-labelledby="h-kurse">
+<section id="angebot" class="light" aria-labelledby="h-angebot">
   <div class="wrap">
-    <div class="head">
-      <div class="label">Beispielkurse</div>
-      <h2 id="h-kurse">Beispielkurse zum Durchklicken</h2>
-      <p>Beispielkurse aus meinem Angebot, so wie sie in Ihrem Lernsystem laufen. Als Leseprobe sind jeweils die ersten fünf Folien offen.</p>
+    <div class="split rv">
+      <div><div class="tag"><b>(02)</b>Angebot</div><h2 class="big" id="h-angebot">Was ich für Sie entwickle</h2></div>
+      <p class="intro">Sie können einen einzelnen Kurs beauftragen oder ein ganzes Programm. Konzept, Kurs und Videos mache ich selbst, Sie haben also eine Ansprechpartnerin für alles.</p>
     </div>
-    <div class="picker">
-      <button class="lk fmk" type="button" aria-pressed="true" data-kurs="fmk-hebel" data-titel="Führen mit KI 0.4: Der Hebel bist du"><img src="kurse/fmk-hebel.jpg" alt="" loading="lazy"><span><small>Führen mit KI 0.4</small><b>Der Hebel bist du</b></span></button>
-      <button class="lk fmk" type="button" aria-pressed="false" data-kurs="fmk-workslop" data-titel="Führen mit KI 2.1: Workslop erkennen und benennen"><img src="kurse/fmk-workslop.jpg" alt="" loading="lazy"><span><small>Führen mit KI 2.1</small><b>Workslop erkennen</b></span></button>
-      <button class="lk" type="button" aria-pressed="false" data-kurs="konflikt" data-titel="Abstieg in die Tiefen eines Konflikts"><img src="kurse/konflikt.jpg" alt="" loading="lazy"><span><small>3D-Abstieg · 17 Min.</small><b>Tiefen eines Konflikts</b></span></button>
-      <button class="lk" type="button" aria-pressed="false" data-kurs="feedback" data-titel="Feedback, das ankommt"><img src="kurse/feedback.jpg" alt="" loading="lazy"><span><small>Lektionen zum Scrollen</small><b>Feedback, das ankommt</b></span></button>
-      <button class="lk" type="button" aria-pressed="false" data-kurs="klar-ansprechen" data-titel="Klar ansprechen: SAG ES"><img src="kurse/klar-ansprechen.jpg" alt="" loading="lazy"><span><small>Reihe, Teil 1 von 5</small><b>Klar ansprechen</b></span></button>
-      <button class="lk" type="button" aria-pressed="false" data-kurs="digitales-lernen" data-titel="Gute digitale Formate bauen"><img src="kurse/digitales-lernen.jpg" alt="" loading="lazy"><span><small>Für Trainer:innen</small><b>Digitale Formate bauen</b></span></button>
+    <div class="bento">
+      <article class="tile wide rv">
+        <div class="tile-pic"><img src="media/offer-elearning.jpg" alt="Kursseite: Lernende sprechen im Chat mit Tarek und wählen ihre Antwort" loading="lazy"></div>
+        <div class="tile-body"><span class="tile-num">01 E-Learning</span><h3>E-Learnings, die man zu Ende macht</h3><p>Ihre Mitarbeitenden führen ein Gespräch im Chat, entscheiden in einer Szene und üben am eigenen Fall. Ein Kurs dauert 10 bis 45 Minuten und läuft in jedem gängigen Lernsystem, auch am Handy.</p><div class="links"><a href="#kurse">Beispielkurse</a></div></div>
+      </article>
+      <article class="tile narrow rv" style="--d:1">
+        <div class="tile-pic"><video src="media/clip-erklaer.mp4" poster="media/clip-erklaer.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Erklärvideo"></video></div>
+        <div class="tile-body"><span class="tile-num">02 Erklärvideo</span><h3>Erklärvideos für Abläufe und Modelle</h3><p>Als flache Illustration, als Motion-Film oder als Scribble mit zeichnender Hand. Mit Sprecherstimme und Untertiteln.</p><div class="links"><a href="#looks">Videoarten</a></div></div>
+      </article>
+      <article class="tile narrow rv">
+        <div class="tile-pic"><img src="media/offer-konzept.jpg" alt="Kursseite: zwei Menschen aus dem Fall erzählen, was bei ihnen getragen hat" loading="lazy"></div>
+        <div class="tile-body"><span class="tile-num">03 Konzept und Storyline</span><h3>Lernkonzepte mit einer Geschichte</h3><p>Ein Fall mit Figuren trägt durch den ganzen Kurs. Lernziele und Storyboard bekommen Sie vorab zur Freigabe, auch wenn Sie selbst umsetzen.</p><div class="links"><a href="#ablauf">So arbeite ich</a></div></div>
+      </article>
+      <article class="tile wide dark rv" style="--d:1">
+        <div class="tile-pic"><img src="kurse/fmk-workslop.jpg" alt="Titelfolie der Einheit „Workslop erkennen und benennen“ aus dem Programm Führen mit KI" loading="lazy"></div>
+        <div class="tile-body"><span class="tile-num">04 Programm für Führungskräfte</span><h3>Führen mit KI</h3><p>Ein Programm für Führungskräfte über zehn Monate. Zwischen sieben Live-Tagen liegen 23 kurze E-Learnings, und nach jedem Tag setzen die Führungskräfte etwas im eigenen Team um. Am Ende hat jede Person einen Nachweis nach Art. 4 KI-Verordnung.</p><div class="links"><a href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht (PDF)</a><a href="#kurse" data-live="fmk-hebel">Einheit ausprobieren</a></div></div>
+      </article>
     </div>
-    <div class="stage" data-stage>
+    <div class="facts rv"><span>Kontrast und Tastaturbedienung geprüft</span><span>KI-Einsatz gekennzeichnet nach Art. 50 KI-Verordnung</span><span>Auf Wunsch in Ihrem Corporate Design</span></div>
+  </div>
+</section>
+
+<section id="kurse" aria-labelledby="h-kurse">
+  <div class="wrap">
+    <div class="split rv">
+      <div><div class="tag"><b>(03)</b>Beispielkurse</div><h2 class="big" id="h-kurse">Zum Durchklicken</h2></div>
+      <p class="intro">Beispielkurse aus meinem Angebot, so wie sie in Ihrem Lernsystem laufen. Klicken Sie sich durch die ersten fünf Folien. Wie es weitergeht, zeige ich Ihnen gern im Gespräch.</p>
+    </div>
+    <div class="cases">
+      <button class="case rv" type="button" aria-pressed="true" data-kurs="fmk-hebel" data-titel="Führen mit KI 0.4: Der Hebel bist du"><em class="chip">Führen mit KI</em><img src="kurse/fmk-hebel.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Einheit 0.4 · Microlearning</small><b>Der Hebel bist du</b></span><i aria-hidden="true">→</i></span></button>
+      <button class="case rv" style="--d:1" type="button" aria-pressed="false" data-kurs="fmk-workslop" data-titel="Führen mit KI 2.1: Workslop erkennen und benennen"><em class="chip">Führen mit KI</em><img src="kurse/fmk-workslop.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Einheit 2.1 · Microlearning</small><b>Workslop erkennen und benennen</b></span><i aria-hidden="true">→</i></span></button>
+      <button class="case rv" style="--d:2" type="button" aria-pressed="false" data-kurs="konflikt" data-titel="Abstieg in die Tiefen eines Konflikts"><img src="kurse/konflikt.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>3D-Abstieg · ca. 17 Min.</small><b>Abstieg in die Tiefen eines Konflikts</b></span><i aria-hidden="true">→</i></span></button>
+      <button class="case rv" type="button" aria-pressed="false" data-kurs="feedback" data-titel="Feedback, das ankommt"><img src="kurse/feedback.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Lektionen zum Scrollen</small><b>Feedback, das ankommt</b></span><i aria-hidden="true">→</i></span></button>
+      <button class="case rv" style="--d:1" type="button" aria-pressed="false" data-kurs="klar-ansprechen" data-titel="Klar ansprechen: SAG ES"><img src="kurse/klar-ansprechen.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Reihe · Teil 1 von 5</small><b>Klar ansprechen: SAG ES</b></span><i aria-hidden="true">→</i></span></button>
+      <button class="case rv" style="--d:2" type="button" aria-pressed="false" data-kurs="digitales-lernen" data-titel="Gute digitale Formate bauen"><img src="kurse/digitales-lernen.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Für Trainer:innen · ca. 25 Min.</small><b>Gute digitale Formate bauen</b></span><i aria-hidden="true">→</i></span></button>
+    </div>
+    <div class="stage rv" data-stage>
       <div class="stage-bar">
         <span class="stage-title" data-stage-title>Führen mit KI 0.4: Der Hebel bist du</span>
         <span class="dev" role="group" aria-label="Ansicht">
@@ -288,82 +325,84 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
       <div class="view" data-view>
         <iframe title="Kursvorschau" data-frame></iframe>
         <div class="poster" data-poster style="background-image:url(kurse/fmk-hebel.jpg)">
-          <div><b data-poster-title>Führen mit KI 0.4: Der Hebel bist du</b><p>Oder wählen Sie oben einen anderen Kurs.</p><button class="btn" type="button" data-start>Kurs hier starten</button></div>
+          <div><b>Führen mit KI 0.4: Der Hebel bist du</b><p>Oder wählen Sie oben einen anderen Kurs.</p><button class="btn" type="button" data-start>Kurs hier starten <span class="arr" aria-hidden="true">→</span></button></div>
         </div>
       </div>
     </div>
-    <p class="note">Eigene Kurse ohne Kundeninhalte, Bilder von Pexels und Storyset. Ihre Antworten bleiben in Ihrem Browser.</p>
+    <p class="note">Alle Beispiele sind meine eigenen Kurse, ohne Inhalte von Kunden. Fotos von Pexels, Illustrationen von Storyset. Was Sie eingeben, bleibt in Ihrem Browser.</p>
   </div>
 </section>
 
-<section id="looks" aria-labelledby="h-looks">
+<section id="looks" class="light" aria-labelledby="h-looks">
   <div class="wrap">
-    <div class="head">
-      <div class="label">Looks und Videos</div>
-      <h2 id="h-looks">So kann Ihr Kurs aussehen</h2>
-      <p>Drei Looks mit festen Regeln für Farbe, Schrift und Bild, dazu drei selbst produzierte Videoarten. Ihre Farben und Ihr Logo setze ich auf Wunsch ein.</p>
+    <div class="split rv">
+      <div><div class="tag"><b>(04)</b>Looks und Videoarten</div><h2 class="big" id="h-looks">So kann Ihr Kurs aussehen</h2></div>
+      <p class="intro">Jeder Look folgt festen Regeln, damit der Kurs von der ersten bis zur letzten Folie zusammenpasst. Ihre Farben und Ihr Logo baue ich ein. Die Videos produziere ich selbst.</p>
     </div>
-    <div class="row3">
-      <div class="row-label">Looks aus echten Kursen</div>
-      <figure><img src="media/look-foto.jpg" alt="Foto mit sechs Fragen als Punkte im Bild" loading="lazy"><figcaption><b>Foto</b>Echte Menschen, echte Orte, Gespräche als Chat.</figcaption></figure>
-      <figure><img src="media/look-comic.jpg" alt="Titelseite mit Illustration: Eine Veränderung führen, die du nicht entschieden hast" loading="lazy"><figcaption><b>Comic und Illustration</b>Für heikle Themen, eine Figur begleitet durch den Kurs.</figcaption></figure>
-      <figure><img src="media/look-micro.jpg" alt="Titelfolie der Microlearning-Einheit Der Hebel bist du" loading="lazy"><figcaption><b>Microlearning</b>10 bis 15 Minuten, ein Fall, eine Entscheidung.</figcaption></figure>
+    <div class="looks">
+      <div class="row-name">Looks aus echten Kursen</div>
+      <figure class="rv"><div class="frame"><img src="media/look-foto.jpg" alt="Foto mit sechs Fragen als Punkte im Bild" loading="lazy"></div><figcaption><b>Foto</b>Wenn sich Ihre Leute in der Situation wiedererkennen sollen.</figcaption></figure>
+      <figure class="rv" style="--d:1"><div class="frame"><img src="media/look-comic.jpg" alt="Titelseite mit Illustration: Eine Veränderung führen, die du nicht entschieden hast" loading="lazy"></div><figcaption><b>Comic und Illustration</b>Wenn ein Thema heikel ist und etwas Abstand braucht.</figcaption></figure>
+      <figure class="rv" style="--d:2"><div class="frame"><img src="media/look-micro.jpg" alt="Titelfolie der Microlearning-Einheit Der Hebel bist du" loading="lazy"></div><figcaption><b>Microlearning</b>Für Reihen über mehrere Wochen, je Einheit 10 bis 15 Minuten.</figcaption></figure>
     </div>
-    <div class="row3">
-      <div class="row-label">Videoarten, Ausschnitte ohne Ton</div>
-      <figure><video src="media/clip-erklaer.mp4" poster="media/clip-erklaer.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Erklärvideo"></video><figcaption><b>Erklärvideo</b>Flache Illustrationen für Abläufe und Begriffe.</figcaption></figure>
-      <figure><video src="media/clip-motion.mp4" poster="media/clip-motion.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Motion-Video"></video><figcaption><b>Motion</b>Räume in 2,5D für Kampagnen und Sicherheitsthemen.</figcaption></figure>
-      <figure><video src="media/clip-scribble.mp4" poster="media/clip-scribble.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Scribble-Video mit zeichnender Hand"></video><figcaption><b>Scribble</b>Eine Hand zeichnet Modelle und Gesprächstechniken.</figcaption></figure>
+    <div class="looks">
+      <div class="row-name">Videoarten, Ausschnitte ohne Ton</div>
+      <figure class="rv"><div class="frame"><video src="media/clip-erklaer.mp4" poster="media/clip-erklaer.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Erklärvideo"></video></div><figcaption><b>Erklärvideo</b>Für Abläufe und Begriffe.</figcaption></figure>
+      <figure class="rv" style="--d:1"><div class="frame"><video src="media/clip-motion.mp4" poster="media/clip-motion.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Motion-Video"></video></div><figcaption><b>Motion</b>Für Kampagnen und Sicherheitsthemen.</figcaption></figure>
+      <figure class="rv" style="--d:2"><div class="frame"><video src="media/clip-scribble.mp4" poster="media/clip-scribble.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Scribble-Video mit zeichnender Hand"></video></div><figcaption><b>Scribble</b>Für Modelle und Gesprächstechniken.</figcaption></figure>
     </div>
   </div>
 </section>
 
-<section id="ablauf" class="ablauf" aria-labelledby="h-ablauf">
+<section id="ablauf" aria-labelledby="h-ablauf">
   <div class="wrap">
-    <div class="head">
-      <div class="label">Ablauf</div>
-      <h2 id="h-ablauf">So arbeiten wir zusammen</h2>
+    <div class="split rv">
+      <div><div class="tag"><b>(05)</b>Ablauf</div><h2 class="big" id="h-ablauf">So arbeiten wir zusammen</h2></div>
+      <p class="intro">Sie sehen den Kurs früh als klickbare Fassung und schreiben Ihre Anmerkungen direkt hinein. So wissen Sie bei jedem Schritt, woran wir sind.</p>
     </div>
-    <div class="flow">
-      <div><b>Erstgespräch</b><span>Ziel, Zielgruppe, Umfang und Lernsystem.</span></div>
-      <div><b>Konzept</b><span>Lernziele, Gliederung und Storyboard zur Freigabe.</span></div>
-      <div><b>Erstfassung</b><span>Klickbarer Kurs, Sie kommentieren direkt darin.</span></div>
-      <div><b>Feinschliff</b><span>Ihre Anmerkungen, Fachprüfung, Endkontrolle.</span></div>
-      <div><b>Lieferung</b><span>Fertiges Paket und Testlauf in Ihrem LMS.</span></div>
+    <div class="steps">
+      <div class="rv"><em>01</em><b>Erstgespräch</b><span>Wir klären, wer lernen soll und was danach anders sein soll.</span></div>
+      <div class="rv" style="--d:1"><em>02</em><b>Konzept</b><span>Sie bekommen Lernziele und Storyboard zur Freigabe.</span></div>
+      <div class="rv" style="--d:2"><em>03</em><b>Erstfassung</b><span>Ein klickbarer Kurs, in dem Sie direkt kommentieren.</span></div>
+      <div class="rv" style="--d:3"><em>04</em><b>Feinschliff</b><span>Ich arbeite Ihre Anmerkungen ein, Ihre Fachleute prüfen.</span></div>
+      <div class="rv" style="--d:4"><em>05</em><b>Lieferung</b><span>Wir testen das fertige Paket gemeinsam in Ihrem LMS.</span></div>
     </div>
-    <div class="faq">
-      <details><summary>Was kostet ein Kurs oder ein Video?</summary><p>Das hängt von Umfang, Format und Ihren Inhalten ab. Nach dem Erstgespräch erhalten Sie ein Angebot mit Umfang, Preis und Zeitplan.</p></details>
-      <details><summary>Läuft der Kurs in unserem Lernsystem?</summary><p>Ja, als SCORM 1.2, SCORM 2004 oder cmi5. Abschluss, Testergebnisse und Lernziele gehen an Ihr LMS.</p></details>
-      <details><summary>Woher kommen die Inhalte?</summary><p>Aus Ihren Unterlagen und Gesprächen mit Ihren Fachleuten. Texte, Szenarien und Fragen stimme ich fachlich mit Ihnen ab.</p></details>
-      <details><summary>Setzen Sie KI ein?</summary><p>Ja, als Werkzeug. Jeden Inhalt prüfe und verantworte ich selbst, jeder Kurs ist nach Artikel 50 der KI-Verordnung gekennzeichnet.</p></details>
+    <div class="faq rv">
+      <details><summary>Was kostet ein Kurs oder ein Video?</summary><p>Das hängt vor allem von der Länge und der Zahl der Videos ab. Nach dem Erstgespräch bekommen Sie ein Angebot mit festem Preis.</p></details>
+      <details><summary>Läuft der Kurs in unserem Lernsystem?</summary><p>Ja. Ich liefere SCORM 1.2, SCORM 2004 oder cmi5, Ihr LMS bekommt Abschluss und Testergebnis. Vor der Übergabe testen wir das Paket zusammen.</p></details>
+      <details><summary>Woher kommen die Inhalte?</summary><p>Aus Ihren Unterlagen und aus Gesprächen mit Ihren Fachleuten. Ich schreibe die Texte und Fälle, Ihre Fachleute geben sie frei.</p></details>
+      <details><summary>Setzen Sie KI ein?</summary><p>Ja, als Werkzeug. Jeden Inhalt prüfe ich selbst und stehe dafür ein. Jeder Kurs ist nach Artikel 50 der KI-Verordnung gekennzeichnet.</p></details>
     </div>
   </div>
 </section>
 
 <section id="kontakt" class="contact" aria-labelledby="h-kontakt">
   <div class="wrap">
-    <div>
-      <div class="label">Kontakt</div>
-      <h2 id="h-kontakt">Lassen Sie uns über Ihr Thema sprechen.</h2>
-      <p>In einem kurzen Erstgespräch klären wir Ziel, Umfang und Format. Danach erhalten Sie ein Angebot mit Preis und Zeitplan.</p>
-      <div class="me"><img src="media/kerstin.jpg" alt=""><div><b>Kerstin Rafai</b><a href="mailto:kerstinrafai@gmail.com">kerstinrafai@gmail.com</a></div></div>
-    </div>
-    <form class="ask" data-ask>
-      <h3>Ihre Anfrage in einer Minute</h3>
-      <span class="lbl" id="ask-was">Was brauchen Sie?</span>
-      <div class="choice" role="group" aria-labelledby="ask-was">
-        <button type="button" aria-pressed="false">E-Learning</button>
-        <button type="button" aria-pressed="false">Erklärvideo</button>
-        <button type="button" aria-pressed="false">Konzept und Storyboard</button>
-        <button type="button" aria-pressed="false">Programm „Führen mit KI“</button>
+    <div class="tag"><b>(06)</b>Kontakt</div>
+    <h2 id="h-kontakt" class="rv">Lassen Sie uns über Ihr Thema sprechen.</h2>
+    <a class="mail rv" href="mailto:kerstinrafai@gmail.com">kerstinrafai@gmail.com</a>
+    <div class="contact-grid">
+      <div class="rv">
+        <p>Erzählen Sie mir in einer halben Stunde, worum es geht und wer lernen soll. Danach schicke ich Ihnen ein Angebot mit Preis und Zeitplan.</p>
+        <div class="me"><img src="media/kerstin.jpg" alt=""><div><b>Kerstin Rafai</b>KR Consulting</div></div>
       </div>
-      <label for="f-thema">Ihr Thema</label>
-      <input id="f-thema" name="thema" placeholder="z. B. Feedbackgespräche für neue Führungskräfte">
-      <label for="f-gruppe">Zielgruppe und Umfang</label>
-      <textarea id="f-gruppe" name="gruppe" placeholder="Wer soll lernen, wie viele Personen, gibt es einen Termin?"></textarea>
-      <button class="btn" type="submit">Anfrage per Mail vorbereiten</button>
-      <small>Ihr Mailprogramm öffnet sich mit Ihrer Anfrage. Über diese Seite werden keine Daten verschickt.</small>
-    </form>
+      <form class="ask rv" style="--d:1" data-ask>
+        <h3>Ihre Anfrage in einer Minute</h3>
+        <span class="lbl" id="ask-was">Was brauchen Sie?</span>
+        <div class="choice" role="group" aria-labelledby="ask-was">
+          <button type="button" aria-pressed="false">E-Learning</button>
+          <button type="button" aria-pressed="false">Erklärvideo</button>
+          <button type="button" aria-pressed="false">Konzept und Storyboard</button>
+          <button type="button" aria-pressed="false">Programm „Führen mit KI“</button>
+        </div>
+        <label for="f-thema">Ihr Thema</label>
+        <input id="f-thema" name="thema" placeholder="z. B. Feedbackgespräche für neue Führungskräfte">
+        <label for="f-gruppe">Zielgruppe und Umfang</label>
+        <textarea id="f-gruppe" name="gruppe" placeholder="Wer soll lernen, wie viele Personen, gibt es einen Termin?"></textarea>
+        <button class="btn" type="submit">Anfrage per Mail vorbereiten <span class="arr" aria-hidden="true">→</span></button>
+        <small>Ihr Mailprogramm öffnet sich mit Ihrer Anfrage. Über diese Seite werden keine Daten verschickt.</small>
+      </form>
+    </div>
   </div>
 </section>
 
@@ -371,7 +410,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 
 <footer>
   <div class="wrap">
-    <span>Kerstin Rafai · KR Consulting</span>
+    <span>© Kerstin Rafai · KR Consulting</span>
     <span>Bilder in den Kursbeispielen: Pexels und Storyset (storyset.com). Erstellt mit KI-Unterstützung, von mir geprüft.</span>
   </div>
 </footer>
@@ -382,28 +421,45 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // kurze Videoausschnitte nur im sichtbaren Bereich abspielen
+  // Kopfleiste bekommt beim Scrollen einen Grund, Foto bewegt sich leicht
+  var top = $('[data-top]'), pic = $('[data-parallax]');
+  function onScroll() {
+    var y = window.scrollY;
+    top.classList.toggle('solid', y > 40);
+    if (pic && !reduce && y < 1200) pic.style.setProperty('--py', (-y * 0.06) + 'px');
+  }
+  window.addEventListener('scroll', onScroll, { passive: true }); onScroll();
+
+  // Einblenden und kurze Clips nur im sichtbaren Bereich
   var clips = $$('video[data-auto]');
-  if ('IntersectionObserver' in window && !reduce) {
-    var vo = new IntersectionObserver(function (es) { es.forEach(function (e) { var v = e.target; if (e.isIntersecting) { var p = v.play(); if (p && p.catch) p.catch(function () {}); } else v.pause(); }); }, { threshold: .35 });
-    clips.forEach(function (v) { vo.observe(v); });
-  } else clips.forEach(function (v) { v.controls = true; });
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }); }, { threshold: .12 });
+    $$('.rv').forEach(function (el) { io.observe(el); });
+    if (!reduce) {
+      var vo = new IntersectionObserver(function (es) { es.forEach(function (e) { var v = e.target; if (e.isIntersecting) { var p = v.play(); if (p && p.catch) p.catch(function () {}); } else v.pause(); }); }, { threshold: .35 });
+      clips.forEach(function (v) { vo.observe(v); });
+    } else clips.forEach(function (v) { v.controls = true; });
+  } else { $$('.rv').forEach(function (el) { el.classList.add('in'); }); }
+
+  // Showreel
+  var reel = $('[data-reel]'), rp = $('[data-reel-play]');
+  rp.addEventListener('click', function () { rp.hidden = true; var p = reel.play(); if (p && p.catch) p.catch(function () {}); reel.focus(); });
 
   // Beispielkurse
   var stage = $('[data-stage]'), frame = $('[data-frame]'), poster = $('[data-poster]'), view = $('[data-view]');
-  var cur = $('.lk[aria-pressed="true"]');
-  function pick(card, load, scroll) {
+  var cur = $('.case[aria-pressed="true"]');
+  function pick(card, scroll) {
     cur = card;
-    $$('.lk').forEach(function (c) { c.setAttribute('aria-pressed', c === card); });
-    var k = card.dataset.kurs, t = card.dataset.titel;
-    $('[data-stage-title]').textContent = t;
+    $$('.case').forEach(function (c) { c.setAttribute('aria-pressed', c === card); });
+    var k = card.dataset.kurs;
+    $('[data-stage-title]').textContent = card.dataset.titel;
     $('[data-stage-new]').href = 'kurse/' + k + '/index.html';
-    if (load) { poster.hidden = true; frame.src = 'kurse/' + k + '/index.html'; }
+    poster.hidden = true; frame.src = 'kurse/' + k + '/index.html';
     if (scroll) stage.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
   }
-  $$('.lk').forEach(function (c) { c.addEventListener('click', function () { pick(c, true, true); }); });
-  $('[data-start]').addEventListener('click', function () { pick(cur, true, false); });
-  $$('[data-live]').forEach(function (a) { a.addEventListener('click', function (e) { var c = $('.lk[data-kurs="' + a.dataset.live + '"]'); if (c) { e.preventDefault(); pick(c, true, true); } }); });
+  $$('.case').forEach(function (c) { c.addEventListener('click', function () { pick(c, true); }); });
+  $('[data-start]').addEventListener('click', function () { pick(cur, false); });
+  $$('[data-live]').forEach(function (a) { a.addEventListener('click', function (e) { var c = $('.case[data-kurs="' + a.dataset.live + '"]'); if (c) { e.preventDefault(); pick(c, true); } }); });
   $$('[data-dev]').forEach(function (b) { b.addEventListener('click', function () {
     $$('[data-dev]').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
     view.classList.toggle('phone', b.dataset.dev === 'phone');
