@@ -5,15 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kerstin Rafai · E-Learning, Erklärvideos, Konzepte</title>
 <meta name="description" content="Kerstin Rafai: E-Learnings, Erklärvideos, Lernkonzepte und das Programm „Führen mit KI“. Beispielkurse zum Durchklicken.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap">
+<link rel="preload" href="media/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+/* Schrift lokal, keine Verbindung zu Google */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400 800;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  src: url(media/fonts/archivo-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400 800;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  src: url(media/fonts/archivo-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
-  --night: #14171C; --night2: #1C2027; --night3: #262B33;
-  --paper: #F2F0EB; --ink: #15181D; --muted: #5A616B; --line: #D9D6CF;
-  --blue: #7FA2EE; --blue-ink: #2E5BB8; --sand: #E7E1D4;
-  --on-night: #F2F0EB; --on-night-2: rgba(242,240,235,.72); --line-night: rgba(242,240,235,.16);
+  --night: #002941; --night2: #00334F; --night3: #0B3D5A;
+  --paper: #EEF6F9; --ink: #002941; --muted: #3D5768; --line: #CFE3EC;
+  --blue: #B6DFED; --blue-ink: #002941; --sand: #D7EBF3; --coral: #FD6E6E;
+  --on-night: #F3F9FB; --on-night-2: rgba(243,249,251,.78); --line-night: rgba(182,223,237,.2);
   --r: 14px; --maxw: 1320px; --side: clamp(18px, 4.5vw, 64px);
   --ease: cubic-bezier(.2,.7,.2,1);
 }
@@ -292,8 +310,6 @@ h1, h2, h3 { text-wrap: balance; }
 .intro, .offer ul, .special p { text-wrap: pretty; }
 .facts { display: block; margin-top: 24px; font-size: 15px; color: var(--muted); }
 .facts i { font-style: normal; margin: 0 8px; color: var(--blue-ink); }
-.light, .contact { border-radius: clamp(20px, 2.4vw, 36px); margin: 0 clamp(6px, 1vw, 14px); }
-.light + .light, .contact { margin-top: clamp(6px, 1vw, 14px); }
 .offer { transition: transform .35s var(--ease), box-shadow .35s var(--ease); }
 .offer:hover { transform: translateY(-4px); box-shadow: 0 22px 40px -28px rgba(21,24,29,.45); }
 .case { transition: border-color .3s, transform .35s var(--ease); }
@@ -310,6 +326,51 @@ footer { padding: 34px 0 30px; }
 .me2 img { width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; object-position: 60% 20%; border-radius: var(--r); }
 .me2 figcaption { margin-top: 12px; font-size: 16px; color: rgba(255,255,255,.85); }
 .me2 b { display: block; font-size: 19px; color: #fff; }
+
+/* Farbkombi Midnight Navy, Soft Blue, Coral (Coral nur als kleiner Akzent) */
+.hero h1 em { color: var(--coral); }
+.ticker span::after { background: var(--coral); }
+.top.solid { background: rgba(0,41,65,.94); }
+.hero .cta .btn:first-child, .contact-cta { background: var(--coral); border-color: var(--coral); color: var(--ink); }
+.btn:hover, .hero .cta .btn:first-child:hover { background: var(--blue); border-color: var(--blue); color: var(--ink); }
+.light .btn:hover { background: var(--night3); border-color: var(--night3); color: #fff; }
+.btn.line:hover { background: transparent; color: var(--on-night); border-color: var(--blue); }
+.reel-play span { background: var(--coral); color: var(--ink); }
+.case .chip { background: var(--coral); color: var(--ink); }
+.case:hover, .case[aria-pressed="true"] { border-color: var(--blue); }
+.case:hover i, .case[aria-pressed="true"] i { background: var(--coral); border-color: var(--coral); color: var(--ink); }
+.special-tag { background: var(--coral); color: var(--ink); }
+.special { background: var(--night); }
+.special .btn:hover { background: var(--blue); border-color: var(--blue); color: var(--ink); }
+.facts i { color: var(--coral); }
+.offer-num, .tile-num { color: var(--ink); }
+.offer .more:hover { color: var(--night3); text-decoration: underline; }
+.light .steps em { color: var(--ink); }
+.steps em { color: var(--blue); }
+.light .faq summary::after { color: var(--ink); }
+.vids { background: var(--night2); }
+.vcard { background: var(--night3); }
+.contact { background: var(--blue); color: var(--ink); }
+.contact .tag b, .contact .tag { color: var(--ink); }
+.contact h2 { color: var(--ink); }
+.mail { color: var(--ink); text-decoration-color: var(--coral); }
+.contact-grid p { color: var(--ink); }
+.me2 figcaption { color: var(--muted); }
+.me2 b { color: var(--ink); }
+.ask .btn { background: var(--ink); border-color: var(--ink); color: #fff; }
+.ask .btn:hover { background: var(--night3); border-color: var(--night3); color: #fff; }
+.choice button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: #fff; }
+.kf-open img { border-color: var(--coral); }
+.kf-opts button:hover { border-color: var(--ink); }
+.kf-reply a { color: var(--ink); text-decoration-color: var(--coral); }
+.dev button[aria-pressed="true"] { background: var(--blue); color: var(--ink); }
+.foot-nav a:hover { color: var(--blue); }
+.light :focus-visible, .contact :focus-visible, .ask :focus-visible, .kf :focus-visible { outline-color: var(--ink); }
+
+/* Aus dem Testlauf */
+video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offset: 3px; }
+.foot-nav a { display: inline-block; padding: 8px 0; }
+.stage-new { display: inline-block; padding: 8px 4px; }
 </style>
 </head>
 <body>
@@ -363,7 +424,7 @@ footer { padding: 34px 0 30px; }
       <p>Alles in diesem Video stammt aus echten Kursen: ein Gespräch, das kippt, ein Motor in 3D, ein Prompt zum Kopieren und Arbeitsblätter für das eigene Team. Es läuft mit Musik, ohne Sprecher.</p>
     </div>
     <div class="reel-box rv">
-      <video controls playsinline preload="none" poster="media/kerstin-rafai-e-learning.jpg" data-reel aria-label="Showreel: E-Learning, das man zu Ende macht">
+      <video playsinline preload="none" poster="media/kerstin-rafai-e-learning.jpg" data-reel aria-label="Showreel: E-Learning, das man zu Ende macht">
         <source src="media/kerstin-rafai-e-learning.mp4" type="video/mp4">
       </video>
       <button class="reel-play" type="button" data-reel-play style="background-image:url(media/kerstin-rafai-e-learning.jpg)" aria-label="Showreel abspielen"><span>Abspielen</span></button>
@@ -446,7 +507,7 @@ footer { padding: 34px 0 30px; }
         <a class="stage-new" href="kurse/fmk-hebel/index.html" target="_blank" rel="noopener" data-stage-new>Im neuen Fenster ↗</a>
       </div>
       <div class="view" data-view>
-        <iframe title="Kursvorschau" data-frame></iframe>
+        <iframe title="Kursvorschau" data-frame tabindex="-1"></iframe>
         <div class="poster" data-poster style="background-image:url(kurse/fmk-hebel.jpg)">
           <div><b>Führen mit KI 0.4: Der Hebel bist du</b><p>Oder wählen Sie oben einen anderen Kurs.</p><button class="btn" type="button" data-start>Kurs hier starten <span class="arr" aria-hidden="true">→</span></button></div>
         </div>
@@ -590,7 +651,7 @@ footer { padding: 34px 0 30px; }
 
   // Showreel
   var reel = $('[data-reel]'), rp = $('[data-reel-play]');
-  rp.addEventListener('click', function () { rp.hidden = true; var p = reel.play(); if (p && p.catch) p.catch(function () {}); reel.focus(); });
+  rp.addEventListener('click', function () { rp.hidden = true; reel.controls = true; var p = reel.play(); if (p && p.catch) p.catch(function () {}); reel.focus(); });
 
   // Beispielkurse
   var stage = $('[data-stage]'), frame = $('[data-frame]'), poster = $('[data-poster]'), view = $('[data-view]');
@@ -601,7 +662,7 @@ footer { padding: 34px 0 30px; }
     var k = card.dataset.kurs;
     $('[data-stage-title]').textContent = card.dataset.titel;
     $('[data-stage-new]').href = 'kurse/' + k + '/index.html';
-    poster.hidden = true; frame.src = 'kurse/' + k + '/index.html';
+    poster.hidden = true; frame.src = 'kurse/' + k + '/index.html'; frame.title = 'Kursvorschau: ' + card.dataset.titel; frame.removeAttribute('tabindex');
     if (scroll) stage.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
   }
   $$('.case').forEach(function (c) { c.addEventListener('click', function () { pick(c, true); }); });
@@ -639,7 +700,7 @@ footer { padding: 34px 0 30px; }
     e.preventDefault();
     var was = $$('.choice [aria-pressed=true]', form).map(function (b) { return b.textContent; }).join(', ') || 'noch offen';
     var body = 'Guten Tag Frau Rafai,\n\nich interessiere mich für: ' + was + '\nThema: ' + (form.thema.value || 'noch offen') + '\nZielgruppe und Umfang: ' + (form.gruppe.value || 'noch offen') + '\n\nBitte melden Sie sich für ein Erstgespräch.\n';
-    location.href = 'mailto:kerstinrafai@gmail.com?subject=' + encodeURIComponent('Anfrage: ' + (form.thema.value || was)) + '&body=' + encodeURIComponent(body);
+    location.href = window.__lastMail = 'mailto:kerstinrafai@gmail.com?subject=' + encodeURIComponent('Anfrage: ' + (form.thema.value || was)) + '&body=' + encodeURIComponent(body);
   });
 })();
 </script>
