@@ -330,6 +330,23 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 28px; justify-content: 
   .rv-in { transition: none; }
 }
 @media print { .top, .kf, .kf-open { display: none !important; } .fx { opacity: 1; transform: none; } section { page-break-inside: avoid; } }
+
+/* Angebot: Karten im Stil Bild oben, dunkelblauer Kartenkörper auf blauem Verlauf */
+#angebot { background: linear-gradient(120deg, #1E4FA8 0%, #3D7BE0 55%, #7FB2F5 100%); color: #fff; }
+#angebot h2 { color: #fff; }
+#angebot .eyebrow { background: rgba(255,255,255,.16); color: #fff; }
+#angebot .sec-head p { color: rgba(255,255,255,.88); }
+#angebot .offers { gap: clamp(20px, 4vw, 64px); }
+#angebot .offer { background: #0F2D66; border: 0; border-radius: 14px; box-shadow: 0 26px 50px -26px rgba(6, 20, 52, .7); }
+#angebot .offer-pic { margin: 0; border-radius: 0; aspect-ratio: 16 / 9; }
+#angebot .offer-body { padding: 24px 32px 30px; }
+#angebot .offer-num { color: #9CC4FF; }
+#angebot .offer h3 { font-family: "Inter", sans-serif; font-weight: 700; font-size: 22px; line-height: 1.25; color: #fff; margin: 8px 0 22px; padding-bottom: 14px; border-bottom: 2px solid #fff; }
+#angebot .offer ul { list-style: none; padding: 0; color: rgba(255,255,255,.9); font-size: 16px; display: grid; gap: 8px; margin-bottom: 22px; }
+#angebot .offer .more { color: #fff; font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
+#angebot .offer .more::before { content: '> '; }
+#angebot .offer .more::after { content: none; }
+#angebot .offer .more:hover { color: #9CC4FF; }
 </style>
 </head>
 <body>
