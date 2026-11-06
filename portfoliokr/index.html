@@ -305,6 +305,11 @@ h1, h2, h3 { text-wrap: balance; }
 .foot-nav a:hover { color: var(--blue); }
 footer { padding: 34px 0 30px; }
 @media (prefers-reduced-motion: reduce) { .offer:hover, .case:hover { transform: none; } }
+
+.me2 { margin: 28px 0 0; max-width: 440px; }
+.me2 img { width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; object-position: 60% 20%; border-radius: var(--r); }
+.me2 figcaption { margin-top: 12px; font-size: 16px; color: rgba(255,255,255,.85); }
+.me2 b { display: block; font-size: 19px; color: #fff; }
 </style>
 </head>
 <body>
@@ -510,7 +515,7 @@ footer { padding: 34px 0 30px; }
     <div class="contact-grid">
       <div class="rv">
         <p>Erzählen Sie mir in einer halben Stunde, worum es geht und wer lernen soll. Danach schicke ich Ihnen ein Angebot mit Preis und Zeitplan.</p>
-        <div class="me"><img src="media/kerstin.jpg" alt=""><div><b>Kerstin Rafai</b>Personal- und Führungskräfteentwicklung</div></div>
+        <figure class="me2"><img src="media/kerstin-2.jpg" alt="Kerstin Rafai erklärt im Seminar" loading="lazy" width="1200" height="1013"><figcaption><b>Kerstin Rafai</b>Personal- und Führungskräfteentwicklung</figcaption></figure>
       </div>
       <form class="ask rv" style="--d:1" data-ask>
         <h3>Ihre Anfrage in einer Minute</h3>
