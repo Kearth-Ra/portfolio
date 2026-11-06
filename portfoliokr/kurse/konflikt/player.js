@@ -1,0 +1,10264 @@
+function kursLms(opts) {
+  opts = opts || {};
+  if (opts.preview) return null;
+  const pad = (n, l) => String(Math.floor(n)).padStart(l, '0');
+  const time12 = s => `${pad(s / 3600, 4)}:${pad((s % 3600) / 60, 2)}:${pad(s % 60, 2)}`;
+  const iso = s => `PT${Math.floor(s / 3600)}H${Math.floor((s % 3600) / 60)}M${Math.round(s % 60)}S`;
+  const clip = (v, n) => String(v == null ? '' : v).slice(0, n);
+  const safeId = id => String(id).replace(/[^\w.\-:]/g, '_');
+
+  function findApi(name) {
+    function scan(w) {
+      let n = 0;
+      try {
+        while (w && !w[name] && w.parent && w.parent !== w && n < 10) { w = w.parent; n++; }
+        return (w && w[name]) || null;
+      } catch (e) { return null; }
+    }
+    return scan(window) || (window.opener ? scan(window.opener) : null);
+  }
+
+  // ---------- SCORM 1.2 ----------
+  function scorm12(api) {
+    const set = (k, v) => api.LMSSetValue(k, String(v));
+    return {
+      standard: '1.2', suspendLimit: 4000,
+      async start() {
+        if (String(api.LMSInitialize('')) !== 'true') return null;
+        const g = k => api.LMSGetValue(k);
+        return { location: g('cmi.core.lesson_location'), suspend: g('cmi.suspend_data'), name: g('cmi.core.student_name') };
+      },
+      save(loc, data) { set('cmi.core.lesson_location', loc); set('cmi.suspend_data', clip(data, 4096)); },
+      result(r) {
+        if (r.pct != null) { set('cmi.core.score.min', 0); set('cmi.core.score.max', 100); set('cmi.core.score.raw', r.pct); }
+        let status = 'incomplete';
+        if (r.completed) status = r.useSuccess && r.testDone ? (r.passed ? 'passed' : 'failed') : 'completed';
+        else if (r.useSuccess && r.testDone && !r.passed) status = 'failed';
+        set('cmi.core.lesson_status', status);
+        set('cmi.core.exit', r.completed ? '' : 'suspend');
+      },
+      time(sec) { set('cmi.core.session_time', time12(sec)); },
+      interaction(n, d) {
+        const p = `cmi.interactions.${n}.`;
+        set(p + 'id', safeId(d.id));
+        set(p + 'type', d.type);
+        if (d.response != null) set(p + 'student_response', clip(d.response, 255));
+        if (d.pattern != null) set(p + 'correct_responses.0.pattern', clip(d.pattern, 255));
+        set(p + 'result', d.result === 'incorrect' ? 'wrong' : d.result);
+        if (d.weighting != null) set(p + 'weighting', d.weighting);
+        if (d.latency != null) set(p + 'latency', time12(d.latency));
+      },
+      objective(n, o) {
+        const p = `cmi.objectives.${n}.`;
+        set(p + 'id', safeId(o.id));
+        if (o.pct != null) { set(p + 'score.min', 0); set(p + 'score.max', 100); set(p + 'score.raw', o.pct); }
+        set(p + 'status', o.pct == null ? 'incomplete' : o.passed ? 'passed' : 'failed');
+      },
+      commit() { api.LMSCommit(''); },
+      finish() { api.LMSFinish(''); }
+    };
+  }
+
+  // ---------- SCORM 2004 ----------
+  function scorm2004(api) {
+    const set = (k, v) => api.SetValue(k, String(v));
+    return {
+      standard: '2004', suspendLimit: 60000,
+      async start() {
+        if (String(api.Initialize('')) !== 'true') return null;
+        const g = k => api.GetValue(k);
+        return { location: g('cmi.location'), suspend: g('cmi.suspend_data'), name: g('cmi.learner_name') };
+      },
+      save(loc, data) { set('cmi.location', loc); set('cmi.suspend_data', clip(data, 64000)); },
+      result(r) {
+        if (r.pct != null) {
+          set('cmi.score.min', 0); set('cmi.score.max', 100); set('cmi.score.raw', r.pct);
+          set('cmi.score.scaled', (r.pct / 100).toFixed(2));
+        }
+        set('cmi.completion_status', r.completed ? 'completed' : 'incomplete');
+        set('cmi.success_status', r.useSuccess && r.testDone ? (r.passed ? 'passed' : 'failed') : 'unknown');
+        set('cmi.exit', r.completed ? 'normal' : 'suspend');
+      },
+      time(sec) { set('cmi.session_time', iso(sec)); },
+      interaction(n, d) {
+        const p = `cmi.interactions.${n}.`;
+        set(p + 'id', safeId(d.id));
+        set(p + 'type', d.type);
+        if (d.response != null) set(p + 'learner_response', clip(d.response, 4000));
+        if (d.pattern != null) set(p + 'correct_responses.0.pattern', clip(d.pattern, 4000));
+        set(p + 'result', d.result === 'wrong' ? 'incorrect' : d.result);
+        if (d.weighting != null) set(p + 'weighting', d.weighting);
+        if (d.latency != null) set(p + 'latency', iso(d.latency));
+      },
+      objective(n, o) {
+        const p = `cmi.objectives.${n}.`;
+        set(p + 'id', safeId(o.id));
+        if (o.pct != null) set(p + 'score.scaled', (o.pct / 100).toFixed(2));
+        set(p + 'success_status', o.pct == null ? 'unknown' : o.passed ? 'passed' : 'failed');
+        set(p + 'completion_status', o.pct == null ? 'incomplete' : 'completed');
+      },
+      commit() { api.Commit(''); },
+      finish() { api.Terminate(''); }
+    };
+  }
+
+  // ---------- cmi5 (xAPI) ----------
+  function cmi5(params) {
+    const endpoint = params.get('endpoint').replace(/\/?$/, '/');
+    const actor = JSON.parse(params.get('actor'));
+    const registration = params.get('registration');
+    const activityId = params.get('activityId');
+    const started = Date.now();
+    let auth = '', launch = {}, saveTimer = null;
+    const sent = {}; // completed, passed, failed:<pct>, answered:<id>
+    const uuid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+    const headers = () => ({ Authorization: auth, 'X-Experience-API-Version': '1.0.3', 'Content-Type': 'application/json' });
+    const stateUrl = id => `${endpoint}activities/state?stateId=${encodeURIComponent(id)}&activityId=${encodeURIComponent(activityId)}&agent=${encodeURIComponent(JSON.stringify(actor))}&registration=${encodeURIComponent(registration)}`;
+    const duration = () => iso((Date.now() - started) / 1000);
+    const normalMode = () => !launch.launchMode || launch.launchMode === 'Normal';
+
+    function send(verb, display, opt) {
+      opt = opt || {};
+      const context = JSON.parse(JSON.stringify(launch.contextTemplate || {}));
+      context.registration = registration;
+      if (opt.cmi5 !== false) {
+        context.contextActivities = context.contextActivities || {};
+        const cat = (context.contextActivities.category || []).slice();
+        cat.push({ id: 'https://w3id.org/xapi/cmi5/context/categories/cmi5' });
+        if (opt.moveOn) cat.push({ id: 'https://w3id.org/xapi/cmi5/context/categories/moveon' });
+        context.contextActivities.category = cat;
+      }
+      const st = {
+        id: uuid(), actor, timestamp: new Date().toISOString(), context,
+        verb: { id: 'http://adlnet.gov/expapi/verbs/' + verb, display: { 'de-DE': display } },
+        object: opt.object || { id: activityId, objectType: 'Activity' }
+      };
+      if (opt.result) st.result = opt.result;
+      return fetch(endpoint + 'statements', { method: 'POST', headers: headers(), body: JSON.stringify(st), keepalive: true }).catch(() => { });
+    }
+
+    return {
+      standard: 'cmi5', suspendLimit: 1e7,
+      async start() {
+        try {
+          const tok = await (await fetch(params.get('fetch'), { method: 'POST' })).json();
+          auth = 'Basic ' + tok['auth-token'];
+          const ld = await fetch(stateUrl('LMS.LaunchData'), { headers: headers() });
+          if (ld.ok) launch = await ld.json();
+          let saved = {};
+          const s = await fetch(stateUrl('kurs-stand'), { headers: headers() });
+          if (s.ok) saved = await s.json();
+          await send('initialized', 'initialisiert');
+          return { location: saved.location, suspend: saved.suspend, name: actor.name || '', masteryScore: launch.masteryScore };
+        } catch (e) { return null; }
+      },
+      save(loc, data) {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => fetch(stateUrl('kurs-stand'), { method: 'PUT', headers: headers(), body: JSON.stringify({ location: loc, suspend: data }), keepalive: true }).catch(() => { }), 800);
+      },
+      result(r) {
+        if (!normalMode()) return;
+        if (r.pagesDone && !sent.completed) {
+          sent.completed = true;
+          send('completed', 'abgeschlossen', { moveOn: true, result: { completion: true, duration: duration() } });
+        }
+        if (r.hasTest && r.testDone && !sent.passed) {
+          const result = { success: r.passed, score: { scaled: +(r.pct / 100).toFixed(2), raw: r.pct, min: 0, max: 100 }, duration: duration() };
+          if (r.passed) { sent.passed = true; send('passed', 'bestanden', { moveOn: true, result }); }
+          else if (sent.failed !== r.pct) { sent.failed = r.pct; send('failed', 'nicht bestanden', { moveOn: true, result }); }
+        }
+      },
+      time() { /* die Dauer steckt in den Statements */ },
+      interaction(n, d) {
+        const key = d.id + '|' + d.response;
+        if (sent['a:' + d.id] === key) return;
+        sent['a:' + d.id] = key;
+        send('answered', 'beantwortet', {
+          cmi5: false,
+          object: {
+            id: activityId + '/frage/' + encodeURIComponent(d.id), objectType: 'Activity',
+            definition: { type: 'http://adlnet.gov/expapi/activities/cmi.interaction', interactionType: d.type, correctResponsesPattern: d.pattern != null ? [String(d.pattern)] : undefined }
+          },
+          result: { response: String(d.response == null ? '' : d.response), success: d.result === 'neutral' ? undefined : d.result === 'correct' }
+        });
+      },
+      objective() { /* in cmi5 nicht vorgesehen */ },
+      commit() { },
+      finish() { send('terminated', 'beendet', { result: { duration: duration() } }); }
+    };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('endpoint') && params.get('fetch') && params.get('actor')) return cmi5(params);
+  const a2004 = findApi('API_1484_11');
+  const a12 = findApi('API');
+  if (opts.standard === '1.2' && a12) return scorm12(a12);
+  if (opts.standard === '2004' && a2004) return scorm2004(a2004);
+  if (a2004) return scorm2004(a2004);
+  if (a12) return scorm12(a12);
+  return null;
+}
+
+function kursZeit(pages) {
+  const SKIP = new Set(['id', 'libs', 'goalLinks', 'pick', 'shelfCols', 'short', 'bubble', 'good', 'deepLook', 'einflug', 'part', 'instant', 'noDesk', 'newMails', 'clock', 'sounds', 'mascotPose', 'shape', 'numbering', 'max', 'mapLook', 'mapLabels', 'labelSide', 'type', 'kind', 'code', 'scope', 'clue', 'hintAfter', 'impulses', 'transferCheck', 'sharesSource', 'factSource', 'height', 'mythOk', 'size', 'slot', 'arrange', 'figures', 'pattern', 'fillChoice', 'fillDistractors', 'tolerance', 'dontKnow', 'objectives', 'src', 'url', 'video', 'videoUrl', 'videoCredit', 'css', 'blockCss', 'customHtml', 'narration', 'narrationVtt', 'captions', 'captionsText', 'poster',
+    'design', 'showIf', 'objective', 'castId', 'char', 'look', 'pose', 'shot', 'audio', 'mechanic', 'spiel', 'style', 'layout', 'cardStyle', 'icon', 'decor',
+    'focus', 'treat', 'frame', 'tone', 'credit', 'alt', 'person', 'blockName', 'lang', 'chapter', 'ref', 'target', 'after', 'orient', 'mosaic', 'cat', 'color', 'side', 'mode', 'source', 'image', 'bgImage', 'backImage', 'poses', 'film', 'stage', 'assets', 'consequence', 'help', 'stages', 'mood',
+    // Verweise und Schalter mit Textwert (Ids, Namen von Symbolen und Varianten): kein Lesetext
+    'compareRef', 'planRef', 'page', 'skipTo', 'mapOrder', 'connect', 'marker', 'namePos', 'calloutIcon', 'icons', 'overlay', 'bgMotion', 'cover', 'anrede',
+    // Rückmeldungen und Begründungen liest man nur zur eigenen Wahl, Hinweise nur bei Bedarf: sie zählen nicht zur Lesezeit (die Zeit je Frage deckt sie ab)
+    'feedback', 'feedbackCorrect', 'feedbackWrong', 'feedbackTrue', 'feedbackFalse', 'why', 'reply', 'hint', 'successText', 'placeholder']);
+  const plain = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = o => {
+    if (Array.isArray(o)) return o.reduce((n, x) => n + words(x), 0);
+    if (o && typeof o === 'object') return Object.keys(o).reduce((n, k) => n + (SKIP.has(k) ? 0 : words(o[k])), 0);
+    if (typeof o === 'string' && !/^data:|^assets\//.test(o)) { const t = plain(o); return t ? t.split(' ').length : 0; }
+    return 0;
+  };
+  const len = a => (Array.isArray(a) ? a.length : 0);
+  // `after` und `source` stehen in SKIP, weil sie bei Punkten im Bild (Ort-Id) und Videos (file|url) technisch sind;
+  // bei diesen Bausteinen sind es echte Texte und zählen nach
+  const extraWords = b => {
+    const plainWords = v => (typeof v === 'string' ? words(v) : 0);
+    if (['markieren', 'kartenstapel', 'formular'].includes(b.type)) return plainWords(b.after);
+    if (['bignumber', 'linkcard'].includes(b.type)) return plainWords(b.source);
+    return 0;
+  };
+  // Zeit je Baustein über das Lesen hinaus (Sekunden)
+  const extra = b => {
+    const n = k => len(b[k]);
+    switch (b.type) {
+      case 'quiz': return 45;
+      case 'pool': return Math.min(Number(b.draw) || 0, n('questions')) * 45;
+      case 'pretest': return n('questions') * 40;
+      case 'review': return (Number(b.draw) || 0) * 40;
+      case 'glossquiz': return (Number(b.draw) || 0) * (b.mode === 'memory' ? 25 : 15);
+      case 'reflection': return 120; case 'actionplan': return 180; case 'survey': return 60; case 'branch': return 40; case 'predict': return 45;
+      case 'selfcheck': case 'dialog': return 60 + (b.decision ? 40 : 0);
+      case 'vscene': return n('steps') * 30 + (b.decision ? 40 : 0);
+      case 'simulation': return n('steps') * 25 * Math.max(1, len(b.modes || ['zeigen', 'ueben', 'pruefen']) - 0.5);
+      case 'triage': return n('items') * 18; case 'levers': return 30 + n('sliders') * 15; case 'chat': return n('turns') * 30; case 'fragen': return 20 + n('items') * 5; case 'kurzfrage': return 10 + (b.askMore ? 15 : 0); case 'ueberdich': return 15 + (b.goalQ ? 30 : 0) + (b.caseQ ? 45 : 0);
+      case 'matrix': return 30 + n('items') * 15; case 'promptbuild': return n('steps') * 20; case 'findtext': return 30 + n('spots') * 15; case 'markieren': return 10 + n('items') * 6;
+      case 'merkkarte': return 15; case 'mappe': return 20; case 'videopaar': return 15 + 30 * n('items'); case 'bildschirm': return 60; case 'kartenstapel': return 90; case 'formular': return 10 + n('rows') * 10;
+      case 'mission': return 60;
+      case 'schloss': return 30;
+      case 'wahlbrett': return 15 + 30 * (b.items || []).filter(x => x && !x.target).length;
+      case 'interaktion': return (Number(b.minutes) || 2) * 60;
+      case 'game': return Math.max(60, 180 - words(b.level) / 180 * 60);
+      case 'casebank': { const c = n('cases') || 1, g = Math.min(c, Number(b.goal) || c); return g * 150 - words(b) * (1 - g / c) / 180 * 60; }
+      case 'sequence': return 20 * n('steps'); case 'process': return 15 * n('steps');
+      case 'cards': return 8 * (b.items || []).filter(x => x && x.reveal).length;
+      case 'accordion': case 'tabs': case 'flipcards': return 20 * n('items');
+      case 'hotspots': return 15 * n('points'); case 'aufdecken': return 8 * n('stops'); case 'sortcats': return 12 * n('items'); case 'checklist': return 30; case 'takeaways': return b.recall && b.look !== 'zeilen' ? 10 * n('items') : 0;
+      case 'ivideo': return b.src || b.url ? 45 : 0; case 'media': return b.media && (b.media.kind === 'video' || b.media.kind === 'embed' || b.media.url) ? 45 : 0;
+      case 'linkcard': return 10; case 'table': return 10;
+      case 'ringe': return 8 * n('items'); case 'pyramide': return 10 + 8 * n('levels'); case 'venn': return 10 + 8 * n('circles');
+      case 'team': return ['aufklappen', 'karussell', 'stimme'].includes(b.look) ? 10 * n('members') : 0;
+      case 'vstatements': return 20 * n('items'); case 'compare': return 10 * n('steps'); case 'layers': return 8 * n('layers'); case 'album': return 10; case 'dial': return 5 * n('items');
+      case 'bignumber': return b.ask && b.ask.question ? 15 : 0;
+      default: return 0;
+    }
+  };
+  const chapters = [];
+  let graded = 0, practice = 0;
+  (pages || []).forEach((pg, i) => {
+    if (!pg || pg.result || pg.extra) return;
+    const name = pg.chapter || '';
+    let ch = chapters.find(c => c.name === name);
+    if (!ch) { ch = { name, pages: [], words: 0, seconds: 0, questions: 0 }; chapters.push(ch); }
+    ch.pages.push(i);
+    ch.seconds += 10;
+    (pg.blocks || []).forEach(b => {
+      ch.words += (words(b) + extraWords(b)) * (b.type === 'text' && b.deep ? 0.5 : 1); // Zum Vertiefen liest nicht jede und jeder
+      ch.seconds += extra(b);
+      if (b.type === 'quiz') { ch.questions++; if (b.graded !== false) graded++; else practice++; }
+      if (b.type === 'pool') { const k = Math.min(Number(b.draw) || 0, len(b.questions)); ch.questions += k; if (b.graded !== false) graded += k; else practice += k; }
+      if (b.type === 'pretest') { ch.questions += len(b.questions); practice += len(b.questions); }
+      if (b.type === 'review') { ch.questions += Number(b.draw) || 0; practice += Number(b.draw) || 0; }
+      if (b.type === 'glossquiz' && b.mode === 'match') practice += 1;
+      if (['triage', 'levers', 'chat', 'matrix', 'promptbuild', 'findtext'].includes(b.type)) practice += 1;
+      if (['simulation', 'mission', 'game', 'interaktion'].includes(b.type) && b.graded) graded++;
+      if (b.type === 'interaktion' && !b.graded) practice += 1;
+    });
+  });
+  chapters.forEach(c => { c.minutes = Math.max(1, Math.round((c.words / 180 * 60 + c.seconds) / 60)); });
+  const words_ = chapters.reduce((n, c) => n + c.words, 0);
+  return { words: words_, minutes: chapters.reduce((n, c) => n + c.minutes, 0), chapters, graded, practice };
+}
+
+function kursPlayer(course, opts) {
+  opts = opts || {};
+  const root = document.getElementById('app');
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const set = course.settings || {};
+  const theme = course.theme || {};
+  let passScore = Number(course.passScore) || 0;
+
+  // ---------- Sprachen ----------
+  // Weitere Sprachen liegen als Übersetzungen (Pfad, Original, Text) in course.languages.
+  // Beim Umschalten werden die Texte im Kurs ersetzt; das Original bleibt gemerkt.
+  const UI_DE = {
+    inhalt: 'Inhalt', menue: 'Menü', duBistDran: 'Du bist dran', start: 'Start', ende: 'Ende', gehoertAn: 'gehört an Stelle', mlStatus: 'Abschlussstatus', mlInBearbeitung: 'in Bearbeitung', mlAbgeschlossen: 'abgeschlossen', mlMinuten: 'Minuten geschätzte Lernzeit', mlFortschritt: 'Fortschritt', mlErgebnis: 'Ergebnis', mlWeitere: 'Weitere Informationen', mlMedien: 'Mediennachweis', letzterVersuch: 'Letzter Versuch', besserAls: 'besser als beim letzten Mal', gleichWie: 'wie beim letzten Mal', unterLetztem: 'unter dem letzten Versuch', inFolge: 'richtig in Folge', runde: 'Runde', naechsteRunde: 'Nächste Runde', alleRunden: 'Alle Runden geschafft', vollbild: 'Vollbild', vollbildAus: 'Vollbild beenden', vollbildAnsehen: 'Im Vollbild ansehen', klangAn: 'Klänge an', klangAus: 'Klänge aus', lektionVon: 'Lektion {n} von {m}', thema: 'Thema', dieseFrage: 'die nächste Frage', wieGutVorher: 'Wie gut kennst du dich damit aus? Schätz dich ein, bevor du die Frage siehst.', kenne0: 'Kaum', kenne1: 'Etwas', kenne2: 'Gut', vorherUeber: 'Du hast gesagt, du kennst dich gut aus, aber die Antwort stimmt nicht. Hier hast du dich überschätzt: Genau das lohnt einen zweiten Blick.', vorherUnter: 'Du warst unsicher und lagst trotzdem richtig. Du weißt mehr, als du denkst.', selbsteinschaetzung: 'Deine Selbsteinschätzung', eingeschaetztPassend: 'Bei {n} von {m} Übungsfragen passte deine Einschätzung vorher.', ueberschaetzt: 'Überschätzt', unterschaetzt: 'Unterschätzt', iaFehlt: 'Hier erscheint die eigene Interaktion, sobald eine Datei hinterlegt ist.', iaTitel: 'Interaktive Übung', iaErledigt: 'Übung abgeschlossen', leisteZu: 'Leiste einklappen', leisteAuf: 'Leiste ausklappen', folgeLabel: 'Was daraus wird', nochmalEntscheiden: 'Nochmal entscheiden', fragHilfe: 'Frag {n}', hilfe: 'Hilfe holen', arbeitshilfe: 'Arbeitshilfe öffnen', triBewertung: 'Bewertung durch den Kunden', verlauf: 'Bisheriger Gesprächsverlauf', entscheidung: 'Wie reagierst du?', spielGeschafft: 'Geschafft. Du kannst das Spiel gern noch einmal spielen.', erzaehler: 'Erzähler',
+    cbBereiche: 'Bereiche', cbAlle: 'Alle Fälle', cbFall: 'Fall', cbBesprochen: 'Besprochen', cbOffen: 'Noch offen', cbOeffnen: 'Öffnen',
+    cbStand: '{n} von {z} nötigen Fällen besprochen · {m} stehen zur Auswahl', cbMl: 'Musterlösung', cbAnekdote: 'Beispiel aus der Praxis',
+    cbUeberlegungen: 'Unsere Überlegungen', cbNotieren: 'Diskutieren und notieren', cbNotiert: 'notiert', cbVergleichen: 'Antworten vergleichen',
+    cbMc: 'Auswahl vorgegeben', cbGewaehlt: 'gewählt', cbNotizHinweis: 'Gedanken, Argumente und offene Fragen aus der Gruppe …',
+    cbNotizGespeichert: 'Wird gespeichert und erscheint in der Sammelansicht der Trainerin oder des Trainers.', cbAuswahl: 'Eine Antwort auswählen',
+    cbPasst: 'Passt.', cbNichtGanz: 'Noch nicht ganz.', cbReset: 'Auswahl zurücksetzen', cbEinordnung: 'Fachliche Einordnung und Merksatz',
+    cbAngesehen: 'angesehen', cbMerksatz: 'Merksatz', cbZurueck: 'Zurück zur Übersicht', cbSzenario: 'Ausgangslage', cbLeitfrage: 'Leitfrage',
+    cbFertig: 'Fertig', cbNaechster: 'Nächster offener Fall', cbImKurs: 'Im Kurs besprochen', cbNichtGewaehlt: 'Nicht ausgewählt',
+    cbPassend: 'Passende Antwort', cbGewaehltImKurs: 'Im Kurs gewählt', cbNotizAusKurs: 'Notiz aus dem Kurs', cbDrucken: 'Drucken oder als PDF speichern',
+    cbFallarbeit: 'Fallarbeit', cbZiel: 'Bitte besprich zuerst mindestens {z} Fälle.', schliessen: 'Schließen',
+    trainer: 'Trainer', trTitel: 'Trainer-Modus', trFreieNotizen: 'Freie Notizen zur Diskussion', trPlatzhalter: 'Notizen aus der Runde … (bleiben in diesem Browser)',
+    trKopieren: 'Alles kopieren', trSpeichern: 'Als Textdatei speichern', trKopiert: 'In die Zwischenablage kopiert.', trGespeichert: 'Textdatei gespeichert.',
+    trAusKurs: 'Aus dem Kurs übernommen', trLeer: 'Sobald die Gruppe einen Fall bespricht oder eine Reflexion speichert, erscheint es hier.',
+    trWerkzeuge: 'Werkzeuge', trLoesen: 'Lösungen zeigen', trLoesenHinweis: 'Setzt alle Fallsammlungen und Fragen auf die richtige Antwort, zum Vorführen oder für die Abnahme.',
+    trLoesenFrage: 'Alle Fallsammlungen und Fragen auf die richtige Antwort setzen? Bisherige Antworten werden überschrieben.',
+    videoFolgt: 'Video folgt', sprechtext: 'Sprechtext', videoFolgtHinweis: 'Platzhalter: Sobald die Videodatei hinterlegt ist, erscheint hier das Video.',
+    werteStand: 'So steht es jetzt', simZeigen: 'Ansehen', simUeben: 'Selbst üben', simPruefen: 'Prüfen', simArt: 'Art der Übung', simSchritt: 'Schritt', simZiel: 'Hier klicken',
+    simDaneben: 'Nicht ganz. Schau noch einmal genau hin.', simPruefDaneben: 'Das war nicht die richtige Stelle.', simGezeigt: 'Die richtige Stelle ist jetzt markiert.',
+    simStelle: 'Stelle zeigen', simFertig: 'Fertig', simNochmal: 'Noch einmal', simKeinBild: 'Für diesen Schritt fehlt der Screenshot.',
+    simGeschafft: 'Geschafft: Du hast alle Schritte selbst ausgeführt.', simGesehen: 'Das war der ganze Ablauf. Jetzt selbst üben?',
+    simErgebnis: 'Schritten beim ersten Versuch richtig.', simNochmalUeben: 'Diese Schritte lohnen sich noch einmal:',
+    tour: 'So geht’s', tourMenuTitel: 'Menü', tourMenu: 'Hier findest du Inhaltsverzeichnis, Suche und Glossar.', tourWeiterTitel: 'Weiter', tourWeiter: 'Blättert zur nächsten Seite. Übungen auf der Seite bitte zuerst erledigen.', tourFortschrittTitel: 'Dein Fortschritt', tourFortschritt: 'Der Balken zeigt, wie weit du bist. Dein Stand bleibt gespeichert.', tourKiTitel: 'KI-Kennzeichen', tourKi: 'Welche Inhalte mit KI entstanden sind, steht hier.', tourZaehlerTitel: 'Fragen', tourZaehler: 'Beantwortete Fragen dieser Seite.', tourFertig: 'Los geht’s',
+    ueberblick: 'Überblick', ovDauer: 'Dauer: {n} Minuten', ovDauer1: 'Dauer: 1 Minute', ovTour: 'Hilfe-Tour', ovLese: 'Lesefortschritt', ovLern: 'Lernerfolg', ovWeiterlesen: 'Weiterlesen', ovFragen: 'Fragen beantworten', ovInfo: 'Erklärung', ovLeseInfo: 'Anteil der Seiten, die du schon geöffnet hast.', ovLernInfo: 'Anteil der Punkte, die du in den bewerteten Fragen schon erreicht hast.',
+    uebersicht: 'Übersicht', zurueck: 'Zurück', weiter: 'Weiter', alsNaechstes: 'Als Nächstes', zurVorigen: 'Zur vorigen Seite', zumVertiefen: 'Zum Vertiefen', zurNaechsten: 'Zur nächsten Seite', seitenwechsel: 'Seitenwechsel', fragenBeantwortet: '{n} von {m} Fragen beantwortet',
+    promptVorlage: 'Prompt zum Mitnehmen', promptKopieren: 'Prompt kopieren', promptKopiert: 'In die Zwischenablage kopiert.', promptMarkieren: 'Kopieren ging nicht. Markiere den Text und kopiere ihn von Hand.', nahtStart: 'Starte jetzt ins Training.',
+    wartePunkte: 'Sieh dir zuerst alle Punkte im Bild an. Danach geht es weiter.',
+    warteKarten: 'Entscheide zuerst alle Karten. Danach geht es weiter.',
+    warteBausteine: 'Setze zuerst alle Bausteine ein. Danach geht es weiter.',
+    warteStellen: 'Finde zuerst alle Stellen im Text. Danach geht es weiter.',
+    warteKartenDrehen: 'Dreh zuerst alle Karten um. Danach geht es weiter.',
+    warteFrage: 'Beantworte zuerst die Frage. Danach geht es weiter.',
+    warteEntscheidung: 'Triff zuerst eine Entscheidung. Danach geht es weiter.',
+    warteSelbstcheck: 'Beantworte zuerst den Selbstcheck. Danach geht es weiter.',
+    scNicht: 'Nicht sicher', scEtwas: 'Etwas sicher', scSicher: 'Sicher', scOffen: 'noch nicht eingestellt',
+    seitenImKapitel: 'Seiten in diesem Kapitel', aufdecken: 'Aufdecken', ortGesperrt: 'noch gesperrt', ortErkundet: 'erkundet', ortNaechster: 'als Nächstes', ortGesperrtHinweis: 'Dieser Ort öffnet sich, sobald du den vorherigen erkundet hast.', orteErkundet: 'Orten erkundet', zurueckZurKarte: 'Zurück zur Karte', platzN: '{n}. Platz', ja: 'Ja', nein: 'Nein', weissNicht: 'Weiß ich nicht', mehrLesen: 'Mehr lesen', danke: 'Danke für deine Antwort.', punkteHinweis: 'Klick auf die Punkte in den Bildern.', wenigerLesen: 'Weniger anzeigen', weissNichtFb: 'Gut, dass du nicht rätst. Hier ist die Antwort mit Erklärung.', deineZahl: 'Deine Zahl', bis: 'bis', linieHinweis: 'Klick links einen Begriff und rechts, was dazu passt. Ein zweiter Klick löst die Linie.', linieWaehlen: 'Begriff wählen, dann rechts die Zuordnung', auswerten: 'Auswerten', pinNummer: 'Nummer {n}', pinGesetzt: 'gesetzt', pinStelle: 'Stelle {n}', pinRichtig: 'Richtige Nummer an dieser Stelle', pinHinweis: 'Zieh jede Nummer auf die passende Stelle im Bild. Ohne Maus: Nummer wählen, dann die Stelle.', nachLinks: 'nach links', nachRechts: 'nach rechts', scAbsenden: 'Absenden', scAendern: 'Neu einschätzen', deinProfil: 'Dein Profil',
+    warteSchaetzung: 'Gib zuerst deine Schätzung ab. Danach geht es weiter.',
+    warteUebung: 'Bearbeite zuerst die Übung auf dieser Seite. Danach geht es weiter.',
+    naechstesKapitel: 'Nächstes Kapitel', lernzeit: 'Lernzeit', minuten: 'Minuten', kapitel: 'Kapitel', starten: 'Starten',
+    fortsetzen: 'Fortsetzen', nochmal: 'Noch einmal ansehen', erledigt: 'Erledigt', offen: 'Offen', inArbeit: 'In Arbeit', gesperrt: 'Noch gesperrt',
+    ftFertig: 'Alle gefunden', ftGefunden: 'Nicht belegt', ftBelegt: 'Das steht so in den Unterlagen', ftLos: 'Lies genau',
+    ftHinweis: 'Tippe die Stellen an, die über das Belegte hinausgehen.', ftGefundenZahl: 'gefunden',
+    pbStart: 'Ausgangspunkt', pbEntwurf: 'Erster Entwurf der KI', pbGuete: 'Güte der Anfrage', pbLeer: 'Tippe einen Baustein an.',
+    triJa: 'Kommt mit', triNein: 'Bleibt draußen', triFrage: 'Was machst du damit?', triGewaehlt: 'Ausgewählt',
+    triPasst: 'Passt', triSchauNochmal: 'Schau noch einmal', triFertig: 'Alle durch', triRichtig: 'richtig',
+    triRichtigWaere: 'Richtig wäre:', triNachlesen: 'Die richtige Seite steht jetzt an den Karten.',
+    triLeer: 'Noch keine Karten.', nochEinmal: 'Noch einmal', von: 'von', karteVon: 'Karte {n} von {m}',
+    clStand: '{n} von {z} erledigt', clAlle: 'Alles erledigt: {z} von {z}', nochmalVersuchen: 'Versuch es noch einmal.',
+    szene: 'Szene', abspielen: 'Abspielen', pause: 'Pause', naechsteZeile: 'Nächste Zeile', vollbild: 'Vollbild', ende: 'Ende', nochmalAnsehen: 'Noch einmal ansehen',
+    szeneStarten: 'Szene starten', vorlesen: 'Vorlesen', vorlesenStopp: 'Vorlesen anhalten', tonAus: 'Ton aus', tonAn: 'Ton an', weiterAbspielen: 'Weiter abspielen', allesAnzeigen: 'Alles anzeigen', szeneNochmal: 'Szene noch einmal',
+    antwortPruefen: 'Antwort prüfen', anhoeren: 'Anhören', sprache: 'Sprache', zumInhalt: 'Zum Inhalt springen',
+    untertitel: 'Untertitel', toneinstellungen: 'Ton einstellen', lautstaerke: 'Lautstärke', tempo: 'Tempo',
+    postfachOrdner: 'Posteingang|Markiert|Wichtig|Spam|Entwürfe', postfachAnMich: 'an mich', postfachMail: 'E-Mail', postfachEtiketten: 'Warnzeichen', postfachStelle: 'Stelle {n}', postfachHinweis: 'Mit dieser Mail stimmt etwas nicht. Findest du die Warnzeichen? Zieh jedes Etikett auf die Stelle der Mail, an der du es erkennst.', postfachStart: 'Hey, in deinem Postfach warten ein paar neue Mails. Schauen wir sie uns an?', postfachApps: 'Abzeichen|Notizen', postfachRichtig: 'Gut erkannt.', postfachDaneben: 'Das passt hier noch nicht. Schau dir die Stelle noch einmal an.', postfachFertig: 'Alle Warnzeichen gefunden. Bei der nächsten Mail siehst du sie schneller.',
+    zuordnenHinweis: 'Zieh die Kärtchen auf den passenden Begriff. Mit der Tastatur: Kärtchen anwählen und die Nummer des Begriffs drücken.',
+    begriffeLernen: 'Begriffe lernen', keineBegriffe: 'Noch keine Begriffe hinterlegt.', alleRichtig: 'Alle Begriffe richtig zugeordnet.', nochNichtAlle: 'Noch nicht alle richtig. Die richtigen Zuordnungen stehen jetzt daneben.',
+    memoryHinweis: 'Deck zwei Karten auf. Gehört die Bedeutung zum Begriff, bleiben beide offen.', karteVerdeckt: 'Verdeckte Karte', paareGefunden: 'Paaren gefunden', zuege: 'Züge',
+    memoryFertig: 'Alle Paare gefunden.', nochmalSpielen: 'Noch einmal',
+    willkommenZurueck: 'Willkommen zurück!', zuletztAuf: 'Du warst zuletzt auf Seite', dortWeitermachen: 'Dort weitermachen', vonVorn: 'Von vorn beginnen',
+    warumFrage: 'Warum? Schreib deine Begründung in einem Satz, bevor du auflöst.', warumPlatz: 'Weil …', warumFehlt: 'Bitte begründe zuerst kurz deine Wahl.',
+    deineBegruendung: 'Deine Begründung', musterBegruendung: 'Begründung im Kurs', begruendungSpeichern: 'Begründung speichern und auflösen',
+    pyrHinweis: 'Klick auf eine Stufe, dann siehst du hier, was sie bedeutet.', vennHinweis: 'Klick auf einen Kreis, dann siehst du hier, was er bedeutet.',
+    aufdecken: 'Aufdecken', aufdeckenHinweis: 'Überleg zuerst, was hinter jeder Aussage steckt. Dann deck sie auf.', aufgedeckt: '{n} von {z} aufgedeckt', karteDahinter: 'Und was steckt dahinter?', kapitelVon: 'Kapitel {n} von {m}', videoVon: 'Video von {name} abspielen', person: 'der Person',
+    deinVorsatz: 'Dein Vorsatz', kalenderKnopf: 'Wiederholung in den Kalender', kalenderHinweis: 'Drei kurze Termine: morgen abrufen, in einer Woche anwenden, in einem Monat weitergeben. Fünf Minuten genügen.',
+    impulsAbruf: 'Abrufen: Beantworte die Fragen aus dem Gedächtnis, erst danach siehst du im Kurs nach.', impulsAnwenden: 'Anwenden: Wo hast du es diese Woche genutzt? Was hat dich gebremst? Nimm dir den kleinsten nächsten Schritt vor.', impulsTeilen: 'Weitergeben: Erzähl einer Kollegin oder einem Kollegen, was du ausprobiert hast und was dabei herauskam.',
+    kalenderHinweisN: '{n} kurze Termine nach {t} Tagen. Fünf Minuten genügen.',
+    anlassFrage: 'Wann wendest du das zum ersten Mal an?', anlassHinweis: 'Ein echter Termin, ein Gespräch, eine Aufgabe. Am Tag davor erinnert dich der Kalender mit deinem Spickzettel.', anlassTitel: 'Morgen: {k} anwenden', anlassText: 'Dein Spickzettel für morgen:', anlassAm: 'Dein Anlass: {d}',
+    fuehrungKnopf: 'Vorsatz an meine Führungskraft', fuehrungBetreff: 'Mein Vorsatz aus „{k}“', fuehrungHallo: 'Hallo,', fuehrungText: 'ich habe den Kurs „{k}“ abgeschlossen. Das nehme ich mir vor:', fuehrungAnlass: 'Zum ersten Mal anwenden will ich es am {d}.', fuehrungBitte: 'Magst du in zwei Wochen zehn Minuten mit mir darüber sprechen? Drei Fragen für das Gespräch:\n1. Was hast du ausprobiert, und was kam dabei heraus?\n2. Was hat dich gebremst?\n3. Was brauchst du von mir, damit es weitergeht?',
+    checkTitel: 'Hast du deinen Vorsatz umgesetzt?', checkJa: 'Ja', checkTeils: 'Teilweise', checkNein: 'Noch nicht', checkWas: 'Was hat geholfen, was hat gebremst?', checkSpeichern: 'Festhalten', checkDanke: 'Danke. Dein Zertifikat zeigt jetzt, wann du es angewendet hast.', checkNoch: 'Noch nicht ist auch eine Antwort. Was wäre der kleinste nächste Schritt, und wann machst du ihn?', checkWarte: 'In {n} Tagen fragt dich der Kurs hier, ob du deinen Vorsatz umgesetzt hast. Dann steht es auf deinem Zertifikat.', angewendetAm: 'Angewendet am {d}',
+    warteVideo2: 'Bitte sieh dir zuerst das Video bis zum Ende an.', videoBisEnde: 'Bitte sieh dir das Video bis zum Ende an.', sicherFalsch: 'Du warst dir sicher, aber die Antwort stimmt nicht. Genau hier lohnt sich ein zweiter Blick.', geratenRichtig: 'Richtig geraten. Präg dir die Lösung gut ein, damit sie beim nächsten Mal sitzt.',
+    weisstDuNoch: 'Weißt du es noch?', nochKeineEntscheidung: 'Du hast noch keine Entscheidungen getroffen.', umfrageDanke: 'Danke für deine Rückmeldung!', umfrageFrage: 'Wie hat dir der Kurs gefallen?', umfrageKommentar: 'Was möchtest du uns noch mitgeben? (optional)',
+    zertAb: 'Das Zertifikat gibt es ab {p} % im Test. Du hast {s} % erreicht.', zertName: 'Dein Name für das Zertifikat', fragenZurueck: 'Über das Inhaltsverzeichnis kommst du zu den Fragen zurück.', kalibFalsch: 'Bei {n} warst du dir sicher, lagst aber falsch. Diese Themen lohnen einen zweiten Blick.', wieSicher: 'Bitte schätze kurz ein, wie sicher du bist.',
+    alleRichtigen: 'Wähle alle Antworten, die stimmen', tabelle: 'Tabelle', denkpauseStart: 'Denkpause starten ({m})', denkpauseEnde: 'Zeit ist um. Schreib jetzt auf, was dir eingefallen ist.', gedankenPh: 'Deine Gedanken …', deineAntwort: 'Deine Antwort', loesung: 'Lösung', antwortLoesung: 'Antwort und Lösung', tippLabel: 'Tipp', nichtBeantwortet: 'nicht beantwortet', stellenRichtig: '{r} von {n} Stellen richtig', stelleImBild: 'die markierte Stelle im Bild',
+    kalenderTitel: 'Wiederholung: {k}', kalenderText: 'Fünf Minuten: Was war der Kern? Was habe ich seitdem davon umgesetzt?', kalenderFragen: 'Drei Fragen zum Abrufen, erst antworten, dann im Kurs nachsehen:',
+    kurzWiederholen: 'Kurz wiederholen', kurzWiederholenHinweis: 'Ein paar Fragen aus dem, was du schon gelernt hast. Sie zählen nicht zur Bewertung. Wiederholen mit Abstand hilft dem Behalten.',
+    allesZugeordnet: 'Alles zugeordnet', nichtZugeordnet: 'Nichts zugeordnet',
+    notizen: 'Notizen', glossar: 'Glossar', ergebnis: 'Ergebnis', abgeschlossen: 'abgeschlossen', ca: 'ca.', min: 'Min',
+    zumVergleich: 'Zum Vergleich:', kritTitel: 'Deine Antwort im Vergleich', kritHinweis: 'Lies die Musterantwort und hake ab, was deine Antwort erfüllt.', kritErfuellt: 'Kriterien erfüllt', kritAlle: 'Alle Kriterien erfüllt. Gut gemacht.',
+    hallo: 'Hallo', willkommenZurueckName: 'Willkommen zurück, {n}!', msAlleKapitel: 'Das war das letzte Kapitel. Jetzt noch der Abschluss.',
+    wieWeiter: 'Wie geht es weiter?', kursOeffnen: 'Kurs öffnen',
+    deinErgebnis: 'Dein Ergebnis', bestanden: 'Bestanden, herzlichen Glückwunsch!', bestandenName: 'Bestanden, herzlichen Glückwunsch, {n}!', nichtBestanden: 'Leider nicht bestanden.',
+    geschafftTitel: 'Das hast du geschafft', seitenGesehen: 'Seiten gesehen', kapitelFertig: 'Kapitel abgeschlossen', fragenRichtig: 'Fragen richtig', uebungenErledigt: 'Übungen erledigt',
+    ergebnisJeLernziel: 'Ergebnis je Lernziel', richtig: 'richtig', sitzt: 'Sitzt', zumKapitel: 'Zum Kapitel', jedeAussage: 'Entscheide bei jeder Aussage', richtigWaere: 'Richtig wäre', zumNachlesen: 'Zum Nachlesen', selbstbild: 'am Anfang eingeschätzt', selbstUeber: 'Am Anfang hast du dich hier sicherer eingeschätzt, als es der Test zeigt. Ein zweiter Blick lohnt sich.', selbstUnter: 'Du kannst hier mehr, als du am Anfang dachtest.', nochmalAnsehen: 'Dazu noch einmal ansehen',
+    transkript: 'Transkript', szene: 'Szene', schritt: 'Schritt', von: 'von', herunterladen: 'Herunterladen',
+    suchen: 'Suchen', suchHinweis: 'Gib mindestens zwei Zeichen ein.', keineTreffer: 'Keine Treffer.',
+    abspielen: 'Abspielen', pause: 'Pause', allesZeigen: 'Alles zeigen', deineSchaetzung: 'Deine Schätzung', tatsaechlich: 'Tatsächlich', amAnfang: 'Am Anfang', heute: 'Heute', deineVermutung: 'Deine Vermutung',
+    entdeckt: 'entdeckt', fuehrungStarten: 'Führung starten', naechsterPunkt: 'Nächster Punkt',
+    oeffnen: 'öffnen', besucht: 'schon besucht', gefunden: 'gefunden', nochOffen: 'noch offen', fundstueck: 'Fundstück',
+    stopp: 'Stopp', kiHinweis: 'Hinweis zu künstlicher Intelligenz:', kiMarke: 'KI-unterstützt', kiBild: 'Mit KI erzeugt', kiStimme: 'Vorgelesen von einer synthetischen Stimme', kiStimmeKurz: 'KI-Stimme',
+    levErgebnis: 'Ergebnis', levHinweis: 'Bewege jeden Regler einmal und beobachte, was sich ändert.', warteRegler: 'Bewege zuerst jeden Regler einmal.',
+    chatWaehle: 'Was antwortest du?', chatNochmal: 'Wähle eine andere Antwort.', chatEnde: 'Das Gespräch ist beendet.', hyNachricht: 'Nachricht', hyGesendet: 'Gesendet', warteChat: 'Führe zuerst das Gespräch zu Ende.',
+    mkcNeu: 'Neue Karte für deinen Stapel', mkcFrage: 'Frage', mkcAntwort: 'Antwort', mkcHinweis: 'Überleg kurz, dann dreh die Karte um.', mkcUmdrehen: 'Karte umdrehen', mkcImStapel: 'Liegt in deinem Kartenstapel ({n} von {m} gesammelt).',
+    deckTitel: 'Kartenstapel', deckLeer: 'Noch keine Merkkarten im Kurs.', deckAnzahl: '{n} Karten in deinem Stapel, {g} davon hast du schon umgedreht.', deckStart: 'Abfrage starten', deckStand: 'Karte {i} von {n} · {k} auf Anhieb gewusst', deckUmdrehen: 'Umdrehen', deckGewusst: 'Gewusst', deckNochNicht: 'Noch nicht', deckErgebnis: '{k} von {n} auf Anhieb gewusst.', deckWiederholen: 'Diese Karten schaust du dir in ein paar Tagen noch einmal an:', deckAlle: 'Alle Karten auf Anhieb gewusst.', deckNeu: 'Noch einmal abfragen', deckKommtNochmal: 'Kommt am Ende noch einmal.', deckAufgedeckt: 'Schon aufgedeckt', deckGewusstAlle: 'Auf Anhieb gewusst:',
+    formLeer: 'Klick auf die Kopfzeile', formStand: '{n} von {m} Feldern ausgefüllt', formVollstaendig: 'Vollständig', formDrucken: 'Ausdrucken', warteFormular: 'Füll zuerst alle Felder des Formulars aus. Danach geht es weiter.', warteKarte: 'Dreh zuerst die Karte um. Danach geht es weiter.', warteBildschirm: 'Löse zuerst die Aufgabe am Bildschirm. Danach geht es weiter.', bsKeinEcht: 'Übungsfeld: Gib hier kein echtes Passwort ein.', bsAnklicken: 'anklicken', bsBestaetigen: 'Bestätigen', bsWillkommen: 'Willkommen', pwLaenge: 'mindestens {n} Zeichen', pwKlein: 'Kleinbuchstaben', pwGross: 'Großbuchstaben', pwZahl: 'eine Zahl', pwZeichen: 'ein Sonderzeichen wie @, ! oder $', pwEinfach: 'keine einfache Folge wie 12345 oder „passwort“', warteStapel: 'Geh zuerst den Kartenstapel durch. Danach geht es weiter.',
+    promptWaehlen: 'Wähle oben einen Prompt …', weitereInfos: 'Weitere Informationen', lesezeit: 'Lesezeit', minute: 'Minute', ueberblick: 'Überblick', kapitelPl: 'Kapitel', gelesen: 'gelesen', geuebt: 'geübt', kurzZusammen: 'Kurz zusammengefasst', anhoerenName: 'Anhören', kurzGefragt: 'Kurz gefragt', kfFreiwillig: 'Freiwillig, ein, zwei Sätze reichen', kfFesthalten: 'Festhalten', soAntwortenAndere: 'So haben andere geantwortet', deineWahl: 'deine Wahl', quelle: 'Quelle', kfFakt: 'Der Hintergrund', kalenderNugget: 'Weißt du es noch?', kalenderAufloesung: 'Auflösung', kfImLernbuch: 'steht in deinem Lernbuch', udDanke: 'Danke. Der Kurs richtet sich jetzt nach dir.', udBegleitung: 'Deine Begleitung', udBegleitFrage: 'Wer begleitet dich durch den Kurs?', mkMarkiert: '{n} von {m} markiert', mkFertig: 'Fertig', mkHinweis: 'Klick auf einen Satz, um ihn zu markieren. Du kannst es jederzeit ändern.', mkDanke: 'Danke, das merkt sich der Kurs.', mkKeins: 'Nichts davon markiert.', deinWeg: 'Dein Weg durch den Kurs', wegVorher: 'am Anfang', wegHeute: 'heute', wegWirklich: 'tatsächlich', wegSelbst: 'Deine Selbsteinschätzung', wegSchaetzung: 'Deine Schätzungen', wegWorte: 'Deine Worte', perMail: 'Per E-Mail an mich', deineNotiz: 'Deine Notiz', notizZuSeite: 'Notiz zu dieser Seite', notizAllgemein: 'Allgemeine Notiz', notizHinweis: 'Alle Notizen stehen in deinem Lernbuch und gehen am Ende mit per E-Mail, Druck oder Textdatei.', notizAndere: 'Deine Notizen auf anderen Seiten', notizLeer: 'Was willst du dir zu dieser Seite merken?', lbwEyebrow: 'Dein Begleiter durch den Kurs', lbwLead: 'Dieser Kurs merkt sich, was du denkst, schreibst und entscheidest, und gibt es dir am Ende mit.', lbwNotizT: 'Notizen auf jeder Seite', lbwNotiz: 'Über „Notizen“ in der Leiste hältst du fest, was dir auf einer Seite wichtig ist. Jede Seite hat ihre eigene Notiz.', lbwSammeltT: 'Der Kurs sammelt mit', lbwSammelt: 'Deine Antworten, Schätzungen, Entscheidungen und Begründungen landen von selbst im Lernbuch.', lbwMailT: 'Am Ende an dich', lbwMail: 'Per E-Mail an dich selbst, als Ausdruck oder als Textdatei. Nichts verlässt deinen Browser, bis du es schickst.', lbwLos: 'Alles klar, los geht’s', lbwProbieren: 'Erste Notiz schreiben', lbwWo: 'Du findest dein Lernbuch jederzeit im Menü.', markiert: 'Markiert', udLage: 'Deine Lage', udLageFrage: 'Was trifft am ehesten auf dich zu?', deinZiel: 'Dein Ziel', deinFall: 'Dein Fall', aendern: 'Ändern', udFehlt: 'Bitte wähle eine Antwort und schreib bei jeder Frage mindestens drei Wörter.', udLos: 'Los geht’s', udPrivat: 'Das wird nicht bewertet. Es bleibt in deinem Lernstand und steht in deinem Lernbuch.', lernbuch: 'Mein Lernbuch', lernbuchLeer: 'Hier sammelt sich alles, was du im Kurs schreibst, schätzt und entscheidest.', zurSeite: 'Zur Seite', drucken: 'Drucken', alsTextSpeichern: 'Als Textdatei speichern', deineBegruendung: 'Deine Begründung', reflexion: 'Reflexion', checkliste: 'Checkliste', zuletztGeschrieben: 'Zuletzt hast du geschrieben:', msZielFrage: 'Was davon bringt dich deinem Ziel näher?', zielRueckblick: 'Was davon probierst du als Erstes aus?', lernbuchOeffnen: 'Mein Lernbuch ansehen', fragWas: 'Was willst du wissen?', fragWeiter: 'Was noch?', fragStand: '{n} von {m} Fragen gestellt', fragNoch: 'noch {n} bis weiter',
+    mxHierAblegen: 'Hier ablegen', mxVergleich: 'Deine Einordnung im Vergleich', mxDeine: 'deine Einordnung', mxExperte: 'Einschätzung', mxNah: 'nah dran', mxGleichesFeld: 'gleiches Feld',
+    mxAnderesFeld: 'anderes Feld', mxAbgelegt: 'eingeordnet', mxHilfe: 'Wähle einen Begriff und klicke dann in die Fläche, dorthin, wo er für dich hingehört. Gesetzte Nummern kannst du ziehen oder anklicken und neu setzen.', mxVerschieben: 'Nummer {n} ({t}) verschieben: ziehen, anklicken und neu setzen oder mit den Pfeiltasten', mxVergleichen: 'Mit der Einschätzung vergleichen', warteMatrix: 'Ordne zuerst alle Begriffe ein und vergleiche.',
+    bereichSicher: 'Mit {p} % Sicherheit liegt der Wert zwischen …', bereichVon: 'von', bereichBis: 'bis', bereichDrin: 'Getroffen. Der wahre Wert liegt in deinem Bereich.', bereichDaneben: 'Daneben. Der wahre Wert liegt außerhalb deines Bereichs.',
+    deinBereich: 'Dein Bereich', bereichKalib: 'Bisher lag der wahre Wert bei {h} von {n} Schätzungen in deinem Bereich. Bei {p} % Sicherheit wären es fast alle. Weniger heißt, du schätzt dich sicherer ein, als du bist.',
+    rwTitel: 'Umschreiben', rwVorher: 'Vorher', rwDeine: 'Deine Fassung', rwMuster: 'Musterfassung',
+    schlossOeffnen: 'Öffnen', schlossStelle: 'Stelle {n} von {m}', schlossHoeher: 'Stelle {n} eins höher', schlossTiefer: 'Stelle {n} eins tiefer', schlossCode: 'Code', schlossGruppe: 'Zahlenschloss',
+    schlossFalsch: 'Das passt noch nicht. Sieh dir deine Fundstücke noch einmal an.', schlossLeer: 'Bitte fülle zuerst alle Stellen aus.', schlossOffen: 'Das Schloss ist offen.', hinweisZeigen: 'Hinweis zeigen',
+    fundstueck: 'Fundstück', fundstuecke: 'Deine Fundstücke', nochNichtGefunden: 'noch nicht gefunden', warteSchloss: 'Öffne zuerst das Schloss. Danach geht es weiter.',
+    wbStand: '{n} von {m} erledigt', wbGeschafft: 'Geschafft: {n} erledigt. Weitere Aufgaben kannst du freiwillig wählen.', wbOeffnen: 'Aufgabe öffnen', wbZurSeite: 'Zur Aufgabe', wbErledigt: 'Erledigt', wbErledigtMark: 'erledigt',
+    warteWahlbrett: 'Wähle zuerst {m} Aufgaben aus dem Wahlbrett und erledige sie.',
+    zerlegenHinweis: 'Zieh jedes Stück der Antwort auf den passenden Teil. Ohne Maus: Buchstabentaste am Kärtchen.',
+    regalLabel: 'Regal', regalWaehle: 'Wähle genau {n} Teile', regalStand: '{k} von {n} gewählt', regalVoll: 'Du hast schon {n} Teile gewählt. Leg erst eins zurück.',
+    regalGenau: 'Wähle genau {n} Teile.', regalTreffer: '{k} von {n} Teilen passen', regalFehlt: 'fehlt', regalPasst: 'passt.', regalPasstNicht: 'passt hier nicht.',
+    regalHaetteGepasst: 'hätte gepasst.', regalZurueck: 'Zurück zum Regal', regalAnsehen: 'Auswahl ansehen', regalErgebnis: 'Ergebnis ansehen',
+    regalSr_right: 'gewählt, passt', regalSr_wrong: 'gewählt, passt nicht', regalSr_miss: 'nicht gewählt, hätte gepasst',
+    mappeStd: 'Unterlage', mappeAuf: 'Mappe öffnen', mappeZu: 'Mappe schließen', mappeHinweis: 'Öffne die Mappe und lies sie, bevor du entscheidest.',
+    mappeOffen: 'Lies in Ruhe. Danach geht es weiter.', mappeGelesen: 'Gelesen. Du kannst die Mappe jederzeit wieder öffnen.', warteMappe: 'Öffne zuerst die Mappe und lies sie.',
+    vpHinweis: 'Sieh dir beide Szenen an und wähl eine.', vpWaehlen: 'Diese Szene', vpPlay: 'Abspielen', vpAbspielen: 'Szene {n} abspielen', vpBeschreibung: 'Was im Bild passiert',
+    vpSoGeht: 'So geht es', vpSoNicht: 'So nicht', vpRichtig: 'Richtig erkannt.', vpFalsch: 'Sieh noch einmal genau hin.', vpTun: 'Tun', vpLassen: 'Lassen',
+    udZielKommt: 'Dein Ziel kommt vor in', udZielOffen: 'Kein Kapitel nennt dein Ziel wörtlich. Sieh in die Kapitelübersicht und wähl, was am nächsten liegt.', szeneN: 'Szene {n}', warteVideopaar: 'Sieh dir beide Szenen an und wähl eine.'
+  };
+  const langs = course.languages || [];
+  const langOriginals = {};
+  let langUi = {};
+  // Sie-Fassung der Bedientexte (settings.anrede: 'Sie'). Jeder Text aus UI_DE mit du, dich, dir, dein … oder einer Du-Aufforderung
+  // braucht hier ein Gegenstück; der Selbsttest „Anrede: du, Du oder Sie“ meldet fehlende Einträge.
+  const UI_SIE = { nahtStart: 'Starten Sie jetzt ins Training.',
+    zerlegenHinweis: 'Ziehen Sie jedes Stück der Antwort auf den passenden Teil. Ohne Maus: Buchstabentaste am Kärtchen.',
+    regalWaehle: 'Wählen Sie genau {n} Teile', regalVoll: 'Sie haben schon {n} Teile gewählt. Legen Sie erst eins zurück.', regalGenau: 'Wählen Sie genau {n} Teile.',
+    mappeHinweis: 'Öffnen Sie die Mappe und lesen Sie sie, bevor Sie entscheiden.', mappeOffen: 'Lesen Sie in Ruhe. Danach geht es weiter.',
+    mappeGelesen: 'Gelesen. Sie können die Mappe jederzeit wieder öffnen.', warteMappe: 'Öffnen Sie zuerst die Mappe und lesen Sie sie.',
+    udZielKommt: 'Ihr Ziel kommt vor in', udZielOffen: 'Kein Kapitel nennt Ihr Ziel wörtlich. Sehen Sie in die Kapitelübersicht und wählen Sie, was am nächsten liegt.', vpHinweis: 'Sehen Sie sich beide Szenen an und wählen Sie eine.', warteVideopaar: 'Sehen Sie sich beide Szenen an und wählen Sie eine.', vpFalsch: 'Sehen Sie noch einmal genau hin.', promptMarkieren: 'Kopieren ging nicht. Markieren Sie den Text und kopieren Sie ihn von Hand.',
+    postfachHinweis: 'Mit dieser Mail stimmt etwas nicht. Finden Sie die Warnzeichen? Ziehen Sie jedes Etikett auf die Stelle der Mail, an der Sie es erkennen.', postfachStart: 'In Ihrem Postfach warten ein paar neue Mails. Sehen wir sie uns an?', postfachDaneben: 'Das passt hier noch nicht. Sehen Sie sich die Stelle noch einmal an.', postfachFertig: 'Alle Warnzeichen gefunden. Bei der nächsten Mail sehen Sie sie schneller.',
+    mkcNeu: 'Neue Karte für Ihren Stapel', mkcHinweis: 'Überlegen Sie kurz, dann drehen Sie die Karte um.', mkcImStapel: 'Liegt in Ihrem Kartenstapel ({n} von {m} gesammelt).',
+    deckAnzahl: '{n} Karten in Ihrem Stapel, {g} davon haben Sie schon umgedreht.', deckWiederholen: 'Diese Karten schauen Sie sich in ein paar Tagen noch einmal an:',
+    formLeer: 'Klicken Sie auf die Kopfzeile', warteFormular: 'Füllen Sie zuerst alle Felder des Formulars aus. Danach geht es weiter.', warteKarte: 'Drehen Sie zuerst die Karte um. Danach geht es weiter.', warteBildschirm: 'Lösen Sie zuerst die Aufgabe am Bildschirm. Danach geht es weiter.', bsKeinEcht: 'Übungsfeld: Geben Sie hier kein echtes Passwort ein.', warteStapel: 'Gehen Sie zuerst den Kartenstapel durch. Danach geht es weiter.',
+    wieGutVorher: 'Wie gut kennen Sie sich damit aus? Schätzen Sie sich ein, bevor Sie die Frage sehen.',
+    vorherUeber: 'Sie haben gesagt, Sie kennen sich gut aus, aber die Antwort stimmt nicht. Hier haben Sie sich überschätzt: Genau das lohnt einen zweiten Blick.',
+    vorherUnter: 'Sie waren unsicher und lagen trotzdem richtig. Sie wissen mehr, als Sie denken.',
+    selbsteinschaetzung: 'Ihre Selbsteinschätzung',
+    eingeschaetztPassend: 'Bei {n} von {m} Übungsfragen passte Ihre Einschätzung vorher.',
+    entscheidung: 'Wie reagieren Sie?', duBistDran: 'Sie sind dran',
+    spielGeschafft: 'Geschafft. Sie können das Spiel gern noch einmal spielen.',
+    simGeschafft: 'Geschafft: Sie haben alle Schritte selbst ausgeführt.',
+    tourMenu: 'Hier finden Sie Inhaltsverzeichnis, Suche und Glossar.',
+    ovLeseInfo: 'Anteil der Seiten, die Sie schon geöffnet haben.', ovLernInfo: 'Anteil der Punkte, die Sie in den bewerteten Fragen schon erreicht haben.',
+    tourFortschrittTitel: 'Ihr Fortschritt',
+    tourFortschritt: 'Der Balken zeigt, wie weit Sie sind. Ihr Stand bleibt gespeichert.',
+    wartePunkte: 'Sehen Sie sich zuerst alle Punkte im Bild an. Danach geht es weiter.',
+    ortGesperrtHinweis: 'Dieser Ort öffnet sich, sobald Sie den vorherigen erkundet haben.',
+    danke: 'Danke für Ihre Antwort.',
+    weissNichtFb: 'Gut, dass Sie nicht raten. Hier ist die Antwort mit Erklärung.',
+    denkpauseEnde: 'Zeit ist um. Schreiben Sie jetzt auf, was Ihnen eingefallen ist.', gedankenPh: 'Ihre Gedanken …', deineZahl: 'Ihre Zahl', deinProfil: 'Ihr Profil', deineAntwort: 'Ihre Antwort', alleRichtigen: 'Wählen Sie alle Antworten, die stimmen',
+    warteSchaetzung: 'Geben Sie zuerst Ihre Schätzung ab. Danach geht es weiter.',
+    triFrage: 'Was machen Sie damit?',
+    zuletztAuf: 'Sie waren zuletzt auf Seite',
+    warumFrage: 'Warum? Schreiben Sie Ihre Begründung in einem Satz, bevor Sie auflösen.',
+    warumFehlt: 'Bitte begründen Sie zuerst kurz Ihre Wahl.',
+    deineBegruendung: 'Ihre Begründung', deinVorsatz: 'Ihr Vorsatz',
+    impulsAbruf: 'Abrufen: Beantworten Sie die Fragen aus dem Gedächtnis, erst danach sehen Sie im Kurs nach.',
+    impulsAnwenden: 'Anwenden: Wo haben Sie es diese Woche genutzt? Was hat Sie gebremst? Nehmen Sie sich den kleinsten nächsten Schritt vor.',
+    impulsTeilen: 'Weitergeben: Erzählen Sie einer Kollegin oder einem Kollegen, was Sie ausprobiert haben und was dabei herauskam.',
+    anlassFrage: 'Wann wenden Sie das zum ersten Mal an?',
+    anlassHinweis: 'Ein echter Termin, ein Gespräch, eine Aufgabe. Am Tag davor erinnert Sie der Kalender mit Ihrem Spickzettel.',
+    anlassText: 'Ihr Spickzettel für morgen:', anlassAm: 'Ihr Anlass: {d}',
+    fuehrungKnopf: 'Vorsatz an meine Führungskraft',
+    fuehrungBitte: 'Hätten Sie in zwei Wochen zehn Minuten, um mit mir darüber zu sprechen? Drei Fragen für das Gespräch:\n1. Was habe ich ausprobiert, und was kam dabei heraus?\n2. Was hat mich gebremst?\n3. Was brauche ich von Ihnen, damit es weitergeht?',
+    fuehrungHallo: 'Guten Tag,',
+    checkTitel: 'Haben Sie Ihren Vorsatz umgesetzt?',
+    checkDanke: 'Danke. Ihr Zertifikat zeigt jetzt, wann Sie es angewendet haben.',
+    checkNoch: 'Noch nicht ist auch eine Antwort. Was wäre der kleinste nächste Schritt, und wann machen Sie ihn?',
+    checkWarte: 'In {n} Tagen fragt Sie der Kurs hier, ob Sie Ihren Vorsatz umgesetzt haben. Dann steht es auf Ihrem Zertifikat.',
+    warteVideo2: 'Bitte sehen Sie sich zuerst das Video bis zum Ende an.',
+    videoBisEnde: 'Bitte sehen Sie sich das Video bis zum Ende an.',
+    sicherFalsch: 'Sie waren sich sicher, aber die Antwort stimmt nicht. Genau hier lohnt sich ein zweiter Blick.',
+    geratenRichtig: 'Richtig geraten. Prägen Sie sich die Lösung gut ein, damit sie beim nächsten Mal sitzt.',
+    weisstDuNoch: 'Wissen Sie es noch?',
+    nochKeineEntscheidung: 'Sie haben noch keine Entscheidungen getroffen.',
+    umfrageDanke: 'Danke für Ihre Rückmeldung!',
+    umfrageFrage: 'Wie hat Ihnen der Kurs gefallen?',
+    umfrageKommentar: 'Was möchten Sie uns noch mitgeben? (optional)',
+    zertAb: 'Das Zertifikat gibt es ab {p} % im Test. Sie haben {s} % erreicht.',
+    zertName: 'Ihr Name für das Zertifikat',
+    fragenZurueck: 'Über das Inhaltsverzeichnis kommen Sie zu den Fragen zurück.',
+    kalibFalsch: 'Bei {n} waren Sie sich sicher, lagen aber falsch. Diese Themen lohnen einen zweiten Blick.',
+    wieSicher: 'Bitte schätzen Sie kurz ein, wie sicher Sie sind.',
+    kurzWiederholenHinweis: 'Ein paar Fragen aus dem, was Sie schon gelernt haben. Sie zählen nicht zur Bewertung. Wiederholen mit Abstand hilft dem Behalten.',
+    kritTitel: 'Ihre Antwort im Vergleich',
+    kritHinweis: 'Lesen Sie die Musterantwort und haken Sie ab, was Ihre Antwort erfüllt.',
+    deinErgebnis: 'Ihr Ergebnis', geschafftTitel: 'Das haben Sie geschafft',
+    selbstUeber: 'Am Anfang haben Sie sich hier sicherer eingeschätzt, als es der Test zeigt. Ein zweiter Blick lohnt sich.',
+    selbstUnter: 'Sie können hier mehr, als Sie am Anfang dachten.',
+    deineSchaetzung: 'Ihre Schätzung', deineVermutung: 'Ihre Vermutung',
+    chatWaehle: 'Was antworten Sie?', deineWahl: 'Ihre Wahl',
+    kfImLernbuch: 'steht in Ihrem Lernbuch',
+    kalenderNugget: 'Wissen Sie es noch?',
+    udDanke: 'Danke. Der Kurs richtet sich jetzt nach Ihnen.',
+    udBegleitung: 'Ihre Begleitung', udBegleitFrage: 'Wer begleitet Sie durch den Kurs?',
+    mkHinweis: 'Klicken Sie auf einen Satz, um ihn zu markieren. Sie können es jederzeit ändern.',
+    deinWeg: 'Ihr Weg durch den Kurs', wegSelbst: 'Ihre Selbsteinschätzung', wegSchaetzung: 'Ihre Schätzungen', wegWorte: 'Ihre Worte',
+    deineNotiz: 'Ihre Notiz',
+    notizHinweis: 'Alle Notizen stehen in Ihrem Lernbuch und gehen am Ende mit per E-Mail, Druck oder Textdatei.',
+    notizAndere: 'Ihre Notizen auf anderen Seiten',
+    notizLeer: 'Was wollen Sie sich zu dieser Seite merken?',
+    lbwEyebrow: 'Ihr Begleiter durch den Kurs',
+    lbwLead: 'Dieser Kurs merkt sich, was Sie denken, schreiben und entscheiden, und gibt es Ihnen am Ende mit.',
+    lbwNotiz: 'Über „Notizen“ in der Leiste halten Sie fest, was Ihnen auf einer Seite wichtig ist. Jede Seite hat ihre eigene Notiz.',
+    lbwSammelt: 'Ihre Antworten, Schätzungen, Entscheidungen und Begründungen landen von selbst im Lernbuch.',
+    lbwMailT: 'Am Ende an Sie',
+    lbwMail: 'Per E-Mail an sich selbst, als Ausdruck oder als Textdatei. Nichts verlässt Ihren Browser, bis Sie es schicken.',
+    lbwWo: 'Sie finden Ihr Lernbuch jederzeit im Menü.',
+    udLage: 'Ihre Lage', udLageFrage: 'Was trifft am ehesten auf Sie zu?',
+    deinZiel: 'Ihr Ziel', deinFall: 'Ihr Fall',
+    udPrivat: 'Das wird nicht bewertet. Es bleibt in Ihrem Lernstand und steht in Ihrem Lernbuch.',
+    lernbuchLeer: 'Hier sammelt sich alles, was Sie im Kurs schreiben, schätzen und entscheiden.',
+    zuletztGeschrieben: 'Zuletzt haben Sie geschrieben:',
+    msZielFrage: 'Was davon bringt Sie Ihrem Ziel näher?',
+    zielRueckblick: 'Was davon probieren Sie als Erstes aus?',
+    fragWas: 'Was wollen Sie wissen?',
+    mxVergleich: 'Ihre Einordnung im Vergleich', mxDeine: 'Ihre Einordnung',
+    mxHilfe: 'Wählen Sie einen Begriff und klicken Sie dann in die Fläche, dorthin, wo er für Sie hingehört. Gesetzte Nummern können Sie ziehen oder anklicken und neu setzen.',
+    bereichDrin: 'Getroffen. Der wahre Wert liegt in Ihrem Bereich.',
+    bereichDaneben: 'Daneben. Der wahre Wert liegt außerhalb Ihres Bereichs.',
+    deinBereich: 'Ihr Bereich',
+    bereichKalib: 'Bisher lag der wahre Wert bei {h} von {n} Schätzungen in Ihrem Bereich. Bei {p} % Sicherheit wären es fast alle. Weniger heißt, Sie schätzen sich sicherer ein, als Sie sind.',
+    rwDeine: 'Ihre Fassung',
+    simDaneben: 'Nicht ganz. Schauen Sie noch einmal genau hin.',
+    warteKarten: 'Entscheiden Sie zuerst alle Karten. Danach geht es weiter.',
+    warteStellen: 'Finden Sie zuerst alle Stellen im Text. Danach geht es weiter.',
+    warteKartenDrehen: 'Drehen Sie zuerst alle Karten um. Danach geht es weiter.',
+    warteFrage: 'Beantworten Sie zuerst die Frage. Danach geht es weiter.',
+    warteSelbstcheck: 'Beantworten Sie zuerst den Selbstcheck. Danach geht es weiter.',
+    punkteHinweis: 'Klicken Sie auf die Punkte in den Bildern.', pyrHinweis: 'Klicken Sie auf eine Stufe, dann sehen Sie hier, was sie bedeutet.', vennHinweis: 'Klicken Sie auf einen Kreis, dann sehen Sie hier, was er bedeutet.',
+    linieHinweis: 'Klicken Sie links einen Begriff und rechts, was dazu passt. Ein zweiter Klick löst die Linie.',
+    pinHinweis: 'Ziehen Sie jede Nummer auf die passende Stelle im Bild. Ohne Maus: Nummer wählen, dann die Stelle.',
+    ftLos: 'Lesen Sie genau',
+    ftHinweis: 'Tippen Sie die Stellen an, die über das Belegte hinausgehen.',
+    pbLeer: 'Tippen Sie einen Baustein an.',
+    triSchauNochmal: 'Schauen Sie noch einmal',
+    nochmalVersuchen: 'Versuchen Sie es noch einmal.',
+    zuordnenHinweis: 'Ziehen Sie die Kärtchen auf den passenden Begriff. Mit der Tastatur: Kärtchen anwählen und die Nummer des Begriffs drücken.',
+    memoryHinweis: 'Decken Sie zwei Karten auf. Gehört die Bedeutung zum Begriff, bleiben beide offen.',
+    jedeAussage: 'Entscheiden Sie bei jeder Aussage',
+    suchHinweis: 'Geben Sie mindestens zwei Zeichen ein.',
+    chatNochmal: 'Wählen Sie eine andere Antwort.',
+    promptWaehlen: 'Wählen Sie oben einen Prompt …',
+    warteMatrix: 'Ordnen Sie zuerst alle Begriffe ein und vergleichen Sie.',
+    schlossFalsch: 'Das passt noch nicht. Sehen Sie sich Ihre Fundstücke noch einmal an.', schlossLeer: 'Bitte füllen Sie zuerst alle Stellen aus.', fundstuecke: 'Ihre Fundstücke',
+    warteSchloss: 'Öffnen Sie zuerst das Schloss. Danach geht es weiter.', wbGeschafft: 'Geschafft: {n} erledigt. Weitere Aufgaben können Sie freiwillig wählen.',
+    warteWahlbrett: 'Wählen Sie zuerst {m} Aufgaben aus dem Wahlbrett und erledigen Sie sie.'
+  };
+  // Anrede (settings.anrede): 'du' (Standard), 'Du' (Pronomen groß, z. B. TBW) oder 'Sie'; eigene Bedientexte über settings.uiTexts { Schlüssel: Text }
+  const ANREDE = set.anrede === 'Sie' || set.anrede === 'Du' ? set.anrede : 'du';
+  const uiOwn = set.uiTexts && typeof set.uiTexts === 'object' ? set.uiTexts : {};
+  const duGross = t => String(t).replace(/(^|[^\p{L}])(du|dich|dir|dein|deine|deinen|deinem|deiner|deines)(?![\p{L}])/gu, (m, a, w) => a + w[0].toUpperCase() + w.slice(1));
+  const T = k => { if (langUi[k]) return langUi[k]; if (uiOwn[k]) return uiOwn[k]; const v = UI_DE[k] || k; return ANREDE === 'Sie' ? (UI_SIE[k] || v) : ANREDE === 'Du' ? duGross(v) : v; };
+  const getP = (o, path) => path.split('.').reduce((x, k) => (x == null ? x : x[k]), o);
+  const setP = (o, path, v) => { const ks = path.split('.'); const last = ks.pop(); const t = ks.reduce((x, k) => (x == null ? x : x[k]), o); if (t != null) t[last] = v; };
+  function applyLang(code) {
+    Object.keys(langOriginals).forEach(k => setP(course, k, langOriginals[k]));
+    Object.keys(narrCues).forEach(k => delete narrCues[k]); // Untertitel neu einlesen
+    const L = langs.find(l => l.code === code);
+    (L ? L.entries || [] : []).forEach(e => {
+      const cur = getP(course, e.key);
+      if (typeof cur !== 'string' || cur !== e.orig || !e.text) return;
+      langOriginals[e.key] = cur;
+      setP(course, e.key, e.text);
+    });
+    langUi = (L && L.ui) || {};
+    document.documentElement.lang = L ? code : (course.lang || 'de');
+    return L ? code : '';
+  }
+  const t0 = Date.now();
+
+  // ---------- Design ----------
+  // opts.renderer: nur den Baukasten liefern (für die Code-Ansicht im Editor), nichts ins Dokument schreiben
+  if (!opts.renderer) {
+    const rootStyle = document.documentElement.style;
+    if (theme.primary) rootStyle.setProperty('--kp-primary', theme.primary);
+    if (theme.accent) rootStyle.setProperty('--kp-accent', theme.accent);
+    // Im dunklen Modus kommen Flächen und Schrift aus dem Stylesheet, sonst aus dem Kurs
+    if (theme.mode !== 'dunkel') {
+      if (theme.bg) rootStyle.setProperty('--kp-bg', theme.bg);
+      if (theme.text) rootStyle.setProperty('--kp-text', theme.text);
+    }
+    if (theme.font) rootStyle.setProperty('--kp-font', theme.font);
+    if (theme.radius != null) rootStyle.setProperty('--kp-radius', theme.radius + 'px');
+    if (theme.headingFont) rootStyle.setProperty('--kp-font-head', theme.headingFont);
+    // Lesebreite, Schriftgröße und Dichte als Stellschrauben des Layouts
+    // Breite wie eine Folie: der Inhalt fuellt den Bildschirm, links und rechts bleiben nur 32 px Rand (Grundregel von Kerstin)
+    rootStyle.setProperty('--kp-maxw', ({ schmal: 'min(1180px, calc(var(--kp-half, 50vw) * 2))', normal: 'min(1400px, calc(var(--kp-half, 50vw) * 2))', breit: set.screen ? 'min(1760px, calc(var(--kp-half, 50vw) * 2))' : 'min(1600px, calc(var(--kp-half, 50vw) * 2))' })[theme.width || 'normal'] || 'min(1400px, calc(var(--kp-half, 50vw) * 2))');
+    // Auf Bildschirmseiten liest man wie auf einer Folie aus mehr Abstand: Grundschrift wächst mit der Breite bis 20 px (Designprüfung 10.10.2026)
+    const fsScale = set.screen ? { klein: 'clamp(16px, calc(.4vw + 12px), 18px)', normal: 'clamp(17px, calc(.45vw + 12.5px), 20px)', gross: 'clamp(19px, calc(.5vw + 13.5px), 22px)' } : { klein: '16px', normal: '17px', gross: '19px' };
+    rootStyle.setProperty('--kp-fs', fsScale[theme.scale || 'normal'] || fsScale.normal);
+    // Abstandsskala auf dem 8-px-Raster: --kp-gap zwischen Bausteinen (Seitenmodus) und in Reihen, --kp-gap-scroll in der Scroll-Darstellung, --kp-pad innen in farbigen Abschnitten
+    rootStyle.setProperty('--kp-gap', ({ kompakt: '16px', normal: '24px', luftig: '32px' })[theme.density || 'normal'] || '24px');
+    rootStyle.setProperty('--kp-gap-scroll', ({ kompakt: '24px', normal: '32px', luftig: '40px' })[theme.density || 'normal'] || '32px');
+    rootStyle.setProperty('--kp-pad', ({ kompakt: '24px', normal: '32px', luftig: '40px' })[theme.density || 'normal'] || '32px');
+    if (theme.mode === 'dunkel') document.documentElement.classList.add('kp-dark');
+    // Kleine Schrift in der Akzentfarbe (Themenzeilen) braucht 4,5 : 1 Kontrast: bei Bedarf automatisch abdunkeln
+    const hex = h => { const m = String(h || '').replace('#', '').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i); return m ? m.slice(1).map(x => parseInt(x, 16)) : null; };
+    const lum = c => { const v = c.map(x => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+    const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+    let ink = hex(theme.accent);
+    const dark = theme.mode === 'dunkel';
+    const ground = dark ? [[15, 20, 27], [23, 30, 39]] : [hex(theme.bg) || [245, 246, 248], [255, 255, 255]];
+    if (ink) {
+      // Im hellen Design abdunkeln, im dunklen aufhellen, bis 4,5 : 1 erreicht ist
+      for (let k = 0; k < 24 && ground.some(g => ratio(ink, g) < 4.5); k++) {
+        ink = dark ? ink.map(x => Math.min(255, Math.round(x * 1.12) + 6)) : ink.map(x => Math.round(x * 0.9));
+      }
+      rootStyle.setProperty('--kp-accent-ink', `rgb(${ink.join(',')})`);
+      // Schrift AUF der Akzentfarbe: Weiss auf einem hellen Akzent (#2EE6A8) erreicht nur
+      // 1,6 : 1. Ist Dunkel der bessere Partner, kommt Dunkel.
+      const acc = hex(theme.accent);
+      if (acc) rootStyle.setProperty('--kp-on-accent', ratio(acc, [255, 255, 255]) >= ratio(acc, [4, 17, 31]) ? '#fff' : '#04111f');
+    }
+    // Stil-Paket und Darstellung als Klassen, damit das CSS darauf reagieren kann
+    document.documentElement.classList.add('kp-style-' + (theme.style || 'klar'));
+    if (theme.style === 'micro' && theme.sideLook === 'lektion') document.documentElement.classList.add('kp-ml-lektion');
+    if (theme.look !== 'klassisch') document.documentElement.classList.add('kp-modern');
+    // Effekte „hochwertig“ ist der Standard; „dezent“ lässt nur die Grundbewegungen
+    if (theme.effects !== 'dezent') document.documentElement.classList.add('kp-fx-premium');
+    if (set.layout === 'scroll') document.documentElement.classList.add('kp-layout-scroll');
+    // Bildschirmseiten: jede Seite füllt den Bildschirm wie eine Folie, Text und Übung stehen nebeneinander
+    if (set.screen) document.documentElement.classList.add('kp-screen');
+    // Anzeiger für klickbare Stellen (Genially): noch nicht angesehene Punkte, Türen und Wahlbrett-Kacheln pulsieren sanft; fehlt das Feld, gilt es als an
+    if (set.clickHint !== false) document.documentElement.classList.add('kp-clickhint');
+  }
+  const assetMap = {};
+  (course.assets || []).forEach(a => { assetMap['assets/' + a.name] = a.src; });
+  // Verweise wie "assets/logo.png" in HTML und CSS auf die hinterlegten Dateien umbiegen
+  const res = s => String(s || '').replace(/assets\/[\w.\-]+/g, m => assetMap[m] || m);
+  // Eigene Kopf- und Fußzeile (leer = Standard); das globale CSS steht danach und kann alles überschreiben
+  const chrome = course.chrome || {};
+  // Lage der Leiste: oben (Standard), unten oder links. Farben leer = Farben des Designs.
+  // „menue“ ist die dezente dunkle Leiste unten: Symbole links, Menü in der Mitte (klappt das Inhaltsverzeichnis links auf), Pfeile rechts
+  const dezent = chrome.navPos === 'menue';
+  const navPos = dezent ? 'unten' : ['oben', 'unten', 'links'].indexOf(chrome.navPos) >= 0 ? chrome.navPos : 'oben';
+  // Linke Leiste einklappbar: der Stand gilt je Kurs und Gerät (localStorage), nicht im Lernstand
+  const navKey = 'kurs-leiste-' + (course.id || 'kurs');
+  let navShut = false;
+  // Leiste einklappen gilt für alle Lagen (Wunsch Kerstin 11.10.2026): links, oben und unten (auch die schmale Leiste)
+  try { navShut = localStorage.getItem(navKey) === 'zu'; } catch (e) { /* kein Speicher */ }
+  if (!opts.renderer) {
+    document.documentElement.classList.add('kp-nav-' + navPos); // auch kp-nav-oben (seit 11.10.2026 für den Einklapp-Knopf)
+    if (navShut) document.documentElement.classList.add('kp-nav-zu');
+    if (dezent) document.documentElement.classList.add('kp-nav-dezent');
+    const ns = document.documentElement.style;
+    if (chrome.navColor) ns.setProperty('--kp-nav-bg', chrome.navColor);
+    // Ohne eigene Schriftfarbe richtet sie sich nach der Helligkeit der Leistenfarbe
+    if (chrome.navInk) ns.setProperty('--kp-nav-ink', chrome.navInk);
+    else if (chrome.navColor) ns.setProperty('--kp-nav-ink', navInkFor(chrome.navColor));
+  }
+  const globalStyle = document.createElement('style');
+  globalStyle.textContent = res(chrome.css) + '\n' + res(course.css);
+  const pageStyle = document.createElement('style');
+  if (!opts.renderer) {
+    document.head.appendChild(globalStyle);
+    document.head.appendChild(pageStyle);
+  }
+  // Blöcke mit eigenem HTML (vom Formular gelöst)
+  const isCustom = b => b.type !== 'html' && !!(b.customHtml && String(b.customHtml).trim());
+  const htmlOf = b => (isCustom(b) ? b.customHtml : b.type === 'html' ? b.html : '');
+
+  // Dunkle Schrift auf heller Leiste, helle auf dunkler (relative Helligkeit nach WCAG)
+  function navInkFor(color) {
+    const m = String(color).replace('#', '').match(/^([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (!m) return '#ffffff';
+    const h = m[1].length === 3 ? m[1].split('').map(x => x + x).join('') : m[1];
+    const c = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255)
+      .map(x => (x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] > 0.32 ? '#1d2530' : '#ffffff';
+  }
+
+  // CSS eines Blocks gilt nur innerhalb dieses Blocks
+  function scopeCss(css, scope) {
+    return String(css || '').replace(/([^{}]+)\{([^{}]*)\}/g, (m, sel, body) => {
+      const s = sel.trim();
+      if (!s || s.startsWith('@') || /^(from|to|\d+%)/.test(s)) return m;
+      return s.split(',').map(x => `${scope} ${x.trim()}`).join(', ') + ' {' + body + '}';
+    });
+  }
+
+  // ---------- Zustand ----------
+  const pages = course.pages.slice();
+  const state = {
+    current: 0, visited: new Set(), answers: {}, tries: {}, pools: {}, branch: {},
+    conf: {}, texts: {}, survey: {}, history: [], name: '', seen: {}, took: {}, cross: {},
+    watched: {}, dlg: {}, seq: {}, self: {}
+  };
+  const lms = kursLms(opts);
+  let finished = false;
+
+  // ---------- Hilfen ----------
+  function shuffleIds(list) {
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+  function allQuestionsBefore(pageIndex, chapter) {
+    const list = [];
+    pages.forEach((p, pi) => {
+      if (chapter ? p.chapter !== chapter : pi >= pageIndex) return;
+      (p.blocks || []).forEach(b => {
+        if (b.type === 'quiz') list.push(b);
+        if (b.type === 'pool') list.push(...(b.questions || []));
+      });
+    });
+    return list;
+  }
+
+  // Fragenpools und Wiederholungen: Auswahl einmal ziehen und merken
+  function drawPools(force) {
+    pages.forEach((p, pi) => (p.blocks || []).forEach(b => {
+      if (!force && state.pools[b.id]) return;
+      if (b.type === 'pool') {
+        const all = (b.questions || []);
+        const n = Math.max(1, Math.min(Number(b.draw) || all.length, all.length));
+        // Pflichtfragen kommen immer dran, der Rest wird aus den übrigen gezogen
+        const fixed = all.map((q, i) => i).filter(i => all[i].fixed).slice(0, n);
+        const rest = shuffleIds(all.map((q, i) => i).filter(i => !all[i].fixed));
+        state.pools[b.id] = fixed.concat(rest.slice(0, Math.max(0, n - fixed.length))).sort((x, y) => x - y);
+      }
+      if (b.type === 'sortcats' && !state.pools['sort-' + b.id]) state.pools['sort-' + b.id] = shuffleIds((b.items || []).map((x, i) => i));
+      if (b.type === 'glossquiz') {
+        const all = termPairs(b);
+        const n = Math.max(1, Math.min(Number(b.draw) || all.length, all.length));
+        state.pools[b.id] = shuffleIds(all.map((x, i) => i)).slice(0, n);
+      }
+      // Wiederholungen werden erst gezogen, wenn die Seite erreicht wird (drawReviews): dann liegen die Antworten
+      // vor, und zuletzt falsch beantwortete Fragen kommen zuerst dran
+    }));
+  }
+  // Fragen nach Nutzen für die Wiederholung sortieren: zuletzt falsch beantwortete zuerst, dann die noch offenen,
+  // zuletzt die richtig beantworteten – innerhalb jeder Gruppe gemischt. Für Wiederholung und Wiedereinstieg.
+  function wrongFirst(qs, answeredFirst) {
+    const rank = q => {
+      const a = state.answers[q.id];
+      if (a == null) return answeredFirst ? 2 : 1;
+      return evaluate(q, a) < 1 ? 0 : answeredFirst ? 1 : 2;
+    };
+    const groups = [[], [], []];
+    qs.forEach(q => groups[rank(q)].push(q));
+    return groups.map(g => shuffleIds(g)).flat();
+  }
+  function drawReviews(pi) {
+    let drawn = false;
+    (pages[pi].blocks || []).forEach(b => {
+      if (b.type !== 'review' || state.pools[b.id]) return;
+      const cand = allQuestionsBefore(pi, b.scope === 'chapter' ? b.chapter : '');
+      state.pools[b.id] = wrongFirst(cand, false).map(q => q.id).slice(0, Math.max(1, Number(b.draw) || 3));
+      drawn = true;
+    });
+    return drawn;
+  }
+
+  // Wiederholungsfragen sind Kopien mit eigener ID, damit sie unabhängig vom Original beantwortet werden
+  const reviewCopies = {};
+  function reviewQuestions(b) {
+    const byId = {};
+    pages.forEach(p => (p.blocks || []).forEach(x => {
+      if (x.type === 'quiz') byId[x.id] = x;
+      if (x.type === 'pool') (x.questions || []).forEach(q => { byId[q.id] = q; });
+    }));
+    return (state.pools[b.id] || []).map(id => {
+      const key = id + '~' + b.id;
+      if (!reviewCopies[key] && byId[id]) reviewCopies[key] = Object.assign({}, byId[id], { id: key, attempts: 0 });
+      return reviewCopies[key];
+    }).filter(Boolean);
+  }
+
+  // Alle Fragen und bewerteten Elemente des Kurses einsammeln
+  let items = [];
+  function buildItems() {
+    const list = [];
+    const add = (pi, q, graded, extra) => list.push(Object.assign({ id: q.id, pageIndex: pi, q, graded, points: Number(q.points) || 10, objective: q.objective || '' }, extra || {}));
+    pages.forEach((p, pi) => (p.blocks || []).forEach(b => {
+      if (b.type === 'html' || isCustom(b)) return addHtmlQuiz(list, pi, b);
+      if (b.type === 'quiz') add(pi, b, b.graded !== false);
+      if (b.type === 'pool') (state.pools[b.id] || []).forEach(i => { if (b.questions[i]) add(pi, b.questions[i], b.graded !== false); });
+      if (b.type === 'pretest') (b.questions || []).forEach(q => add(pi, q, false, { pretest: b.id }));
+      if (b.type === 'review') reviewQuestions(b).forEach(q => add(pi, q, false));
+      if (b.type === 'glossquiz' && b.mode === 'match' && drawnPairs(b).length) add(pi, glossQuiz(b), false);
+      if (b.type === 'ivideo') (b.markers || []).forEach(m => { if (m.kind === 'question' && m.q) add(pi, m.q, m.q.graded !== false); });
+      // Klickpfad (Stufe „prüfen“), Mini-Mission, Level-Spiel und eigene Interaktion zählen nur mit b.graded
+      if (b.graded && (b.type === 'mission' || b.type === 'game' || b.type === 'interaktion' || (b.type === 'simulation' && (b.modes || ['zeigen', 'ueben', 'pruefen']).includes('pruefen'))))
+        list.push({ id: b.id, pageIndex: pi, play: b, graded: true, points: Number(b.points) || 10, objective: b.objective || '' });
+    }));
+    // Entscheidungen (auch am Ende eines Comic-Dialogs) mit Punkten
+    pages.forEach((p, pi) => branchesIn(p).forEach(br => {
+      if (!br.scored) return;
+      const max = Math.max(0, ...(br.options || []).map(o => Number(o.points) || 0));
+      if (max > 0) list.push({ id: br.id, pageIndex: pi, branch: br, graded: true, points: max, objective: br.objective || '' });
+    }));
+    items = list;
+  }
+  // Fragen, die als HTML vorliegen (HTML-Block oder Block mit eigenem HTML)
+  function addHtmlQuiz(list, pi, b) {
+    const src = htmlOf(b);
+    if (!/data-kurs-quiz/.test(src)) return;
+    const doc = new DOMParser().parseFromString('<div>' + src + '</div>', 'text/html');
+    doc.querySelectorAll('[data-kurs-quiz]').forEach((el, qi) => {
+      const answers = Array.from(el.querySelectorAll('[data-kurs-antwort]'));
+      list.push({
+        id: b.id + ':' + qi, pageIndex: pi,
+        graded: !/^(nein|false|0)$/i.test(el.getAttribute('data-kurs-bewertet') || ''),
+        points: Number(el.getAttribute('data-kurs-punkte')) || 10, objective: el.getAttribute('data-kurs-lernziel') || '',
+        html: {
+          kind: el.getAttribute('data-kurs-quiz') === 'multiple' ? 'multiple' : 'single',
+          right: answers.map((a, i) => /^(richtig|true|1|ja)$/i.test(a.getAttribute('data-kurs-antwort')) ? i : -1).filter(i => i >= 0)
+        }
+      });
+    });
+  }
+  const graded = () => items.filter(it => it.graded);
+  const pageIndexById = id => pages.findIndex(p => p.id === id);
+
+  // ---------- Auswertung ----------
+  function normAnswers(q) {
+    if (q.kind === 'truefalse') {
+      const yes = q.correctBool !== false;
+      return [{ text: q.labelTrue || 'Wahr', correct: yes, feedback: q.feedbackTrue }, { text: q.labelFalse || 'Falsch', correct: !yes, feedback: q.feedbackFalse }];
+    }
+    return q.answers || [];
+  }
+  function fillSolutions(q) {
+    return (String(q.text || '').match(/\[\[(.+?)\]\]/g) || []).map(m => m.slice(2, -2).split('|').map(s => s.trim()));
+  }
+  const normStr = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  // Zahl aus einer Eingabe: „1.250,5“, „1250.5“ und „1 250“ ergeben dieselbe Zahl; leer oder Unsinn → null
+  const numVal = s => { const t = String(s == null ? '' : s).trim().replace(/\s/g, ''); if (!t) return null; const n = Number(/,\d{1,2}$/.test(t) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '')); return Number.isFinite(n) ? n : null; };
+  const fmtNum = n => String(Math.round(n * 1000) / 1000).replace('.', ',');
+  // Lückentext mit Auswahl (q.fillChoice): jede Lücke bietet die Lösungen aller Lücken plus die Ablenker aus q.fillDistractors
+  const fillChoices = q => { const sol = fillSolutions(q).map(s => s[0]); const d = String(q.fillDistractors || '').split(/[;\n]/).map(x => x.trim()).filter(Boolean); const all = []; sol.concat(d).forEach(x => { if (!all.some(y => normStr(y) === normStr(x))) all.push(x); }); return shuffled(all.length, q.id + 'fc').map(i => all[i]); };
+
+  function shuffled(n, seed) {
+    const arr = Array.from({ length: n }, (v, i) => i);
+    let s = String(seed).split('').reduce((a, c) => a + c.charCodeAt(0) * 31, 7);
+    for (let i = arr.length - 1; i > 0; i--) {
+      s = (s * 1103515245 + 12345) % 2147483648;
+      const j = s % (i + 1);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    if (n > 1 && arr.every((v, i) => v === i)) arr.push(arr.shift());
+    return arr;
+  }
+
+  function evaluate(q, a) {
+    if (!a) return 0;
+    if (q.kind === 'fill') {
+      const sol = fillSolutions(q);
+      return sol.length ? sol.filter((alts, i) => alts.some(s => normStr(s) === normStr(a[i]))).length / sol.length : 0;
+    }
+    // Zahl mit Toleranz: richtig, wenn der Wert im Bereich answer ± tolerance liegt (Komma und Punkt gelten beide)
+    if (q.kind === 'numeric') { const v = numVal(a[0]); return v != null && Math.abs(v - (Number(q.answer) || 0)) <= (Number(q.tolerance) || 0) + 1e-9 ? 1 : 0; }
+    // „Weiß ich nicht“ (Wert −1) ist nie richtig, zählt aber nicht als Raten
+    if (a.length === 1 && a[0] === -1) return 0;
+    if (q.kind === 'order') { const n = (q.items || []).length; return n ? a.filter((v, i) => v === i).length / n : 0; }
+    if (q.kind === 'match') { const n = (q.pairs || []).length; return n ? a.filter((v, i) => v === i).length / n : 0; }
+    if (q.kind === 'pins') { const n = (q.pins || []).length; return n ? a.filter((v, i) => v === i).length / n : 0; }
+    if (q.kind === 'claims') { const c = q.claims || []; return c.length ? c.filter((x, i) => a[i] === (x.yes === false ? 0 : 1)).length / c.length : 0; }
+    if (q.kind === 'hotspot') return (q.spots || []).some(s => s.correct && Math.hypot(s.x - a[0], s.y - a[1]) <= (Number(s.r) || 8)) ? 1 : 0;
+    const right = normAnswers(q).map((x, i) => x.correct ? i : -1).filter(i => i >= 0);
+    return right.length === a.length && right.every(i => a.indexOf(i) >= 0) ? 1 : 0;
+  }
+
+  // Übungen mit Spielcharakter: Klickpfad = Anteil richtiger Schritte im besten Prüfdurchgang;
+  // Mission und Level-Spiel = volle Punkte bei höchstens einem Fehler, halbe bei mehr, keine bei „Lösung zeigen“ oder Überspringen
+  function playFraction(b) {
+    if (b.type === 'simulation') { const st = state.self[b.id]; return st && st.exam != null ? st.exam : null; }
+    // Eigene Interaktion: der gemeldete Wert (0 bis 1), ohne Wert zählt „fertig“ voll
+    if (b.type === 'interaktion') { const st = state.self[b.id]; return st && st.done ? (st.s == null ? 1 : st.s) : null; }
+    const r = (state.self.mm || {})[b.id];
+    if (!r) return null;
+    if (!r.ok || r.r || r.k) return 0;
+    return r.e <= 1 ? 1 : 0.5;
+  }
+  function itemFraction(it) {
+    if (it.play) return playFraction(it.play);
+    if (it.branch) {
+      const c = state.branch[it.id];
+      if (c == null) return null;
+      return (Number((it.branch.options[c] || {}).points) || 0) / it.points;
+    }
+    const a = state.answers[it.id];
+    if (!a) return null;
+    if (it.q) return evaluate(it.q, a);
+    const r = it.html.right;
+    return r.length === a.length && r.every(i => a.indexOf(i) >= 0) ? 1 : 0;
+  }
+
+  function scoreOf(list) {
+    let got = 0, max = 0, open = 0;
+    list.forEach(it => {
+      max += it.points;
+      const f = itemFraction(it);
+      if (f == null) open++; else got += f * it.points;
+    });
+    return { got: Math.round(got * 10) / 10, max, open, pct: max ? Math.round(got / max * 100) : 0 };
+  }
+  const score = () => scoreOf(graded());
+
+  // Selbstbild je Lernziel: Aussagen aus Selbstchecks mit Skala oder Regler (b.objectives[i] = Lernziel-id),
+  // Mittel der Werte 1–5 als Anteil 0–100; gezählt wird der erste ausgewertete Selbstcheck im Kurs je Ziel
+  function selfImage(oid) {
+    for (const p of pages) for (const b of (p.blocks || [])) {
+      if (b.type !== 'selfcheck' || !(b.mode === 'scale' || b.mode === 'regler')) continue;
+      const st = state.self[b.id];
+      if (!st || !st.done) continue;
+      const vals = (b.statements || []).map((x, i) => (b.objectives || {})[i] === oid ? Number((st.a || [])[i]) : NaN).filter(v => v >= 1);
+      if (!vals.length) continue;
+      const avg = vals.reduce((x, y) => x + y, 0) / vals.length;
+      return { pct: Math.round((avg - 1) / 4 * 100), text: b.mode === 'regler' ? scValText(b, Math.round(avg)) : `${Math.round(avg * 10) / 10} ${T('von')} 5` };
+    }
+    return null;
+  }
+  function objectiveStats() {
+    return (course.objectives || []).map(o => {
+      const list = graded().filter(it => it.objective === o.id);
+      if (!list.length) return null;
+      const s = scoreOf(list);
+      const right = list.filter(it => itemFraction(it) >= 1).length;
+      return { o, pct: s.open ? null : s.pct, open: s.open, passed: !s.open && s.pct >= passScore, firstPage: Math.min(...list.map(it => it.pageIndex)), right, total: list.length };
+    }).filter(Boolean);
+  }
+
+  // Status für das LMS: abgeschlossen (Inhalt) und bestanden (Test) getrennt ermitteln
+  function progressResult() {
+    const contentIdx = pages.map((p, i) => p.result || p.extra ? -1 : i).filter(i => i >= 0);
+    const seen = contentIdx.filter(i => state.visited.has(i)).length;
+    const pagesPct = contentIdx.length ? seen / contentIdx.length * 100 : 100;
+    const visitedLast = state.visited.has(contentIdx[contentIdx.length - 1]) || state.visited.has(pages.length - 1);
+    const mode = set.completion || 'auto';
+    const hasTest = graded().length > 0;
+    const s = score();
+    const testDone = hasTest && !s.open;
+    const passed = testDone && s.pct >= passScore;
+    const pagesDone = /percent/.test(mode) ? pagesPct >= (Number(set.completionPercent) || 100) : visitedLast;
+    let completed;
+    if (mode === 'test') completed = passed;
+    else if (mode === 'percent+test') completed = pagesDone && passed;
+    else if (mode === 'auto') completed = hasTest ? testDone : pagesDone;
+    else completed = pagesDone;
+    const useSuccess = hasTest && (mode === 'auto' || mode === 'test' || mode === 'percent+test');
+    return { completed, pagesDone, hasTest, testDone, passed, pct: testDone ? s.pct : null, useSuccess };
+  }
+
+  // Ist auf der Seite noch etwas offen?
+  function openReason(i) {
+    const p = pages[i];
+    const hid = condHiddenIds(p); // durch eine Bedingung verborgen: hält nicht auf
+    if (items.some(it => it.pageIndex === i && !it.branch && !it.play && !hid.has(it.id) && state.answers[it.id] == null)) return 'Bitte beantworte zuerst die Fragen auf dieser Seite.';
+    if (items.some(it => it.pageIndex === i && it.play && !hid.has(it.id) && playFraction(it.play) == null)) return 'Bitte schließe zuerst die Übung auf dieser Seite ab.';
+    for (const br of branchesIn(p)) {
+      if (!hid.has(br.id) && ((br.options || []).some(o => o.target) || br.scored) && state.branch[br.id] == null) return 'Bitte triff zuerst eine Entscheidung.';
+    }
+    // Ein Abschnitt, der erst nach einer Übung erscheint, hält auf, bis diese Übung gemacht ist –
+    // sonst käme man an dem verborgenen Teil vorbei, ohne ihn je gesehen zu haben.
+    for (const b of (p.blocks || [])) {
+      const c = b.showIf;
+      if (!c || c.kind !== 'done') continue;
+      const ref = (p.blocks || []).find(x => x.id === c.ref);
+      if (ref && !hid.has(ref.id) && !blockDone(ref)) return waitReason(ref);
+    }
+    for (const b of (p.blocks || []).filter(x => !hid.has(x.id))) {
+      // „Weiter erst, wenn bearbeitet“ – gilt für jeden Baustein mit etwas zu tun
+      if (b.required && !['reflection', 'actionplan', 'mission', 'game', 'casebank'].includes(b.type) && !blockDone(b)) return waitReason(b);
+      if ((b.type === 'reflection' || b.type === 'actionplan') && b.required && state.texts[b.id] == null) return 'Bitte bearbeite zuerst die Aufgabe auf dieser Seite.';
+      if (b.type === 'ivideo' && b.requireWatch && !state.watched[b.id]) return T('warteVideo2');
+      if (b.type === 'mission' && b.skippable === false && !(state.self.mm || {})[b.id]) return 'Bitte schließe zuerst die Mini-Mission auf dieser Seite ab.';
+      if (b.type === 'game' && b.required && !(state.self.mm || {})[b.id]) return 'Bitte spiele zuerst das Level-Spiel auf dieser Seite zu Ende.';
+      if (b.type === 'casebank' && b.required && cbDoneCount(b) < cbGoal(b)) return T('cbZiel').replace('{z}', cbGoal(b));
+      if (b.type === 'schloss' && !blockDone(b)) return T('warteSchloss');
+    }
+    return '';
+  }
+  // Was genau noch fehlt – je Übung ein eigener Satz, damit niemand raten muss
+  function waitReason(b) {
+    const t = b.type;
+    if (t === 'hotspots') return T('wartePunkte');
+    if (t === 'triage') return T('warteKarten');
+    if (t === 'promptbuild') return T('warteBausteine');
+    if (t === 'findtext') return T('warteStellen');
+    if (t === 'flipcards' || (t === 'glossquiz' && b.mode !== 'match')) return T('warteKartenDrehen');
+    if (t === 'quiz' || t === 'pool' || t === 'pretest') return T('warteFrage');
+    if (t === 'branch' || t === 'dialog') return T('warteEntscheidung');
+    if (t === 'selfcheck') return T('warteSelbstcheck');
+    if (t === 'predict') return T('warteSchaetzung');
+    if (t === 'levers') return T('warteRegler');
+    if (t === 'chat') return T('warteChat');
+    if (t === 'matrix') return T('warteMatrix');
+    if (t === 'schloss') return T('warteSchloss');
+    if (t === 'formular') return T('warteFormular');
+    if (t === 'merkkarte') return T('warteKarte');
+    if (t === 'mappe') return T('warteMappe');
+    if (t === 'videopaar') return T('warteVideopaar');
+    if (t === 'bildschirm') return T('warteBildschirm');
+    if (t === 'kartenstapel') return T('warteStapel');
+    if (t === 'wahlbrett') return T('warteWahlbrett').replace('{m}', wbMin(b));
+    return T('warteUebung');
+  }
+  function blockedHere() {
+    if (state.current >= pages.length - 1) return '';
+    const reason = openReason(state.current);
+    if (!reason) return '';
+    const p = pages[state.current];
+    const hardStop = branchesIn(p).some(br => (br.options || []).some(o => o.target)) ||
+      (p.blocks || []).some(b => b.type === 'schloss' || ((b.type === 'reflection' || b.type === 'actionplan') && b.required) || (b.type === 'ivideo' && b.requireWatch) || (b.type === 'mission' && b.skippable === false) || (b.type === 'game' && b.required) || (b.type === 'casebank' && b.required) ||
+        b.required || (b.showIf && b.showIf.kind === 'done'));
+    return set.gating || hardStop ? reason : '';
+  }
+  // Entscheidungen einer Seite: Entscheidungs-Blöcke und Entscheidungen am Ende eines Comic-Dialogs
+  function branchesIn(p) {
+    const list = [];
+    (p.blocks || []).forEach(b => {
+      if (b.type === 'branch') list.push(b);
+      if (b.type === 'dialog' && b.decision && (b.decision.options || []).length) list.push(b.decision);
+    });
+    return list;
+  }
+  function unlockedUpTo() {
+    if (!set.gating) return pages.length - 1;
+    let i = 0;
+    while (i < pages.length - 1 && state.visited.has(i) && !openReason(i)) i++;
+    return i;
+  }
+  function nextIndex() {
+    const p = pages[state.current];
+    for (const br of branchesIn(p)) {
+      if (state.branch[br.id] != null) {
+        const t = pageIndexById((br.options[state.branch[br.id]] || {}).target);
+        if (t >= 0) return t;
+      }
+    }
+    const t = pageIndexById(p.next);
+    if (t >= 0) return t;
+    const back = mapReturn(state.current);
+    return back >= 0 ? back : state.current + 1;
+  }
+  // Lernkarte: Liegt die Seite in einem Kapitel, das ein Pin einer Lernkarte öffnet, und ist sie die letzte dieses Kapitels,
+  // führt „Weiter“ ohne eigenes Ziel zurück zur Karte (sonst liefe man in den nächsten Ort hinein)
+  function mapReturn(idx) {
+    const p = pages[idx]; if (!p || !p.chapter) return -1;
+    const nx = pages[idx + 1]; if (nx && nx.chapter === p.chapter && !nx.result) return -1;
+    for (let k = 0; k < pages.length; k++) for (const b of (pages[k].blocks || [])) {
+      if (b.type !== 'hotspots' || !b.map || k === idx) continue;
+      if ((b.points || []).some(pt => { const d = pageIndexById(pt.target); return d >= 0 && pages[d].chapter === p.chapter; })) return k;
+    }
+    return -1;
+  }
+  function toast(text, ico) {
+    const t = document.createElement('div');
+    t.className = 'kp-toast';
+    t.setAttribute('role', 'status');
+    t.innerHTML = `${ico ? icon(ico) : ''}<span>${esc(text)}</span>`;
+    root.appendChild(t);
+    setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, 2600);
+  }
+
+  // ---------- Meldung an das LMS ----------
+  function suspendString() {
+    const data = { v: Array.from(state.visited), a: state.answers, t: state.tries, p: state.pools, b: state.branch, c: state.conf, s: state.survey, x: state.texts, w: state.watched, k: state.self, l: state.lang || '' };
+    let json = JSON.stringify(data);
+    const limit = lms ? lms.suspendLimit : 4000;
+    // Bei SCORM 1.2 wird es eng: freie Texte liegen dann nur im Browser, Umfrage und Sicherheit zuletzt
+    if (json.length > limit) { delete data.x; json = JSON.stringify(data); }
+    if (json.length > limit) { delete data.s; delete data.c; json = JSON.stringify(data); }
+    return json;
+  }
+
+  function responseOf(it, std) {
+    const L = i => String.fromCharCode(97 + i);
+    const sep = std === '2004' ? '[,]' : ',';
+    const dot = std === '2004' ? '[.]' : '.';
+    // Klickpfad, Mission, Level-Spiel: Ergebnis in Prozent als Zahl
+    if (it.play) return { type: 'numeric', response: String(Math.round((playFraction(it.play) || 0) * 100)), pattern: '100' };
+    const a = it.branch ? [state.branch[it.id]] : state.answers[it.id];
+    if (it.branch) {
+      const best = it.branch.options.reduce((bi, o, i, arr) => (Number(o.points) || 0) > (Number(arr[bi].points) || 0) ? i : bi, 0);
+      return { type: 'choice', response: L(a[0]), pattern: L(best) };
+    }
+    if (it.html) return { type: 'choice', response: a.map(L).join(sep), pattern: it.html.right.map(L).join(sep) };
+    const q = it.q;
+    switch (q.kind) {
+      case 'truefalse': {
+        const tf = v => std === '2004' ? (v ? 'true' : 'false') : (v ? 't' : 'f');
+        return { type: 'true-false', response: tf(a[0] === 0), pattern: tf(q.correctBool !== false) };
+      }
+      case 'fill': return { type: 'fill-in', response: a.join(' | '), pattern: fillSolutions(q).map(s => s[0]).join(' | ') };
+      case 'numeric': return { type: 'numeric', response: String(numVal(a[0]) == null ? '' : numVal(a[0])), pattern: String(Number(q.answer) || 0) };
+      case 'order': return { type: 'sequencing', response: a.map(L).join(sep), pattern: (q.items || []).map((x, i) => L(i)).join(sep) };
+      case 'match': return { type: 'matching', response: a.map((r, i) => (i + 1) + dot + (r >= 0 ? L(r) : '-')).join(sep), pattern: (q.pairs || []).map((x, i) => (i + 1) + dot + L(i)).join(sep) };
+      case 'pins': return { type: 'matching', response: a.map((r, i) => (i + 1) + dot + (r >= 0 ? L(r) : '-')).join(sep), pattern: (q.pins || []).map((x, i) => (i + 1) + dot + L(i)).join(sep) };
+      case 'claims': return { type: 'matching', response: a.map((v, i) => (i + 1) + dot + (v ? 't' : 'f')).join(sep), pattern: (q.claims || []).map((x, i) => (i + 1) + dot + (x.yes === false ? 'f' : 't')).join(sep) };
+      case 'hotspot': return { type: 'performance', response: a.join(std === '2004' ? '[.]' : ','), pattern: null };
+      default: return { type: 'choice', response: a.map(i => i < 0 ? 'x' : L(i)).join(sep), pattern: normAnswers(q).map((x, i) => x.correct ? L(i) : null).filter(Boolean).join(sep) };
+    }
+  }
+
+  function report() {
+    if (!lms || finished) return;
+    try {
+      lms.save(state.current, suspendString());
+      lms.result(progressResult());
+      lms.time((Date.now() - t0) / 1000);
+      let n = 0;
+      graded().forEach(it => {
+        const f = itemFraction(it);
+        if (f == null) return;
+        const d = responseOf(it, lms.standard);
+        lms.interaction(n++, Object.assign(d, { id: it.id, result: f >= 1 ? 'correct' : 'wrong', weighting: it.points, latency: state.took[it.id] }));
+      });
+      pages.forEach(p => (p.blocks || []).forEach(b => {
+        if (b.type !== 'survey' || !state.survey[b.id]) return;
+        (b.statements || []).forEach((st, i) => {
+          const v = state.survey[b.id].r[i];
+          if (v) lms.interaction(n++, { id: b.id + '-' + (i + 1), type: 'likert', response: String(v), pattern: null, result: 'neutral' });
+        });
+      }));
+      objectiveStats().forEach((s, i) => lms.objective(i, { id: s.o.id, pct: s.pct, passed: s.passed }));
+      lms.commit();
+    } catch (e) { /* ein Fehler im LMS darf den Kurs nicht stoppen */ }
+  }
+
+  // ---------- Blöcke ----------
+  const IMG_SHAPES = ['fleck', 'kreis', 'wolke'];
+  function figure(img, cls) {
+    if (!img || !img.src) return '';
+    const cap = [img.caption, img.credit ? (/^(©|foto|bild|quelle)/i.test(img.credit) ? img.credit : 'Bild: ' + img.credit) : ''].filter(Boolean);
+    // Geraeterahmen (monitor, tablet, whiteboard): das Bild haengt wie ein Bildschirm in der Kulisse
+    const frame = deviceFrame(img.frame);
+    // Glitch braucht die Bildadresse als CSS-Variable fuer die versetzten Farbkopien an den Raendern
+    const glitch = img.treat === 'glitch' ? ` style="--kp-img:url('${esc(res(img.src))}')"` : '';
+    // Zeichnungen (SVG) bekommen keine automatische Bildbehandlung des Stils (Raster, Duotone), die gilt Fotos
+    const drawing = /\.svg(\?|$)|^data:image\/svg/i.test(String(img.src || '')) ? ' kp-drawing' : '';
+    // Form hinter oder um die Illustration (Vorbild bildungsinnovator „EU AI Act“, „Kognitive Flexibilität“)
+    const shape = IMG_SHAPES.includes(img.shape) ? ' kp-form kp-form-' + img.shape : '';
+    return `<figure class="kp-fig${drawing}${shape} ${cls || ''} ${img.treat ? 'kp-treat-' + esc(img.treat) : ''} ${img.ai ? 'kp-ai' : ''}${frame.open ? ' kp-framed' : ''}">${frame.open}<div class="kp-fig-frame"${glitch}><img loading="lazy" decoding="async" src="${esc(res(img.src))}" alt="${esc(img.alt)}"${img.focus ? ` style="object-position:${esc(img.focus)}"` : ''}>${img.ai ? `<span class="kp-ai-badge">${T('kiBild')}</span>` : ''}
+      <button type="button" class="kp-zoom" data-zoom aria-label="Bild vergrößern"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M11 8.5v5M8.5 11h5"/></svg></button></div>${frame.close}
+      ${cap.length ? `<figcaption>${img.caption ? esc(img.caption) : ''}${img.credit ? `<span class="kp-credit">${esc(cap[cap.length - 1])}</span>` : ''}</figcaption>` : ''}</figure>`;
+  }
+
+  // Geraeterahmen um ein Bild oder eine Buehne: liefert oeffnendes und schliessendes HTML (leer ohne Rahmen).
+  // monitor = dunkle Blende mit Fuss, tablet = runde Blende mit Kamera, whiteboard = helle Aluleiste mit Ecken.
+  const DEVICE_FRAMES = ['monitor', 'tablet', 'whiteboard'];
+  function deviceFrame(kind) {
+    if (!DEVICE_FRAMES.includes(kind)) return { open: '', close: '', toString: () => '' };
+    return { open: `<div class="kp-device kp-device-${kind}"><div class="kp-device-screen">`, close: `</div><span class="kp-device-foot" aria-hidden="true"></span></div>`, toString: () => kind };
+  }
+
+  function embedUrl(url) {
+    const yt = String(url).match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{6,})/);
+    if (/youtu/.test(url) && yt) return 'https://www.youtube-nocookie.com/embed/' + yt[1];
+    const vi = String(url).match(/vimeo\.com\/(?:video\/)?(\d+)/);
+    if (vi) return 'https://player.vimeo.com/video/' + vi[1];
+    return url;
+  }
+
+  function renderMedia(m) {
+    m = m || {};
+    // Vollbild-Knopf am Video (Prüfung 19.10.2026): startet das Video gleich im Vollbild, auch auf dem iPhone (webkitEnterFullscreen)
+    if (m.kind === 'video' && m.src) return `<div class="kp-vid" data-vid><video controls playsinline ${m.poster ? `poster="${esc(res(m.poster))}"` : ''} src="${esc(res(m.src))}">${trackHtml(m.captions, m.captionsText)}</video>${vidFsOk() ? `<button type="button" class="kp-vid-full" data-vid-full>${icon('expand')}<span>${esc(T('vollbildAnsehen'))}</span></button>` : ''}</div>`;
+    if (m.kind === 'video' && plainText(m.transcript)) return videoDummy(m.transcript, m.poster);
+    if (m.kind === 'audio' && m.src) return `<audio controls src="${esc(res(m.src))}"></audio>${m.transcript ? `<details class="kp-acc"><summary>Transkript</summary><div class="kp-text">${res(m.transcript)}</div></details>` : ''}`;
+    if (m.kind === 'embed' && m.url) return `<div class="kp-embed"><iframe src="${esc(embedUrl(m.url))}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen title="Video"></iframe></div>`;
+    if (m.kind === 'gallery' && (m.images || []).length) return `<div class="kp-gallery">${m.images.map(im => `<img loading="lazy" decoding="async" src="${esc(res(im.src))}" alt="${esc(im.alt)}" data-lightbox tabindex="0">`).join('')}</div>`;
+    if (m.kind === 'compare' && m.before && m.after) {
+      return `<div class="kp-compare" data-compare><img loading="lazy" decoding="async" src="${esc(res(m.before))}" alt="vorher"><div class="kp-after" style="width:50%"><img loading="lazy" decoding="async" src="${esc(res(m.after))}" alt="nachher"></div><input type="range" min="0" max="100" value="50" aria-label="Vergleich verschieben"></div>`;
+    }
+    return '<p class="kp-label">Für diesen Block ist noch kein Medium hinterlegt.</p>';
+  }
+
+  const itemsHtml = (list, fn) => (list || []).map(fn).join('');
+
+  // Karten mit Aufdeckzeile (Vorbild „Zeit für einen anderen Blickwinkel“: „Zu eigensinnig?“ → „Effizient und kreativ!“):
+  // erst selbst vermuten, dann die Zeile unter der Karte öffnen. Stand in state.self[id].open, erledigt mit allen Zeilen.
+  const cardsRv = b => (b.items || []).map((it, i) => plainText(it.reveal) ? i : -1).filter(i => i >= 0);
+  function cardRvHtml(b, it, i, open) {
+    if (!plainText(it.reveal)) return '';
+    return open ? `<p class="kp-card-rv on" tabindex="-1">${icon('arrow-circle')}<span>${esc(plainText(it.reveal))}</span></p>`
+      : `<button type="button" class="kp-card-rv" data-card-rv="${i}" aria-expanded="false">${icon('arrow-circle')}<span>${esc(b.revealLabel || T('karteDahinter'))}</span></button>`;
+  }
+  function renderCards(b) {
+    const rv = cardsRv(b), open = (state.self[b.id] || {}).open || [];
+    const status = rv.length ? `<p class="kp-tk-hint kp-cards-status" data-cards-status>${esc(b.revealHint || T('aufdeckenHinweis'))} <b>${esc(T('aufgedeckt').replace('{n}', rv.filter(i => open.includes(i)).length).replace('{z}', rv.length))}</b></p>` : '';
+    if (b.look === 'reihe') {
+      // Tagesablauf (Vorbild „DISRU… WAS?“): links die Einleitung mit rundem „+“ für mehr Text, rechts die Leitfrage fett,
+      // darunter hohe Fotos nebeneinander auf einem zarten Verlauf, in jedem ein Punkt an eigener Stelle. Der Punkt deckt eine
+      // Zeile im Foto auf; Stand und Erledigt wie bei der Aufdeckzeile. Für Einstieg und Inhaltsfolien.
+      const PX = [24, 72, 78, 70, 74, 30], PY = [18, 38, 48, 62, 22, 55];
+      const moreId = 'rm-' + b.id;
+      const head = plainText(b.intro) || plainText(b.question) ? `<div class="kp-reihe-head"><div class="kp-reihe-intro"><div class="kp-text">${res(b.intro || '')}</div>${plainText(b.more) ? `<button type="button" class="kp-more-btn" data-more="${moreId}" aria-expanded="false" aria-controls="${moreId}" aria-label="${esc(T('mehrLesen'))}"><span aria-hidden="true"></span></button>` : ''}</div>${plainText(b.question) ? `<p class="kp-reihe-ask">${esc(plainText(b.question))}</p>` : ''}</div>${plainText(b.more) ? `<div class="kp-text kp-reihe-more" id="${moreId}" hidden>${res(b.more)}</div>` : ''}` : '';
+      const rstat = rv.length ? `<p class="kp-tk-hint kp-cards-status" data-cards-status>${esc(b.revealHint || T('punkteHinweis'))} <b>${esc(T('aufgedeckt').replace('{n}', rv.filter(k => open.includes(k)).length).replace('{z}', rv.length))}</b></p>` : '';
+      return `${head}${rstat}<div class="kp-cards kp-cards-reihe kp-cards-rv" data-cards="${b.id}" style="--n:${Math.max(1, (b.items || []).length)}">${itemsHtml(b.items, (it, i) => {
+        const has = plainText(it.reveal), on = open.includes(i);
+        const x = it.x != null && it.x !== '' ? Number(it.x) : PX[i % PX.length], y = it.y != null && it.y !== '' ? Number(it.y) : PY[i % PY.length];
+        return `<div class="kp-card kp-card-reihe fx-reveal" style="--kp-i:${i}">${it.image && it.image.src ? `<img src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}${has && !on ? `<button type="button" class="kp-ck-dot kp-rh-dot" data-card-rv="${i}" aria-expanded="false" aria-label="${esc((plainText(it.title) || T('karteDahinter')) + ', ' + (i + 1))}" style="left:${x}%;top:${y}%"><span aria-hidden="true"></span></button>` : ''}${has && on ? cardRvHtml(b, it, i, true) : ''}</div>`;
+      })}</div>`;
+    }
+    if (b.look === 'mosaik') {
+      // Bildcollage mit Nummern (Vorbild „Deine Probleme hätte ich gern!“): das erste Foto groß, die übrigen daneben und darunter;
+      // die Nummer im Bild deckt eine Zeile über dem Foto auf. Stand und Erledigt wie bei der Aufdeckzeile.
+      return `${status}<div class="kp-cards kp-cards-mosaik kp-cards-rv" data-cards="${b.id}">${itemsHtml(b.items, (it, i) => {
+        const has = plainText(it.reveal), on = open.includes(i);
+        const pos = it.x != null || it.y != null ? ` style="left:${Number(it.x) || 50}%;top:${Number(it.y) || 50}%"` : '';
+        return `<div class="kp-card kp-card-mosaik fx-reveal${pos ? ' kp-mz-placed' : ''}">${it.image && it.image.src ? `<img src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}${has && !on ? `<button type="button" class="kp-mz-num" data-card-rv="${i}" aria-expanded="false" aria-label="${esc((plainText(it.title) || T('karteDahinter')) + ', ' + (i + 1))}"${pos}>${i + 1}</button>` : ''}${has && on ? cardRvHtml(b, it, i, true) : ''}</div>`;
+      })}</div>`;
+    }
+    if (b.look === 'kreis') {
+      // Runde Fotos mit pulsierendem Punkt (Vorbild „Wer hat es am schwersten?“): Klick auf den Punkt deckt die Zeile unter dem Titel auf
+      return `${status}<div class="kp-cards kp-cards-kreis${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}" style="--n:${Math.min(4, Math.max(1, (b.items || []).length))}">${itemsHtml(b.items, (it, i) => {
+        const has = plainText(it.reveal), on = open.includes(i);
+        return `<div class="kp-card kp-card-kreis fx-reveal"><div class="kp-ck-pic">${it.image && it.image.src ? `<img src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}${has && !on ? `<button type="button" class="kp-ck-dot" data-card-rv="${i}" aria-expanded="false" aria-label="${esc((b.revealLabel || T('karteDahinter')) + ': ' + plainText(it.title))}"><span aria-hidden="true"></span></button>` : ''}</div>${plainText(it.title) ? `<h3>${esc(it.title)}</h3>` : ''}${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${has && on ? cardRvHtml(b, it, i, true) : ''}</div>`;
+      })}</div>`;
+    }
+    if (b.look === 'methode') {
+      // Methoden nebeneinander (Vorbild Rise „Mit Struktur zum Ziel“): großes Liniensymbol, darunter „Typ 1:“ und der Name in
+      // Versalien, kurzer Text und ein rundes Plus, das die Aufdeckzeile öffnet. Ohne Kasten, auf dunkler Folie hell.
+      const lab = plainText(b.numLabel);
+      return `${status}<div class="kp-cards kp-cards-methode${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}" style="--n:${Math.min(3, Math.max(1, (b.items || []).length))}">${itemsHtml(b.items, (it, i) => {
+        const has = plainText(it.reveal), on = open.includes(i);
+        return `<div class="kp-card kp-card-methode fx-reveal">${it.icon ? `<span class="kp-mt-icon" aria-hidden="true">${icon(it.icon)}</span>` : ''}<h3>${lab ? `<span class="kp-mt-num">${esc(lab)} ${i + 1}:</span>` : ''}${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${has && !on ? `<button type="button" class="kp-mt-plus" data-card-rv="${i}" aria-expanded="false" aria-label="${esc((b.revealLabel || T('karteDahinter')) + ': ' + plainText(it.title))}"><span aria-hidden="true"></span></button>` : ''}${has && on ? cardRvHtml(b, it, i, true) : ''}</div>`;
+      })}</div>`;
+    }
+    if (b.look === 'nummer') {
+      // Große Nummer (Vorbild bildungsinnovator „Führungskraft als Personalentwickler“, Kapitelbilder 01 bis 06): hinter dem Foto
+      // steht eine riesige Ziffer in der Hauptfarbe, das Foto ragt unten links hinein; Titel und Text darunter, Aufdeckzeile wie sonst
+      return `${status}<div class="kp-cards kp-cards-nummer${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}" style="--n:${Math.min(3, Math.max(1, (b.items || []).length))}">${itemsHtml(b.items, (it, i) => `<div class="kp-card kp-card-nummer fx-reveal" style="--kp-i:${i}"><div class="kp-nc-stage"><span class="kp-nc-num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span>${it.image && it.image.src ? `<img class="kp-nc-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}</div><h3>${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${cardRvHtml(b, it, i, open.includes(i))}</div>`)}</div>`;
+    }
+    return `${status}<div class="kp-cards${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}">${itemsHtml(b.items, (it, i) => `<div class="kp-card fx-reveal fx-hover-lift${it.icon ? ' kp-card-iconed' : ''}${it.icon && !plainText(it.html) ? ' kp-card-tile' : ''}${it.image && it.image.src ? ' kp-card-pic' : ''}">${it.image && it.image.src ? `<img class="kp-card-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}${it.icon ? `<span class="kp-card-icon" aria-hidden="true">${icon(it.icon, 'kp-ico-lg')}</span>` : ''}<h3>${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${cardRvHtml(b, it, i, open.includes(i))}</div>`)}</div>`;
+  }
+
+  function renderBlock(b) {
+    if (isCustom(b)) return `<div class="kp-text kp-custom">${res(b.customHtml)}</div>`;
+    switch (b.type) {
+      // Zum Vertiefen als Zeile mit rundem Plus (Vorbild Rise „Plan B: So umschifft Ihr mögliche Schwierigkeiten“): nur der Titel, kein Etikett;
+      // Liste mit Haken im Kreis (Vorbild Rise „Die Stärken der Supertalente“); Dachzeile, Überschrift und Prompt zum Kopieren
+      case 'text': { const plain = `<div class="kp-text${b.look === 'haken' ? ' kp-list-haken' : ''}">${res(b.html)}</div>`;
+        if (b.title || b.eyebrow) return `${eyebrow(b.eyebrow)}${b.title ? `<h3 class="kp-text-title">${accent(b.title)}</h3>` : ''}${plain}${copyBox(b)}`;
+        if (b.deep) return b.deepLook === 'plus' && b.deepTitle
+          ? `<details class="kp-deep kp-deep-plus"><summary><span class="kp-deep-title">${esc(b.deepTitle)}</span><span class="kp-deep-btn" aria-hidden="true"></span></summary><div class="kp-text">${res(b.html)}</div></details>`
+          : `<details class="kp-deep"><summary><span class="kp-deep-tag">${esc(T('zumVertiefen'))}</span>${b.deepTitle ? `<span class="kp-deep-title">${esc(b.deepTitle)}</span>` : ''}</summary><div class="kp-text">${res(b.html)}</div></details>`;
+        return plain + copyBox(b); }
+      // Zitatkarte über dem Foto (Vorbild Rise „Ziele mit Plan verfolgen“): dunkle Karte mit Name und Zitat ragt unten ins Bild
+      case 'image': return b.quote && plainText(b.quote.text) && b.image && b.image.src
+        ? `<div class="kp-fig-quoted">${figure(b.image, 'kp-' + (b.size || 'full'))}<blockquote class="kp-fig-quote kp-on-dark">${b.quote.name ? `<footer><b>${esc(b.quote.name)}</b>${b.quote.role ? ` <span>${esc(b.quote.role)}</span>` : ''}</footer>` : ''}<p>${esc(plainText(b.quote.text))}</p></blockquote></div>`
+        : figure(b.image, 'kp-' + (b.size || 'full'));
+      // Karte (Vorbild „In diesem Training lernst Du“): großes Foto, der Text liegt als dunkle Karte überlappend unten daneben
+      case 'textimage': if (b.look === 'karte') return `<div class="kp-ti-karte${b.side === 'left' ? ' kp-left' : ''}${b.cardStyle === 'akzent' ? ' kp-ti-akzent' : ''}">${figure(b.image)}<div class="kp-ti-card${b.cardStyle === 'akzent' ? '' : ' kp-on-dark'} kp-text">${res(b.html)}</div></div>`;
+        return `<div class="kp-textimage ${b.side === 'left' ? 'kp-left' : ''} ${b.size === 'medium' || b.size === 'small' ? 'kp-ti-' + b.size : ''}"><div class="kp-text">${res(b.html)}</div>${figure(b.image)}</div>`;
+      // Moderation neben dem Video (Vorbild „Warum ist Resilienz so wichtig?“): freigestellte Person auf einer getönten, schräg
+      // geschnittenen Fläche links, das Video rechts daneben in derselben Höhe
+      case 'media': {
+        const pr = b.presenter || {}, prOn = pr.image && pr.image.src && ['video', 'embed'].includes((b.media || {}).kind);
+        // „Kurz zusammengefasst“ neben dem Video (Vorbild bildungsinnovator „Führung neu gedacht“, „Digital Sales“): Kernaussagen mit Pfeil
+        const pts = (b.points || []).map(x => plainText(x)).filter(Boolean);
+        const sum = pts.length ? `<div class="kp-media-sum"><p class="kp-eyebrow">${esc(b.pointsTitle || T('kurzZusammen'))}</p><ul>${pts.map((x, i) => `<li class="fx-reveal" style="--kp-i:${i}">${icon('arrow-circle')}<span>${esc(x)}</span></li>`).join('')}</ul></div>` : '';
+        const inner = sum ? `<div class="kp-media-wrap"><div class="kp-media">${renderMedia(b.media)}</div>${sum}</div>` : `<div class="kp-media">${renderMedia(b.media)}</div>`;
+        // Expertin neben dem Video (Vorbild bildungsinnovator „Transformation integral gestalten“, „Yippi-Logik“): rundes Porträt,
+        // Name groß, darunter die Rolle („ist die Expertin für dieses Modul“)
+        const ex = b.expert || {}, exP = ex.castId ? (castOf({ castId: ex.castId }) || {}) : {};
+        const exImg = (ex.image && ex.image.src ? ex.image : null) || (exP.image && exP.image.src ? exP.image : null);
+        const exName = ex.name || exP.name || '';
+        if (!sum && (exImg || exName) && ['video', 'embed'].includes((b.media || {}).kind)) {
+          return `<div class="kp-expert"><div class="kp-media">${renderMedia(b.media)}</div><div class="kp-expert-side">${exImg ? `<img class="kp-expert-img" src="${esc(res(exImg.src))}" alt="${esc(exImg.alt || exName)}" loading="lazy"${focusStyle(exImg)}>` : ''}${exName ? `<p class="kp-expert-name">${esc(exName)}</p>` : ''}${ex.role ? `<p class="kp-expert-role">${res(ex.role)}</p>` : ''}</div></div>${b.caption ? `<p class="kp-caption">${esc(b.caption)}</p>` : ''}`;
+        }
+        return `${prOn ? `<div class="kp-presenter"><figure class="kp-pres-person"><img src="${esc(res(pr.image.src))}" alt="${esc(pr.image.alt || pr.name || '')}" loading="lazy">${pr.name ? `<figcaption><b>${esc(pr.name)}</b>${pr.role ? `<span>${esc(pr.role)}</span>` : ''}</figcaption>` : ''}</figure>${inner}</div>` : inner}${b.caption ? `<p class="kp-caption">${esc(b.caption)}</p>` : ''}`;
+      }
+      case 'html': return `<div class="kp-text kp-custom">${res(b.html)}</div>`;
+      case 'note': return b.style === 'quote'
+        ? `<blockquote class="kp-quote">${res(b.html)}${b.author ? `<footer class="kp-author">${esc(b.author)}${b.authorRole ? `<span>${esc(b.authorRole)}</span>` : ''}</footer>` : ''}</blockquote>`
+        : b.style === 'reiter' ? `<div class="kp-note kp-note-reiter"><span class="kp-note-tab" aria-hidden="true">${b.tab ? esc(b.tab) : icon('info')}</span><div class="kp-text">${b.title ? `<h3 class="kp-note-title">${accent(b.title)}</h3>` : ''}${b.tab ? `<span class="kp-sr">${esc(b.tab)}: </span>` : ''}${res(b.html)}</div></div>`
+        : `<div class="kp-note kp-text">${b.title ? `<h3 class="kp-note-title">${accent(b.title)}</h3>` : ''}${res(b.html)}</div>`;
+      case 'divider': return '<hr class="kp-divider">';
+      // Bild-Akkordeon (Vorbild „Die Situation · Das Warum · Die Alternative“): Bilder nebeneinander, darunter die Leiste zum Aufklappen
+      case 'accordion': return b.look === 'bilder'
+        ? `<div class="kp-acc-bilder" style="--n:${Math.min(4, (b.items || []).length || 1)}">${itemsHtml(b.items, it => `<details class="kp-acc kp-acc-bild"><summary>${it.image && it.image.src ? `<img src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}<span class="kp-acc-bar">${esc(it.title)}</span></summary><div class="kp-text">${res(it.html)}</div></details>`)}</div>`
+        : itemsHtml(b.items, it => `<details class="kp-acc"><summary>${esc(it.title)}</summary><div class="kp-text">${res(it.html)}</div></details>`);
+      // Lesezeichen (Vorbild youknow „Unbewusste Vorannahmen“): nummerierte Reiter senkrecht links, die Karte mit Bild und Titel daneben
+      case 'tabs': return b.look === 'lesezeichen'
+        ? `<div data-kurs-tabs class="kp-tabs-lz">${itemsHtml(b.items, it => `<section data-titel="${esc(it.title)}" class="kp-lz-card">${it.image && it.image.src ? `<img class="kp-lz-img" loading="lazy" decoding="async" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}">` : ''}<h3>${esc(it.title)}</h3><div class="kp-text">${res(it.html)}</div></section>`)}</div>`
+        : `<div data-kurs-tabs>${itemsHtml(b.items, it => `<section data-titel="${esc(it.title)}" class="kp-text">${res(it.html)}</section>`)}</div>`;
+      case 'flipcards': {
+        const tall = (b.items || []).some(it => (it.image && it.image.src) || (it.backImage && it.backImage.src));
+        const pic = im => im && im.src ? `<img class="kp-flip-img" src="${esc(res(im.src))}" alt="${esc(im.alt || '')}" loading="lazy">` : '';
+        const cards = (on) => itemsHtml(b.items, (it, i) => `<div class="kp-flip${tall ? ' kp-flip-tall' : ''}${on != null && i === on ? ' on' : ''}" tabindex="0" role="button" aria-label="${esc(it.title)}: Karte umdrehen"><div class="kp-flip-inner"><div class="kp-flip-front">${pic(it.image)}${esc(it.title)}</div><div class="kp-flip-back">${pic(it.backImage)}${res(it.html)}</div></div></div>`);
+        // Karussell: eine Karte in der Mitte, blaettern mit ‹ ›, „1 von 3“ und eine duenne Fortschrittslinie
+        if (b.look === 'karussell' && (b.items || []).length) {
+          const N = b.items.length;
+          const at = Math.min(Number((state.self[b.id] || {}).at) || 0, N - 1);
+          return `<div class="kp-flipcar" data-flipcar="${b.id}">
+            <div class="kp-flipcar-track">${cards(at)}</div>
+            <div class="kp-flipcar-nav">
+              <button type="button" class="kp-flipcar-btn" data-fc-step="${b.id}" data-dir="-1" aria-label="${T('zurueck')}" ${at === 0 ? 'disabled' : ''}>‹</button>
+              <span class="kp-flipcar-pos"><span data-fc-pos>${at + 1} ${T('von')} ${N}</span><i class="kp-flipcar-bar" aria-hidden="true"><b style="width:${Math.round((at + 1) / N * 100)}%"></b></i></span>
+              <button type="button" class="kp-flipcar-btn" data-fc-step="${b.id}" data-dir="1" aria-label="${T('weiter')}" ${at >= N - 1 ? 'disabled' : ''}>›</button>
+            </div></div>`;
+        }
+        // Bildstreifen (Vorbild youknow „Unbewusste Vorannahmen“): hohe Bilder nebeneinander, ein runder Knopf mit Brille im Bild,
+        // die Rückseite zeigt die Szene aus dem anderen Blickwinkel (backImage) mit Titel und Text. Umdrehen und Erledigt wie bei den Karten.
+        if (b.look === 'streifen' && (b.items || []).length) {
+          const Y = [74, 66, 80, 70, 62];
+          const fill = im => (im && im.src ? `<img class="kp-flip-img" src="${esc(res(im.src))}" alt="${esc(im.alt || '')}" loading="lazy"${focusStyle(im)}>${im.credit ? `<span class="kp-credit-over kp-stripe-credit">${esc(im.credit)}</span>` : ''}` : '');
+          return `<div class="kp-flipgrid kp-stripes" style="--n:${b.items.length}">${itemsHtml(b.items, (it, i) => `<div class="kp-flip kp-stripe" tabindex="0" role="button" aria-label="${esc(it.title)}: Karte umdrehen" style="--y:${Number(it.y) || Y[i % Y.length]}%"><div class="kp-flip-inner"><div class="kp-flip-front">${fill(it.image)}<span class="kp-stripe-btn" aria-hidden="true">${icon(b.icon || 'glasses')}</span></div><div class="kp-flip-back">${fill(it.backImage || it.image)}<div class="kp-stripe-text"><strong>${esc(it.title)}</strong>${res(it.html)}</div></div></div></div>`)}</div>`;
+        }
+        // Bildkacheln (Vorbild „Besonderheiten in der Online-Kommunikation“): quadratische Fotos ohne Text, Akzentkante oben,
+        // Eckmarke mit Umdreh-Symbol; die Rückseite zeigt Titel und Text. Der Titel steht vorn als aria-label.
+        if (b.look === 'kacheln' && (b.items || []).length) {
+          const fill = im => (im && im.src ? `<img class="kp-flip-img" src="${esc(res(im.src))}" alt="${esc(im.alt || '')}" loading="lazy"${focusStyle(im)}>` : '');
+          // Spalten: bis vier nebeneinander, sechs und neun als 3er-Raster, sonst vier; die Zeilenzahl begrenzt die Breite
+          const N = b.items.length, cols = N <= 4 ? N : (N % 3 === 0 || N === 5 ? 3 : 4);
+          return `<div class="kp-flipgrid kp-tiles" style="--n:${cols};--rows:${Math.ceil(N / cols)}">${itemsHtml(b.items, it => `<div class="kp-flip kp-tile" tabindex="0" role="button" aria-label="${esc(it.title)}: Karte umdrehen"><div class="kp-flip-inner"><div class="kp-flip-front">${fill(it.image)}${it.image && it.image.src ? '' : `<strong class="kp-tile-title">${esc(it.title)}</strong>`}<span class="kp-tile-badge" aria-hidden="true">${icon(b.icon || 'flip')}</span></div><div class="kp-flip-back"><div class="kp-tile-text"><strong>${esc(it.title)}</strong>${res(it.html)}</div></div></div></div>`)}</div>`;
+        }
+        return `<div class="kp-flipgrid">${cards()}</div>`;
+      }
+      case 'linkcard': return renderLinkcard(b);
+      case 'table': return renderTable(b);
+      case 'timeline': if (b.style === 'fotos') return renderTimelineFotos(b); return `<div class="${b.style === 'steps' ? 'kp-steps' : 'kp-timeline'}">${itemsHtml(b.items, it => `<div class="fx-reveal"><div><h3>${esc(it.title)}</h3><div class="kp-text">${res(it.html)}</div></div></div>`)}</div>`;
+      case 'cards': return renderCards(b);
+      case 'quiz': return renderQuiz(b, b.graded !== false);
+      case 'pool': return `<div class="kp-pool">${(state.pools[b.id] || []).map(i => b.questions[i]).filter(Boolean).map(q => renderQuiz(q, b.graded !== false)).join('')}</div>`;
+      case 'review': return renderReview(b);
+      case 'glossquiz': return renderGlossquiz(b);
+      case 'pretest': return renderPretest(b);
+      case 'branch': return renderBranch(b);
+      case 'debrief': return renderDebrief(b);
+      case 'reflection': return renderReflection(b);
+      case 'actionplan': return renderPlan(b);
+      case 'survey': return renderSurvey(b);
+      case 'certificate': return renderCertificate(b);
+      case 'ivideo': return renderIVideo(b);
+      case 'dialog': return renderDialog(b);
+      case 'sequence': return renderSequence(b);
+      case 'lottie': return `<div class="kp-lottie kp-${b.size || 'medium'}" data-lottie="${b.id}" role="img" aria-label="${esc(b.alt || 'Animation')}"></div>`;
+      case 'hero': return renderHero(b);
+      case 'guide': return renderGuide(b);
+      case 'agenda': return renderAgenda(b);
+      case 'selfcheck': return renderSelfcheck(b);
+      case 'chapters': return renderChapters(b);
+      case 'statement': return renderStatement(b);
+      case 'predict': return renderPredict(b);
+      case 'takeaways': return renderTakeaways(b);
+      case 'sources': return renderSources(b);
+      case 'team': return renderTeam(b);
+      case 'vstatements': return renderStatements(b);
+      case 'vscene': return renderVscene(b);
+      case 'bignumber': return renderBignumber(b);
+      case 'hotspots': return renderHotspots(b);
+      case 'layers': return renderLayers(b);
+      case 'aufdecken': return renderAufdecken(b);
+      case 'comicstrip': return renderStrip(b);
+      case 'sortcats': return renderSort(b);
+      case 'triage': return renderTriage(b);
+      case 'levers': return renderLevers(b);
+      case 'chat': return renderChat(b);
+      case 'fragen': return renderFragen(b);
+      case 'ueberdich': return renderUeberdich(b);
+      case 'kurzfrage': return renderKurzfrage(b);
+      case 'matrix': return renderMatrix(b);
+      case 'promptbuild': return renderPromptBuild(b);
+      case 'findtext': return renderFindText(b);
+      case 'markieren': return renderMarkieren(b);
+      case 'merkkarte': return renderMerkkarte(b);
+      case 'mappe': return renderMappe(b);
+      case 'videopaar': return renderVideopaar(b);
+      case 'bildschirm': return renderBildschirm(b);
+      case 'kartenstapel': return renderKartenstapel(b);
+      case 'formular': return renderFormular(b);
+      case 'simulation': return renderSimulation(b);
+      case 'casebank': return renderCasebank(b);
+      case 'mission': return `<div class="kp-mission" data-mission="${b.id}"><p class="kp-mission-wait">${esc(b.title || b.intro || 'Mini-Mission')}</p></div>`;
+      case 'game': {
+        // Vorschau und Review-Version: Spiel als srcdoc (window.KURS_SPIELE), im Paket als eigene Datei spiel-<id>.html
+        const inline = window.KURS_SPIELE && window.KURS_SPIELE[b.id];
+        const done = (state.self.mm || {})[b.id];
+        if (opts.renderer && !inline) return `<p class="kp-mission-wait">${esc(String(b.title || 'Level-Spiel').replace(/\*/g, ''))}</p>`;
+        return `<div class="kp-game${b.cover ? ' kp-game-cover' : ''}">${done ? `<p class="kp-game-done">✓ ${T('spielGeschafft')}</p>` : ''}<iframe data-game="${b.id}" title="${esc(String(b.title || 'Level-Spiel').replace(/\*/g, ''))}" allow="fullscreen" ${inline ? `srcdoc="${esc(inline)}"` : `src="spiel-${esc(b.id)}.html"`}></iframe></div>`;
+      }
+      case 'interaktion': return renderInteraktion(b);
+      case 'process': return renderProcess(b);
+      case 'gate': return renderGate(b);
+      case 'schloss': return renderSchloss(b);
+      case 'wahlbrett': return renderWahlbrett(b);
+      case 'compare': return renderCompare(b);
+      case 'album': return renderAlbum(b);
+      case 'checklist': return renderChecklist(b);
+      case 'attachments': return renderAttachments(b);
+      case 'dial': return renderDial(b);
+      case 'ringe': return renderRinge(b);
+      case 'pyramide': return renderPyramide(b);
+      case 'venn': return renderVenn(b);
+      case 'anim': return renderAnim(b);
+      case 'motion': return renderMotion(b);
+      default: return '';
+    }
+  }
+
+  const sameBoxes = q => !!set.sameBoxes && q.kind === 'single' && !['regler', 'pillen'].includes(q.look);
+  function quizHint(q) {
+    if (q.kind === 'multiple' && q.look === 'regal') return T('regalWaehle').replace('{n}', regalPick(q));
+    if (set.sameBoxes && (q.kind === 'multiple' || sameBoxes(q))) return T('alleRichtigen');
+    return {
+      multiple: 'Mehrere Antworten sind richtig', single: 'Eine Antwort ist richtig', truefalse: 'Wahr oder falsch?',
+      fill: 'Lücken ausfüllen', numeric: 'Zahl eingeben', order: 'In die richtige Reihenfolge bringen', match: 'Passendes zuordnen', hotspot: 'Die richtige Stelle im Bild anklicken', pins: 'Nummern an die passende Stelle im Bild bringen', claims: T('jedeAussage')
+    }[q.kind] || 'Eine Antwort ist richtig';
+  }
+
+  const CONF = ['Geraten', 'Eher sicher', 'Sicher'];
+
+  // Serie: wie viele Fragen in Kursreihenfolge bis zu dieser am Stück richtig sind (settings.streak, kein Vergleich mit anderen)
+  function streakOf(q) {
+    const qs = items.filter(it => it.q).map(it => it.q);
+    let at = qs.indexOf(q);
+    if (at < 0) at = qs.findIndex(x => x.id === q.id);
+    let n = 0;
+    for (let i = at; i >= 0; i--) {
+      const x = qs[i];
+      if (state.answers[x.id] == null || evaluate(x, state.answers[x.id]) < 1) break;
+      n++;
+    }
+    return n;
+  }
+  function renderQuiz(q, isGraded) {
+    const given = state.answers[q.id];
+    const done = given != null;
+    // Postfach (Vorbild Storyline-Phishing-Übung): Etiketten auf Stellen einer Mail; als Übung sofort je Etikett Rückmeldung durch die Figur
+    const mailLook = q.kind === 'match' && q.dragdrop && q.look === 'postfach';
+    const mailLive = mailLook && !isGraded && q.instant !== false;
+    const tries = state.tries[q.id] || 0;
+    if (!state.seen[q.id]) state.seen[q.id] = Date.now();
+    let body = '';
+
+    if (q.kind === 'fill') {
+      let i = -1;
+      const sol = fillSolutions(q);
+      // Lückentext mit Auswahl (q.fillChoice): statt Freitext ein Auswahlfeld je Lücke mit allen Lösungen plus Ablenkern.
+      // Schreibweisen spielen dann keine Rolle, im Test ist das fairer; die Lücken sind dafür etwas leichter zu raten.
+      const choices = q.fillChoice ? fillChoices(q) : null;
+      body = '<p class="kp-fill' + (choices ? ' kp-fill-choice' : '') + '">' + esc(q.text || '').replace(/\[\[(.+?)\]\]/g, () => {
+        i++;
+        if (!done) return choices ? `<select data-blank="${i}" aria-label="Lücke ${i + 1}"><option value="">…</option>${choices.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>` : `<input type="text" data-blank="${i}" autocomplete="off" aria-label="Lücke ${i + 1}">`;
+        const ok = sol[i].some(s => normStr(s) === normStr(given[i]));
+        return `<input type="text" value="${esc(given[i] || '')}" disabled class="${ok ? 'kp-right' : 'kp-wrong'}" aria-label="Lücke ${i + 1}: ${ok ? 'richtig' : 'falsch'}">` + (ok ? '' : ` <span class="kp-solution">(${esc(sol[i][0])})</span>`);
+      }) + '</p>';
+    } else if (q.kind === 'numeric') {
+      // Zahl mit Toleranz (Fristen, Grenzwerte, Mengen): ein Eingabefeld, Einheit dahinter, nach dem Prüfen der erlaubte Bereich
+      const tol = Number(q.tolerance) || 0, ans = Number(q.answer) || 0;
+      const ok = done && evaluate(q, given) >= 1;
+      const range = tol ? `${fmtNum(ans - tol)} ${T('bis')} ${fmtNum(ans + tol)}` : fmtNum(ans);
+      body = `<p class="kp-numeric"><label><span class="kp-label">${esc(q.prompt || T('deineZahl'))}</span>
+        <input type="text" inputmode="decimal" data-num="${q.id}" value="${done ? esc(given[0] || '') : ''}" ${done ? 'disabled' : ''} class="${done ? (ok ? 'kp-right' : 'kp-wrong') : ''}" autocomplete="off" aria-label="${esc(q.prompt || T('deineZahl'))}${q.unit ? ' in ' + esc(q.unit) : ''}"></label>${q.unit ? `<em class="kp-num-unit">${esc(q.unit)}</em>` : ''}
+        ${done && !ok ? `<span class="kp-solution">(${T('richtigWaere')}: ${esc(range)}${q.unit ? ' ' + esc(q.unit) : ''})</span>` : ''}</p>`;
+    } else if (q.kind === 'order') {
+      const order = done ? given : shuffled((q.items || []).length, q.id + tries);
+      // Pfeil (Vorbild PUMA „Structure your talk“): Start oben, Ende unten, die Schritte als Streifen am Pfeil;
+      // nach dem Prüfen nennt jeder falsche Schritt seinen richtigen Platz (die Lösung steht damit am Pfeil)
+      const pfeil = q.look === 'pfeil';
+      // Bildreihe (Vorbild „Drag and Drop“ mit „1st place … 5th place“): die Schritte als Bilder nebeneinander, darüber
+      // die Plätze; ◀ ▶ oder Ziehen verschiebt, nach dem Prüfen nennt ein falsches Bild seinen Platz
+      if (q.look === 'bilder') {
+        const n = (q.items || []).length;
+        const place = pos => plainText((q.placeLabels || {})[pos] || '') || T('platzN').replace('{n}', pos + 1);
+        const pic = idx => { const im = (q.itemImages || {})[idx]; return im && im.src ? `<img class="kp-order-img" src="${esc(res(im.src))}" alt="${esc(im.alt || '')}" loading="lazy" draggable="false"${focusStyle(im)}>` : ''; };
+        body = `<div class="kp-order-reihe" style="--n:${n}"><div class="kp-order-places" aria-hidden="true">${order.map((x, pos) => `<span class="kp-order-place">${esc(place(pos))}</span>`).join('')}</div>
+          <div class="kp-order kp-order-row" data-order>${order.map((idx, pos) => `<div class="kp-order-item ${done ? (idx === pos ? 'kp-right' : 'kp-wrong') : ''}" draggable="${!done}" data-item="${idx}">
+            ${pic(idx)}<span class="kp-order-cap">${esc(q.items[idx])}</span>
+            ${done ? (idx !== pos ? `<b class="kp-order-pos">${esc(place(idx))}</b>` : '') : `<span class="kp-move"><button data-up aria-label="${T('nachLinks')}">◀</button><button data-down aria-label="${T('nachRechts')}">▶</button></span>`}
+          </div>`).join('')}</div></div>`;
+      } else {
+      const list = `<div class="kp-order" data-order>${order.map((idx, pos) => `
+        <div class="kp-order-item ${done ? (idx === pos ? 'kp-right' : 'kp-wrong') : ''}" draggable="${!done}" data-item="${idx}">
+          <span class="kp-grip" aria-hidden="true">≡</span><span>${esc(q.items[idx])}</span>
+          ${done ? (pfeil && idx !== pos ? `<b class="kp-order-pos">${T('gehoertAn')} ${idx + 1}</b>` : '') : '<span class="kp-move"><button data-up aria-label="nach oben">▲</button><button data-down aria-label="nach unten">▼</button></span>'}
+        </div>`).join('')}</div>`;
+      body = pfeil ? `<div class="kp-pfeil"><span class="kp-pfeil-end kp-pfeil-top">${esc(q.startLabel || T('start'))}</span>${list}<span class="kp-pfeil-end kp-pfeil-bottom">${esc(q.endLabel || T('ende'))}</span></div>` : list;
+      }
+    } else if (q.kind === 'match' && q.dragdrop) {
+      // Bild neben dem Begriff, falls hinterlegt (etwa ein Bauteil und seine Bezeichnung)
+      const pairImg = pair => pair.image && pair.image.src ? `<img class="kp-match-img" loading="lazy" decoding="async" src="${esc(res(pair.image.src))}" alt="${esc(pair.image.alt || '')}">` : '';
+      // Zuordnen per Ziehen; die Nummerntasten am Kärtchen sind der Weg ohne Maus (WCAG 2.5.7)
+      const pairs = q.pairs || [];
+      const rights = shuffled(pairs.length, q.id);
+      const placed = done ? given : [];
+      // Musterantwort zerlegen (q.look 'zerlegen'): die Tasten tragen den Buchstaben des Teils statt einer Nummer
+      const zl = q.look === 'zerlegen';
+      const card = r => {
+        const row = placed.indexOf(r);
+        const right = done && row === r;
+        return `<li class="kp-mdd-card${zl ? ' kp-zl-card' : ''} ${done ? (row < 0 ? '' : (right ? 'kp-right' : 'kp-wrong')) : ''}" draggable="${!done}" data-mdd-card="${r}" data-quiz="${q.id}" tabindex="0">
+          <span>${esc(pairs[r].right)}</span>
+          ${done ? '' : `<span class="kp-mdd-move">${pairs.map((x, n) => { const to = esc(plainText(x.left).replace(/\*\*|\[\[|\]\]/g, '')); return `<button data-mdd-to="${n}" data-card="${r}" data-quiz="${q.id}" title="Zu „${to}“"${zl ? ` aria-label="Zu ${to}"` : ''}>${zl ? esc(zlShort(x)) : n + 1}</button>`; }).join('')}</span>`}
+        </li>`;
+      };
+      const open = rights.filter(r => placed.indexOf(r) < 0);
+      if (q.look === 'postfach') body = mailCheckHtml(q, pairs, open, placed, done, given, card, mailLive);
+      else if (zl) body = zerlegenHtml(q, pairs, open, placed, done, given, card);
+      else body = `<div class="kp-mdd" data-mdd="${q.id}">
+        <p class="kp-sort-hint">${esc(T('zuordnenHinweis'))}</p>
+        <ul class="kp-mdd-pool" data-mdd-pool="${q.id}">${open.map(card).join('') || `<li class="kp-sort-empty">${T('allesZugeordnet')}</li>`}</ul>
+        <div class="kp-mdd-rows">${pairs.map((pair, i) => `
+          <div class="kp-mdd-row ${done ? (given[i] === i ? 'kp-right' : 'kp-wrong') : ''}">
+            <span class="kp-mdd-left"><span class="kp-num" aria-hidden="true">${i + 1}</span>${pairImg(pair)}${esc(pair.left)}</span>
+            <ul class="kp-mdd-drop" data-mdd-drop="${i}" data-quiz="${q.id}" aria-label="${esc(pair.left)}">
+              ${placed[i] >= 0 ? card(placed[i]) : (done ? `<li class="kp-sort-empty">${T('nichtZugeordnet')}</li>` : '')}
+            </ul>
+            ${done && given[i] !== i ? `<span class="kp-solution">(${esc(pair.right)})</span>` : ''}
+          </div>`).join('')}</div>
+      </div>`;
+    } else if (q.kind === 'match' && q.look === 'linien') {
+      // Zuordnen mit Linien (Vorbild Storyline „Matching“, Mini-Mission G01): links die Begriffe, rechts gemischt die
+      // Zuordnungen, ein Klick links und einer rechts ziehen eine Linie (SVG über dem Raster). Ohne Maus: Tab und
+      // Eingabetaste, gleiche Reihenfolge. Die Verbindungen stehen bis zum Prüfen nur im DOM (data-to am linken Begriff),
+      // drawMatchLines() zeichnet sie nach jedem Klick und bei Größenänderung neu.
+      const rights = shuffled((q.pairs || []).length, q.id);
+      const pairImg = pair => pair.image && pair.image.src ? `<img class="kp-match-img" loading="lazy" decoding="async" src="${esc(res(pair.image.src))}" alt="${esc(pair.image.alt || '')}">` : '';
+      const left = (q.pairs || []).map((pair, i) => `<button type="button" class="kp-ml-item kp-ml-left${done ? (given[i] === i ? ' kp-right' : ' kp-wrong') : ''}" data-ml-left="${i}" data-to="${done ? given[i] : -1}" ${done ? 'disabled' : ''} aria-label="${esc(pair.left)}${done ? '' : ': ' + T('linieWaehlen')}">${pairImg(pair)}<span>${esc(pair.left)}</span></button>`).join('');
+      const right = rights.map(r => `<button type="button" class="kp-ml-item kp-ml-right" data-ml-right="${r}" ${done ? 'disabled' : ''}>${esc(q.pairs[r].right)}</button>`).join('');
+      body = `<div class="kp-match-lines${done ? ' kp-ml-done' : ''}" data-ml="${q.id}"><p class="kp-ml-hint">${T('linieHinweis')}</p>
+        <div class="kp-ml-grid"><div class="kp-ml-col">${left}</div><div class="kp-ml-col">${right}</div><svg class="kp-ml-svg" aria-hidden="true"></svg></div>
+        ${done ? `<ol class="kp-ml-sol">${(q.pairs || []).map((pair, i) => given[i] === i ? '' : `<li>${esc(pair.left)} → <b>${esc(pair.right)}</b></li>`).join('')}</ol>` : ''}</div>`;
+    } else if (q.kind === 'match') {
+      const rights = shuffled((q.pairs || []).length, q.id);
+      const pairImg = pair => pair.image && pair.image.src ? `<img class="kp-match-img" loading="lazy" decoding="async" src="${esc(res(pair.image.src))}" alt="${esc(pair.image.alt || '')}">` : '';
+      body = `<div class="kp-match">${q.pairs.map((pair, i) => `
+        <div class="kp-match-row ${done ? (given[i] === i ? 'kp-right' : 'kp-wrong') : ''}">
+          <span id="m-${q.id}-${i}" class="kp-match-left">${pairImg(pair)}${esc(pair.left)}</span>
+          <select data-match="${i}" ${done ? 'disabled' : ''} aria-labelledby="m-${q.id}-${i}">
+            <option value="-1">Bitte wählen …</option>
+            ${rights.map(r => `<option value="${r}" ${done && given[i] === r ? 'selected' : ''}>${esc(q.pairs[r].right)}</option>`).join('')}
+          </select>
+        </div>`).join('')}</div>`;
+    } else if (q.kind === 'claims') {
+      // Aussagen beurteilen (Vorbild AGG-Training „Was bedeutet Diskriminierung eigentlich?“): je Aussage zwei Knöpfe, eine Auswertung
+      const yes = q.labelTrue && q.labelTrue !== 'Wahr' ? q.labelTrue : T('ja'), no = q.labelFalse && q.labelFalse !== 'Falsch' ? q.labelFalse : T('nein');
+      body = `<div class="kp-claims">${(q.claims || []).map((x, i) => {
+        const v = done ? given[i] : null, ok = done && v === (x.yes === false ? 0 : 1);
+        const opt = (val, lab) => `<label class="kp-claim-opt"><input type="radio" name="cl-${q.id}-${i}" value="${val}" ${v === val ? 'checked' : ''} ${done ? 'disabled' : ''}><span>${esc(lab)}</span></label>`;
+        return `<div class="kp-claim${done ? (ok ? ' kp-right' : ' kp-wrong') : ''}" role="radiogroup" aria-labelledby="cl-${q.id}-${i}-t">
+          <span class="kp-claim-text" id="cl-${q.id}-${i}-t">${esc(x.text)}</span><span class="kp-claim-btns">${opt(1, yes)}${opt(0, no)}</span>
+          ${done && (x.feedback || !ok) ? `<span class="kp-claim-fb">${ok ? '' : `${T('richtigWaere')}: <b>${esc(x.yes === false ? no : yes)}</b>. `}${esc(x.feedback || '')}</span>` : ''}</div>`;
+      }).join('')}</div>`;
+    } else if (q.kind === 'pins') {
+      // Nummern ins Bild (Vorbild „Drag and drop on image“): links die nummerierten Aussagen, rechts das Bild mit Zielen
+      const at = done ? given : (pinsAt[q.id] || (q.pins || []).map(() => -1));
+      body = q.image && q.image.src ? pinsHtml(q, at, done) : '<p class="kp-label">Kein Bild hinterlegt.</p>';
+    } else if (q.kind === 'hotspot') {
+      const img = q.image && q.image.src ? res(q.image.src) : '';
+      const mark = done ? `<span class="kp-marker ${evaluate(q, given) ? 'kp-right' : 'kp-wrong'}" style="left:${given[0]}%;top:${given[1]}%;width:34px;height:34px"></span>` : '';
+      const sol = done ? (q.spots || []).filter(s => s.correct).map(s => `<span class="kp-marker kp-right" style="left:${s.x}%;top:${s.y}%;width:${(Number(s.r) || 8) * 2}%;aspect-ratio:1"></span>`).join('') : '';
+      const cross = state.cross[q.id] || [50, 50];
+      body = img ? `<div class="kp-hotspot" data-hotspot="${q.id}" ${done ? '' : 'tabindex="0" role="application" aria-label="Bild. Mit den Pfeiltasten das Fadenkreuz bewegen, mit der Eingabetaste die Stelle wählen."'}>
+          <img src="${esc(img)}" alt="${esc(q.image.alt)}">${sol}${mark}${done ? '' : `<span class="kp-cross" style="left:${cross[0]}%;top:${cross[1]}%"></span>`}</div>` : '<p class="kp-label">Kein Bild hinterlegt.</p>';
+    } else if (q.kind === 'multiple' && q.look === 'regal') {
+      // Regal (Vorbild Storyline „Help Alex choose the best outfit“): Teile als freigestellte Bilder auf Regalbrettern,
+      // genau q.pick davon wählen; echte Kästchen, der Name kommt aus Antworttext oder Alternativtext
+      body = regalHtml(q, done, given);
+    } else {
+      const ans = normAnswers(q);
+      // Einheitliche Kästchen (settings.sameBoxes): auch Einfachauswahl als Kästchen, damit die Form nicht verrät, wie viele Antworten stimmen
+      const type = q.kind === 'multiple' || (sameBoxes(q)) ? 'checkbox' : 'radio';
+      // Darstellung: Bildkarten (q.look 'bilder', Bild je Antwort) oder Regler mit Stufen (q.look 'regler', nur Einfachauswahl,
+      // die Antworten sind die Stufen in ihrer Reihenfolge und werden deshalb nie gemischt)
+      const regler = q.look === 'regler' && q.kind === 'single';
+      // Farbbalken (q.look 'balken', Vorbild LUCYDATE): jede Antwort als volle Fläche in der Hauptfarbe mit heller Schrift
+      const lookCls = regler ? ' kp-ans-regler' : q.look === 'bilder' ? ' kp-ans-cards' : q.look === 'balken' ? ' kp-ans-balken' : q.look === 'raster' ? ' kp-ans-raster' : q.look === 'pillen' ? ' kp-ans-pillen' : '';
+      const order = q.shuffle && q.kind !== 'truefalse' && !regler ? shuffled(ans.length, q.id + tries) : ans.map((a, i) => i);
+      const perAnswer = q.answerFeedback || q.kind === 'truefalse';
+      const ansImg = a => (a.image && a.image.src ? `<img class="kp-answer-img" loading="lazy" decoding="async" src="${esc(res(a.image.src))}" alt="${esc(a.image.alt || '')}">` : '');
+      // „Weiß ich nicht“ (q.dontKnow): eigene Antwort mit Wert −1 am Ende, schließt die anderen aus; senkt das Raten,
+      // zählt nie als richtig, die Rückmeldung ist dann eine Erklärung ohne Tadel
+      const dkChecked = done && given.length === 1 && given[0] === -1;
+      const dk = q.dontKnow && !regler ? `<label class="kp-answer kp-answer-dk${done && dkChecked ? ' kp-dk-chosen' : ''}"><input type="${type}" name="q-${q.id}" value="-1" data-dk ${dkChecked ? 'checked' : ''} ${done ? 'disabled' : ''}><span class="kp-answer-text"><span${q.look === 'pillen' && !q.dontKnowLabel ? ` aria-label="${esc(T('weissNicht'))}" title="${esc(T('weissNicht'))}"` : ''}>${q.look === 'pillen' && !q.dontKnowLabel ? '?' : esc(q.dontKnowLabel || T('weissNicht'))}</span></span></label>` : '';
+      // Kurze Antworten ohne Bild (4 oder 6, je bis 110 Zeichen) stehen auf großen Bildschirmen als Kacheln nebeneinander
+      const kurz = !lookCls && !dk && [4, 6].includes(ans.length) && ans.every(a => !(a.image && a.image.src) && plainText(a.text).length <= 110) ? ' kp-ans-kurz' : '';
+      body = `<div class="kp-answers${lookCls}${kurz}${dk ? ' kp-has-dk' : ''}" role="${type === 'radio' ? 'radiogroup' : 'group'}" aria-label="Antworten"${regler ? ` style="--n:${order.length}"` : ''}>${order.map(i => {
+        const a = ans[i];
+        const checked = done && given.indexOf(i) >= 0;
+        const cls = done ? (a.correct ? 'kp-right' : (checked ? 'kp-wrong' : '')) : '';
+        const showFb = done && perAnswer && a.feedback && (checked || (a.correct && q.kind === 'multiple'));
+        return `<label class="kp-answer ${cls}"><input type="${type}" name="q-${q.id}" value="${i}" ${checked ? 'checked' : ''} ${done ? 'disabled' : ''}>${ansImg(a)}
+          <span class="kp-answer-text"><span>${esc(a.text)}</span>${showFb ? `<span class="kp-answer-fb">${esc(a.feedback)}</span>` : ''}</span></label>`;
+      }).join('')}${dk}</div>`;
+      // Pillen mit zwei Antworten: „?“ steht in der Mitte (Ja ? Nein)
+      if (dk && q.look === 'pillen' && order.length === 2) body = body.replace(/(<\/label>)([\s\S]*?)(<label class="kp-answer kp-answer-dk[\s\S]*<\/label>)<\/div>$/, (m, end1, second, dkHtml) => end1 + dkHtml + second + '</div>');
+    }
+
+    // Einschätzung vorher (settings.confidence 'vorher', nur Übungsfragen): erst das Thema, dann „Wie gut kennst du dich aus?“, dann die Frage
+    const pre = confBefore(q, isGraded);
+    if (pre && !done && state.conf[q.id] == null) {
+      return `<div class="kp-quiz" data-quiz="${q.id}">
+      <p class="kp-label">${esc(quizHint(q))}<span class="kp-badge">Übung</span></p>
+      <div class="kp-conf-pre" role="group" aria-labelledby="cp-${q.id}">
+        <p class="kp-conf-topic"><span class="kp-label">${T('thema')}</span><b>${esc(confTopic(q))}</b></p>
+        <p class="kp-conf-ask" id="cp-${q.id}">${T('wieGutVorher')}</p>
+        <div class="kp-conf-btns">${[0, 1, 2].map(v => `<button class="kp-btn kp-sec" data-conf-pre="${q.id}" data-v="${v}">${T('kenne' + v)}</button>`).join('')}</div>
+      </div></div>`;
+    }
+    const askConf = (q.confidence || set.confidence) && !done && !pre;
+    const confHtml = askConf ? `<div class="kp-conf" role="radiogroup" aria-label="Wie sicher bist du?"><span>Wie sicher bist du?</span>
+      ${[2, 1, 0].map(v => `<label><input type="radio" name="c-${q.id}" value="${v}" ${state.conf[q.id] === v ? 'checked' : ''}>${CONF[v]}</label>`).join('')}
+      <span class="kp-conf-msg" data-conf-msg></span></div>` : '';
+
+    // Selbsterklärung: vor der Auflösung ein Satz „Warum?“ (Bisra u. a. 2018); die Begründung steht danach neben der des Kurses
+    const why = q.explain && q.kind !== 'hotspot';
+    const whyHtml = why && !done ? `<div class="kp-why" data-why-box><label><span class="kp-label">${T('warumFrage')}</span><textarea class="kp-notes kp-why-text" rows="1" data-why="${q.id}" placeholder="${esc(T('warumPlatz'))}"></textarea></label><span class="kp-why-missing" role="alert" hidden>${T('warumFehlt')}</span></div>` : '';
+    let bottom = q.kind === 'hotspot' ? confHtml : `${whyHtml}${confHtml}<div class="kp-quiz-actions"><button class="kp-btn" data-check="${q.id}">${T('antwortPruefen')}</button></div>`;
+    if (done) {
+      const f = evaluate(q, given);
+      const ok = f >= 1;
+      const partial = f > 0 && f < 1 ? ` (${Math.round(f * 100)} % richtig)` : '';
+      const streak = ok && set.streak ? streakOf(q) : 0;
+      const dkGiven = given.length === 1 && given[0] === -1;
+      bottom = `<div class="kp-feedback ${ok ? 'ok' : 'no'}${dkGiven ? ' kp-fb-dk' : ''}" role="status">${esc(dkGiven ? T('weissNichtFb') : ok ? (q.feedbackCorrect || 'Richtig!') : (q.feedbackWrong || 'Leider nicht richtig.'))}${dkGiven ? '' : partial}${streak >= 2 ? `<span class="kp-streak">${streak} ${T('inFolge')}</span>` : ''}</div>`;
+      const c = state.conf[q.id];
+      if (c === 2 && !ok) bottom += `<div class="kp-note kp-conf-fb" style="margin-top:10px">${pre ? T('vorherUeber') : T('sicherFalsch')}</div>`;
+      if (c === 0 && ok) bottom += `<div class="kp-note kp-conf-fb" style="margin-top:10px">${pre ? T('vorherUnter') : T('geratenRichtig')}</div>`;
+      const mine = why ? loadText(q.id + '~why') : null;
+      if (mine) bottom += `<div class="kp-why-cmp"><div class="kp-why-mine"><span class="kp-label">${T('deineBegruendung')}</span><p>${esc(mine)}</p></div>${q.explanation ? `<div class="kp-note kp-text"><span class="kp-label">${T('musterBegruendung')}</span>${res(q.explanation)}</div>` : ''}</div>`;
+      else if (q.explanation) bottom += `<div class="kp-note kp-text" style="margin-top:10px">${res(q.explanation)}</div>`;
+      const max = Number(q.attempts) || 0; // 0 = unbegrenzt
+      if (!ok && (max === 0 || tries < max)) bottom += `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-retry-one="${q.id}">Nochmal versuchen${max ? ` (${max - tries} übrig)` : ''}</button></div>`;
+    }
+    const badge = isGraded ? '' : '<span class="kp-badge">Übung</span>';
+    // Person stellt die Frage (q.person, Vorbild „Laura Paulsen, Texterin“): rundes Porträt oder Video links, Name und Rolle darunter
+    const zlLook = q.kind === 'match' && q.dragdrop && q.look === 'zerlegen';
+    const regalLook = q.kind === 'multiple' && q.look === 'regal';
+    const blase = !mailLook && !zlLook && !regalLook && q.person && q.person.bubble && qPersonOn(q);
+    const qp = mailLook || zlLook || regalLook || blase ? '' : qPersonHtml(q);
+    if (mailLive && !done) bottom = '';
+    const qhintHtml = !done && plainText(q.hint) && tries >= Math.max(1, Number(q.hintAfter) || 1) ? `<div class="kp-note kp-qhint" data-qhint="${q.id}" role="note"><span class="kp-label">${esc(T('tippLabel'))}</span> ${esc(plainText(q.hint))}</div>` : '';
+    if (regalLook) {
+      // Regal: rechts der Auftrag auf dunkler Fläche mit Zähler und Prüfen-Knopf (erst bei genau k Teilen aktiv), links das Regal;
+      // nach dem Prüfen liegt das Ergebnis als Karte über der abgedunkelten Übung (regalResult)
+      const k = regalPick(q), n = 0;
+      const side = `<div class="kp-regal-side kp-on-dark">
+          ${q.eyebrow ? `<p class="kp-eyebrow kp-q-eyebrow">${esc(q.eyebrow)}</p>` : ''}
+          <p class="kp-label">${esc(quizHint(q))}${badge}</p>
+          <h2 class="kp-q">${esc(q.question)}</h2>
+          ${done ? `<p class="kp-regal-count">${esc(T('regalTreffer').replace('{k}', regalHits(q, given)).replace('{n}', k))}</p>` : `<p class="kp-regal-count" data-regal-count="${q.id}" aria-live="polite">${esc(T('regalStand').replace('{k}', n).replace('{n}', k))}</p>`}
+          ${qhintHtml}
+          ${done ? `<div class="kp-quiz-actions"><button type="button" class="kp-btn kp-sec" data-regal-show="${q.id}">${T('regalErgebnis')}</button></div>` : bottom.replace(`data-check="${q.id}">`, `data-check="${q.id}" data-regal-check disabled>`)}
+          ${quizSidePic(q, 'kp-regal-pic')}
+        </div>`;
+      return `<div class="kp-quiz kp-q-regal${done ? ' kp-regal-done' : ''}" data-quiz="${q.id}">${side}${body}${done ? regalResult(q, given, bottom) : ''}</div>`;
+    }
+    if (blase) {
+      // Person mit Sprechblase (Vorbild „Mr. Thompson“): die Frage steht in der Blase neben der Person, die Antworten links als Karten.
+      // Im DOM kommt die Person mit der Frage zuerst, damit Screenreader erst die Frage hören.
+      return `<div class="kp-quiz kp-q-blase" data-quiz="${q.id}">
+        <div class="kp-qb-stage"><h2 class="kp-q kp-qb-bubble">${esc(q.question)}</h2>${quizSidePic(q, 'kp-qb-pic')}</div>
+        <div class="kp-qb-side">${q.eyebrow ? `<p class="kp-eyebrow kp-q-eyebrow">${esc(q.eyebrow)}</p>` : ''}<p class="kp-label">${esc(quizHint(q))}${badge}</p>${qhintHtml}${body}${bottom}</div></div>`;
+    }
+    // Symbol links neben der Frage (q.icon, Vorbild bildungsinnovator „Was denkst du?“)
+    return `<div class="kp-quiz${qp ? ' kp-q-hasperson' : q.icon ? ' kp-q-hasicon' : ''}" data-quiz="${q.id}">
+      ${qp || (q.icon ? `<span class="kp-q-icon" aria-hidden="true">${icon(q.icon)}</span>` : '')}
+      ${q.eyebrow ? `<p class="kp-eyebrow kp-q-eyebrow">${esc(q.eyebrow)}</p>` : ''}
+      <p class="kp-label">${esc(quizHint(q))}${badge}</p>
+      <h2 class="kp-q">${esc(q.question)}</h2>
+      ${q.kind === 'hotspot' || q.kind === 'pins' || zlLook ? '' : figure(q.image)}
+      ${qhintHtml}
+      ${body}${bottom}</div>`;
+  }
+
+  // Person oder Bild neben einer Übung (Musterantwort zerlegen, Regal, Sprechblase): Foto der Person aus q.person, sonst q.image
+  function qPersonOn(q) { const r = q.person; return !!(r && (r.castId || plainText(r.name) || (r.image && r.image.src))); }
+  function quizSidePic(q, cls) {
+    let img = null, name = '', role = '';
+    if (qPersonOn(q)) {
+      const p = castOf(q.person);
+      name = plainText(p.name); role = plainText(p.role);
+      img = p.image && p.image.src ? p.image : null;
+      if (!img) return `<figure class="${cls}">${avatarSvg(p.look || 'a1', p.pose || 'neutral', true)}${name ? `<figcaption><b>${esc(name)}</b>${role ? `<span>${esc(role)}</span>` : ''}</figcaption>` : ''}</figure>`;
+    }
+    if (!img && q.image && q.image.src) img = q.image;
+    if (!img) return '';
+    return `<figure class="${cls}"><img src="${esc(res(img.src))}" alt="${esc(img.alt || name)}" loading="lazy" decoding="async"${focusStyle(img)}>${name ? `<figcaption><b>${esc(name)}</b>${role ? `<span>${esc(role)}</span>` : ''}</figcaption>` : ''}${img.credit ? `<span class="kp-credit">${esc(img.credit)}</span>` : ''}</figure>`;
+  }
+  // Musterantwort zerlegen (Vorbild Storyline „Match each part of the STAR method“): oben die Teile des Modells als runde
+  // Buchstaben mit gestricheltem Ablagefeld (2 × 2), darunter die Stücke einer einzigen guten Antwort, rechts eine Person.
+  // Die Zieh-Logik ist die der Zuordnung (data-mdd-*), also gelten Ziehen, Tasten am Kärtchen und collectAnswer() unverändert.
+  function zlShort(pair) {
+    return plainText((pair && pair.short) || '').trim().slice(0, 3) || plainText((pair && pair.left) || '').trim().charAt(0).toUpperCase() || '?';
+  }
+  function zerlegenHtml(q, pairs, open, placed, done, given, card) {
+    const pic = quizSidePic(q, 'kp-zl-pic');
+    return `<div class="kp-mdd kp-zl${pic ? ' kp-zl-haspic' : ''}${done ? ' kp-zl-done' : ''}" data-mdd="${q.id}">
+      <div class="kp-zl-band"><div class="kp-zl-rows">${pairs.map((pair, i) => `
+        <div class="kp-zl-row${done ? (given[i] === i ? ' kp-right' : ' kp-wrong') : ''}">
+          <span class="kp-zl-badge" aria-hidden="true">${esc(zlShort(pair))}</span>
+          <div class="kp-zl-slot"><span class="kp-zl-name">${esc(pair.left)}</span>
+            <ul class="kp-mdd-drop kp-zl-drop" data-mdd-drop="${i}" data-quiz="${q.id}" aria-label="${esc(pair.left)}">${placed[i] >= 0 ? card(placed[i]) : (done ? `<li class="kp-sort-empty">${T('nichtZugeordnet')}</li>` : '')}</ul>
+            ${done && given[i] !== i ? `<p class="kp-zl-sol">${T('richtigWaere')}: ${esc(pair.right)}</p>` : ''}</div>
+        </div>`).join('')}</div></div>
+      ${done ? '' : `<p class="kp-sort-hint kp-zl-hint">${esc(T('zerlegenHinweis'))}</p>`}
+      <ul class="kp-mdd-pool kp-zl-pool" data-mdd-pool="${q.id}">${open.map(card).join('') || (done ? '' : `<li class="kp-sort-empty">${T('allesZugeordnet')}</li>`)}</ul>
+      ${pic}
+    </div>`;
+  }
+  // Regal: k = q.pick (ohne Angabe die Zahl der richtigen Teile), Treffer = gewählte richtige Teile
+  function regalPick(q) { const n = Number(q.pick) || 0; return n > 0 ? n : normAnswers(q).filter(a => a.correct).length; }
+  function regalHits(q, given) { const ans = normAnswers(q); return (given || []).filter(i => ans[i] && ans[i].correct).length; }
+  function regalName(a) { return plainText(a.text) || (a.image && plainText(a.image.alt)) || ''; }
+  function regalHtml(q, done, given) {
+    const ans = normAnswers(q), per = Math.max(2, Math.min(8, Number(q.shelfCols) || 5));
+    const order = q.shuffle ? shuffled(ans.length, q.id + (state.tries[q.id] || 0)) : ans.map((a, i) => i);
+    const item = i => {
+      const a = ans[i], img = a.image && a.image.src ? a.image : null, name = regalName(a);
+      const chosen = done && given.indexOf(i) >= 0;
+      const st = done ? (a.correct ? (chosen ? 'right' : 'miss') : (chosen ? 'wrong' : '')) : '';
+      return `<label class="kp-regal-item${st ? ' kp-regal-' + st : ''}" title="${esc(name)}"><input type="checkbox" name="q-${q.id}" value="${i}" ${chosen ? 'checked' : ''} ${done ? 'disabled' : ''}>
+        <span class="kp-regal-obj">${img ? `<img src="${esc(res(img.src))}" alt="" draggable="false" decoding="async">` : ''}</span><span class="kp-regal-name">${esc(name)}</span>
+        ${st ? `<span class="kp-regal-mark" aria-hidden="true">${st === 'right' ? '✓' : st === 'miss' ? '+' : '✕'}</span><span class="kp-sr">, ${esc(T('regalSr_' + st))}</span>` : ''}</label>`;
+    };
+    const boards = [];
+    for (let k = 0; k < order.length; k += per) boards.push(order.slice(k, k + per));
+    return `<div class="kp-regal-shelf" role="group" aria-label="${esc(T('regalLabel'))}" style="--per:${per}">${boards.map(row => `<div class="kp-regal-board">${row.map(item).join('')}</div>`).join('')}</div>`;
+  }
+  // Ergebnis als Karte über der abgedunkelten Übung: links vorher (Person) und nachher (Bild des Bands), rechts Überschrift,
+  // Text des Bands und je gewähltem Teil, was es bewirkt bzw. warum es nicht passt; dazu fehlende Teile.
+  // Bänder: q.outcomes [{min, title, html, image}], das höchste min, das die Treffer erreichen.
+  const regalClosed = new Set();
+  function regalResult(q, given, bottom) {
+    const ans = normAnswers(q), hits = regalHits(q, given), k = regalPick(q);
+    const ok = evaluate(q, given) >= 1;
+    const bands = (q.outcomes || []).filter(o => o && (plainText(o.title) || plainText(o.html))).slice().sort((a, b) => (Number(a.min) || 0) - (Number(b.min) || 0));
+    const o = bands.filter(x => hits >= (Number(x.min) || 0)).pop() || { title: ok ? (q.feedbackCorrect || T('alleRichtig')) : (q.feedbackWrong || T('nochNichtAlle')), html: '' };
+    const line = (i, kind) => { const a = ans[i]; return `<li class="kp-regal-fb-${kind}"><b>${esc(regalName(a))}${kind === 'miss' ? ' ' + esc(T('regalFehlt')) : ''}:</b> ${esc(plainText(a.feedback) || (kind === 'right' ? T('regalPasst') : kind === 'miss' ? T('regalHaetteGepasst') : T('regalPasstNicht')))}</li>`; };
+    const chosen = given || [];
+    const rights = chosen.filter(i => ans[i] && ans[i].correct), wrongs = chosen.filter(i => ans[i] && !ans[i].correct);
+    const miss = ans.map((a, i) => i).filter(i => ans[i].correct && chosen.indexOf(i) < 0);
+    const before = quizSidePic(q, 'kp-regal-before');
+    const after = o.image && o.image.src ? `<figure class="kp-regal-after-pic"><img src="${esc(res(o.image.src))}" alt="${esc(o.image.alt || '')}" decoding="async"${focusStyle(o.image)}>${o.image.credit ? `<span class="kp-credit">${esc(o.image.credit)}</span>` : ''}</figure>` : '';
+    const max = Number(q.attempts) || 0, tries = state.tries[q.id] || 0, again = !ok && (max === 0 || tries < max);
+    const hidden = regalClosed.has(q.id);
+    return `<div class="kp-regal-result${ok ? ' is-ok' : ' is-no'}" data-regal-result="${q.id}"${hidden ? ' hidden' : ''}>
+      <div class="kp-regal-card" role="dialog" aria-modal="false" aria-labelledby="rg-${q.id}-t" tabindex="-1">
+        ${before || after ? `<div class="kp-regal-pics">${before}${after}</div>` : ''}
+        <div class="kp-regal-text">
+          <p class="kp-regal-score">${esc(T('regalTreffer').replace('{k}', hits).replace('{n}', k))}</p>
+          <h3 class="kp-regal-title" id="rg-${q.id}-t">${esc(plainText(o.title) || '')}</h3>
+          ${o.html ? `<div class="kp-text">${res(o.html)}</div>` : ''}
+          <ul class="kp-regal-fb">${rights.map(i => line(i, 'right')).join('')}${wrongs.map(i => line(i, 'wrong')).join('')}${miss.map(i => line(i, 'miss')).join('')}</ul>
+          ${q.explanation ? `<div class="kp-text kp-regal-expl">${res(q.explanation)}</div>` : ''}
+          <div class="kp-quiz-actions">${again ? `<button type="button" class="kp-btn" data-retry-one="${q.id}">${T('regalZurueck')}</button>` : ''}<button type="button" class="kp-btn${again ? ' kp-sec' : ''}" data-regal-close="${q.id}" data-regal-go="${ok ? 1 : 0}">${again ? T('regalAnsehen') : T('weiter')}</button></div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Postfach (Nachbau der Storyline-Übung „Spot the red flags“): Tablet mit Startbildschirm, Mail-App mit Ordnerleiste, Suchleiste und
+  // Kopf, je Warnzeichen ein gestricheltes Feld direkt hinter der Textstelle, Etiketten rechts (abgelegte lassen eine Lücke), die Figur
+  // erscheint groß über der abgedunkelten Mail mit Sprechfeld, Namensschild und Weiter-Pfeil. Die Zieh-Logik ist die der Zuordnung
+  // (data-mdd-*), deshalb gelten Nummerntasten, Ziehen und collectAnswer() unverändert. Zeilen: pairs[i].left (Text, **fett**,
+  // [[Link]], __gestrichelt unterstrichen__, Zeilenumbruch), Etikett pairs[i].right, Erklärung pairs[i].why;
+  // pairs[i].part 'absender' steht im Kopf hinter der Adresse, 'unterschrift' hinter der Unterschrift.
+  const mailUi = {};
+  function mailState(id) { return mailUi[id] || (mailUi[id] = { open: false, intro: false, done: false, coach: null }); }
+  function mailInline(t) {
+    return esc(String(t || '')).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\[\[([^\]]+)\]\]/g, '<span class="kp-mail-link">$1</span>')
+      .replace(/__([^_]+)__/g, '<span class="kp-mail-mark">$1</span>').replace(/\n/g, '<br>');
+  }
+  function mailPart(x) { return x.part === true ? 'absender' : (x.part || ''); }
+  function mailPerson(q) {
+    const raw = q.person;
+    if (!raw || !(raw.castId || plainText(raw.name) || (raw.image && raw.image.src))) return null;
+    return castOf(raw);
+  }
+  function mailFigure(p, pose, cls) {
+    if (!p) return '';
+    const src = poseImage(p, pose);
+    return src ? `<img class="${cls}" src="${esc(res(src))}" alt="">` : `<span class="${cls}">${avatarSvg(p.look || 'a1', pose || 'neutral', true)}</span>`;
+  }
+  function mailCoachHtml(q, st) {
+    const p = mailPerson(q), name = p ? plainText(p.name) : '';
+    return `<div class="kp-mail-coach${p ? '' : ' no-face'}" data-mail-coach="${q.id}" role="dialog" aria-modal="true" aria-label="${esc(name || T('postfachMail'))}"${st ? '' : ' hidden'}>
+      <span class="kp-mail-figure" data-mail-figure aria-hidden="true">${st ? mailFigure(p, st.pose) : ''}</span>
+      <div class="kp-mail-say">${name ? `<b class="kp-mail-name">${esc(name)}</b>` : ''}<p data-mail-say="${q.id}" aria-live="polite">${st ? esc(st.text) : ''}</p>
+        <button type="button" class="kp-mail-next" data-mail-next="${q.id}" aria-label="${esc(T('weiter'))}">${icon('arrow')}</button></div></div>`;
+  }
+  function mailCheckHtml(q, pairs, open, placed, done, given, card, live) {
+    const m = q.mail || {}, st = mailState(q.id), p = mailPerson(q);
+    const rights = shuffled(pairs.length, q.id);
+    const desk = !done && !m.noDesk && !st.open;
+    // Was die Figur gerade sagt: eigene Rückmeldung, sonst der Auftrag beim ersten Öffnen, sonst der Schlusssatz
+    let coach = st.coach;
+    if (!coach && !done && !desk && !st.intro) coach = { kind: 'intro', text: plainText(m.hint) || T('postfachHinweis'), pose: m.pose || 'think' };
+    if (!coach && done && !st.done) coach = { kind: 'done', text: plainText(m.done) || T('postfachFertig'), pose: 'happy' };
+    const folders = T('postfachOrdner').split('|');
+    const drop = (pair, i) => `<ul class="kp-mdd-drop kp-mail-drop" data-mdd-drop="${i}" data-n="${i + 1}" data-quiz="${q.id}" aria-label="${esc(T('postfachStelle').replace('{n}', i + 1))}: ${esc(plainText(pair.left).replace(/\*\*|\[\[|\]\]|__/g, ''))}">${placed[i] >= 0 ? card(placed[i]).trim() : ''}</ul>`;
+    const state = i => done ? (given[i] === i ? ' kp-right' : ' kp-wrong') : '';
+    const sol = i => done && given[i] !== i ? `<span class="kp-solution">(${esc(pairs[i].right)})</span>` : '';
+    const zone = (i, text, cls) => `<div class="kp-mail-line${cls ? ' ' + cls : ''}${state(i)}"><p class="kp-mail-text">${text}</p><span class="kp-mail-lead" aria-hidden="true"></span>${drop(pairs[i], i)}${sol(i)}</div>`;
+    const idx = part => pairs.findIndex(x => mailPart(x) === part);
+    const head = idx('absender'), sign = idx('unterschrift');
+    const senderName = plainText(m.senderName);
+    const addr = head >= 0 ? pairs[head].left : m.sender;
+    const fromText = `${senderName ? `<b class="kp-mail-sname">${esc(senderName)}</b> ` : ''}<span class="kp-mail-addr">${senderName ? '&lt;' : ''}${mailInline(addr)}${senderName ? '&gt;' : ''}</span>`;
+    const from = `<div class="kp-mail-from"><span class="kp-mail-avatar" aria-hidden="true">${icon('user')}</span>
+      ${head >= 0 ? zone(head, fromText, 'kp-mail-fromline') : `<div class="kp-mail-line kp-mail-fromline"><p class="kp-mail-text">${fromText}</p></div>`}
+      <span class="kp-mail-to">${esc(m.to || T('postfachAnMich'))} <span aria-hidden="true">⌄</span></span></div>`;
+    const plain = t => plainText(t) ? String(t).split(/\n\s*\n/).map(x => `<p class="kp-mail-plain">${mailInline(x.trim())}</p>`).join('') : '';
+    const signName = plainText(m.signName) ? `<span class="kp-mail-signname">${esc(plainText(m.signName))}</span>` : '';
+    const signBlock = sign >= 0
+      ? `${zone(sign, signName || mailInline(pairs[sign].left), 'kp-mail-signline')}${signName ? `<p class="kp-mail-plain kp-mail-role">${mailInline(pairs[sign].left)}</p>` : ''}`
+      : `${signName ? `<p class="kp-mail-plain">${signName}</p>` : ''}${plain(m.signature)}`;
+    const deskPic = ['trophy', 'chat'];
+    const deskHtml = desk ? `<div class="kp-mail-desk" data-mail-desk="${q.id}">
+        <svg class="kp-mail-waves" viewBox="0 0 1000 560" preserveAspectRatio="none" aria-hidden="true">${Array.from({ length: 14 }, (_, k) => `<path d="M${-40 + k * 6} 300 C ${120 + k * 9} ${60 - k * 8}, ${200 + k * 4} ${180 + k * 6}, ${420 + k * 7} ${-20 + k * 3}"/><path d="M${1040 - k * 6} ${260 + k * 4} C ${930 - k * 7} ${470 + k * 6}, ${840 - k * 3} ${420 - k * 5}, ${700 - k * 5} ${580}"/>`).join('')}</svg>
+        ${plainText(m.brand) ? `<p class="kp-mail-logo">${esc(plainText(m.brand))}${plainText(m.brandSub) ? `<small>${esc(plainText(m.brandSub))}</small>` : ''}</p>` : ''}
+        <div class="kp-mail-apps">
+          <button type="button" class="kp-mail-appicon" data-mail-open="${q.id}"><span class="kp-mail-apppic">${icon('mail')}<b>${esc(String(m.newMails || 1))}</b></span><span>${esc(T('postfachMail'))}</span></button>
+          ${deskPic.map((ic, k) => `<span class="kp-mail-appicon is-deko" aria-hidden="true"><span class="kp-mail-apppic">${icon(ic)}</span><span>${esc(T('postfachApps').split('|')[k] || '')}</span></span>`).join('')}
+        </div>
+        <div class="kp-mail-deskcoach">${p ? `<span class="kp-mail-hex" aria-hidden="true">${mailFigure(p, 'happy')}</span>` : ''}
+          <p class="kp-mail-bubble">${esc(plainText(m.desk) || T('postfachStart'))}</p></div>
+      </div>` : '';
+    const labels = open.map(r => card(r).replace('<li ', `<li style="--row:${rights.indexOf(r) + 1}" `)).join('');
+    const app = `<div class="kp-mail-app"${desk ? ' hidden' : ''}${coach ? ' inert' : ''}>
+        <aside class="kp-mail-side" aria-hidden="true">${plainText(m.brand) ? `<b class="kp-mail-brand">${esc(plainText(m.brand))}${plainText(m.brandSub) ? `<small>${esc(plainText(m.brandSub))}</small>` : ''}</b>` : ''}
+          <ul>${folders.map((f, k) => `<li${k === 0 ? ' class="on"' : ''}>${icon(['mail', 'star', 'flag', 'alert', 'pencil'][k] || 'mail')}<span>${esc(f)}</span>${k === 0 && m.unread ? `<b>${esc(String(m.unread))}</b>` : ''}</li>`).join('')}</ul></aside>
+        <div class="kp-mail-main">
+          <div class="kp-mail-search" aria-hidden="true"><span class="kp-mail-field"><i>⌄</i></span><span class="kp-mail-go">${icon('search')}</span></div>
+          <div class="kp-mail-content">
+            <div class="kp-mail-head"><h3 class="kp-mail-subj">${esc(plainText(m.subject) || '')}</h3>
+              <span class="kp-mail-tools" aria-hidden="true">${m.time ? `<span class="kp-mail-time">${esc(m.time)}</span>` : ''}${icon('star')}${icon('arrow')}${icon('layers')}</span></div>
+            <article class="kp-mail-doc" aria-label="${esc(T('postfachMail'))}">${from}
+              <div class="kp-mail-body">${plain(m.greeting)}${plain(m.lead)}
+                ${pairs.map((pair, i) => i === head || i === sign ? '' : zone(i, mailInline(pair.left))).join('')}
+                ${plain(m.closing)}${signBlock}</div></article>
+            <div class="kp-mail-tray"><p class="kp-sr">${esc(T('postfachEtiketten'))}</p>
+              <ul class="kp-mdd-pool kp-mail-labels" data-mdd-pool="${q.id}" style="--n:${pairs.length}">${labels}</ul></div>
+          </div>
+        </div>
+      </div>`;
+    const solution = done && !live && pairs.some(x => plainText(x.why)) ? `<ol class="kp-mail-sol">${pairs.map((x, i) => `<li class="${given[i] === i ? 'is-right' : 'is-miss'}"><b>${esc(x.right)}</b> ${esc(plainText(x.why))}</li>`).join('')}</ol>` : '';
+    return `<div class="kp-mdd kp-mail${live ? ' kp-mail-live' : ''}${done ? ' kp-mail-done' : ''}" data-mdd="${q.id}"${live ? ' data-mail-live' : ''}>
+      <div class="kp-mail-device"><div class="kp-mail-screen">${deskHtml}${app}${mailCoachHtml(q, coach)}</div><span class="kp-mail-home" aria-hidden="true"></span></div>${solution}
+    </div>`;
+  }
+  // Figur zeigen oder schließen, ohne die Übung neu zu zeichnen (die abgelegten Etiketten stehen nur im DOM)
+  function mailCoachShow(wrap, st) {
+    const box = wrap.querySelector('[data-mail-coach]'), app = wrap.querySelector('.kp-mail-app');
+    if (!box) return;
+    const found = findQuestion(wrap.dataset.mdd);
+    const p = found ? mailPerson(found.q) : null;
+    box.querySelector('[data-mail-figure]').innerHTML = mailFigure(p, st.pose);
+    box.querySelector('[data-mail-say]').textContent = st.text;
+    box.hidden = false;
+    box.classList.remove('kp-mail-pop'); void box.offsetWidth; box.classList.add('kp-mail-pop');
+    if (app) app.inert = true;
+    const nx = box.querySelector('[data-mail-next]'); if (nx) nx.focus({ preventScroll: true });
+  }
+  function mailCoachClose(wrap) {
+    const id = wrap.dataset.mdd, st = mailState(id);
+    const box = wrap.querySelector('[data-mail-coach]'), app = wrap.querySelector('.kp-mail-app');
+    if (st.coach && st.coach.kind === 'done') st.done = true;
+    if (!st.coach) { if (wrap.classList.contains('kp-mail-done')) st.done = true; else st.intro = true; }
+    st.coach = null;
+    if (box) box.hidden = true;
+    if (app) app.inert = false;
+    const next = wrap.querySelector('[data-mdd-pool] [data-mdd-card]') || wrap.querySelector('.kp-mail-subj');
+    if (next) { if (!next.hasAttribute('tabindex')) next.setAttribute('tabindex', '-1'); next.focus({ preventScroll: true }); }
+  }
+  // Sofort-Rückmeldung: richtig abgelegt bleibt das Etikett und die Figur erklärt das Warnzeichen, falsch springt es zurück.
+  // Sind alle Stellen belegt, gilt die Frage als beantwortet (über answer(), damit Lernstand, Klang und Fortschritt stimmen).
+  function mailLivePlace(wrap, card, rowIdx) {
+    const found = findQuestion(wrap.dataset.mdd);
+    if (!found) return;
+    const q = found.q, r = Number(card.dataset.mddCard), i = Number(rowIdx), pair = (q.pairs || [])[r] || {}, st = mailState(q.id);
+    if (r === i) {
+      card.classList.add('kp-right'); card.draggable = false; card.removeAttribute('tabindex');
+      const mv = card.querySelector('.kp-mdd-move'); if (mv) mv.remove();
+      uiSound('richtig');
+      const drops = [...wrap.querySelectorAll('[data-mdd-drop]')];
+      const why = plainText(pair.why) || T('postfachRichtig');
+      if (drops.every(d => d.querySelector('.kp-right'))) {
+        st.coach = { kind: 'done', text: why + ' ' + (plainText((q.mail || {}).done) || T('postfachFertig')), pose: 'happy' };
+        const box = wrap.closest('[data-quiz]');
+        const a = collectAnswer(q, box);
+        mailCoachShow(wrap, st.coach);
+        setTimeout(() => { if (box.isConnected) answer(q, a, box); }, 400);
+      } else {
+        st.coach = { kind: 'right', text: why, pose: 'happy' };
+        mailCoachShow(wrap, st.coach);
+      }
+      return;
+    }
+    state.mailMiss = state.mailMiss || {}; state.mailMiss[q.id] = (state.mailMiss[q.id] || 0) + 1;
+    uiSound('falsch');
+    card.classList.add('kp-mail-back');
+    st.coach = { kind: 'miss', text: plainText((q.mail || {}).miss) || T('postfachDaneben'), pose: 'think' };
+    setTimeout(() => { card.classList.remove('kp-mail-back'); mddPlace(q.id, r, null, true); mailCoachShow(wrap, st.coach); }, reducedMotion() ? 0 : 320);
+  }
+  function qPersonHtml(q) {
+    const raw = q.person;
+    if (!raw || !(raw.castId || plainText(raw.name) || (raw.image && raw.image.src) || raw.video)) return '';
+    const p = castOf(raw), img = p.image && p.image.src ? p.image : null, vid = raw.video || raw.videoUrl;
+    const name = plainText(p.name);
+    const media = vid
+      ? `<video class="kp-qp-video" playsinline preload="metadata" data-qp-video="${q.id}" src="${esc(res(vid))}"${img ? ` poster="${esc(res(img.src))}"` : ''}>${trackHtml(raw.captions, raw.captionsText)}</video><button type="button" class="kp-qp-play" data-qp-play="${q.id}" aria-pressed="false" aria-label="${esc(T('videoVon').replace('{name}', name || T('person')))}">${icon('play')}</button>`
+      : img ? `<img src="${esc(res(img.src))}" alt="${esc(img.alt || name)}" loading="lazy"${focusStyle(img)}>` : avatarSvg(p.look || 'a1', p.pose || 'neutral');
+    return `<figure class="kp-q-person"><div class="kp-qp-media${vid ? ' kp-qp-hasvideo' : ''}">${media}</div>
+      <figcaption>${name ? `<b class="kp-qp-name">${esc(name)}</b>` : ''}${plainText(p.role) ? `<span class="kp-qp-role">${esc(plainText(p.role))}</span>` : ''}${plainText(raw.transcript) ? `<details class="kp-clip-read kp-qp-read"><summary><span>${T('zumNachlesen')}</span><span class="kp-clip-plus" aria-hidden="true"></span></summary><div class="kp-text">${res(raw.transcript)}</div></details>` : ''}</figcaption></figure>`;
+  }
+
+  // Begriffe lernen: Paare aus dem Glossar oder aus dem Block selbst
+  function termPairs(b) {
+    if (b.source === 'own') return (b.pairs || []).filter(x => x.left && x.right);
+    return (course.glossary || []).filter(g => g.term && g.definition).map(g => ({ left: g.term, right: g.definition }));
+  }
+  function drawnPairs(b) {
+    const all = termPairs(b);
+    return (state.pools[b.id] || []).map(i => all[i]).filter(Boolean);
+  }
+  // Die Zuordnungs-Variante läuft als gewöhnliche Übungsfrage mit der ID des Blocks
+  const glossCopies = {};
+  function glossQuiz(b) {
+    if (!glossCopies[b.id]) {
+      glossCopies[b.id] = Object.assign(newQuizLike(), {
+        id: b.id, kind: 'match', question: b.title || T('begriffeLernen'), pairs: drawnPairs(b),
+        graded: false, attempts: 0, dragdrop: !!b.dragdrop, points: 0
+      });
+    }
+    return glossCopies[b.id];
+  }
+  function newQuizLike() {
+    return { type: 'quiz', feedbackCorrect: T('alleRichtig'), feedbackWrong: T('nochNichtAlle'), explanation: '', answers: [], image: null, confidence: false, objective: '' };
+  }
+  function renderGlossquiz(b) {
+    const pairs = drawnPairs(b);
+    const head = `<p class="kp-label">${T('begriffeLernen')}</p>${b.title ? `<h2 class="kp-q" style="margin:0 0 10px">${accent(b.title)}</h2>` : ''}`;
+    if (!pairs.length) return `<div class="kp-gq" data-gq="${b.id}">${head}<p class="kp-label">${T('keineBegriffe')}</p></div>`;
+    if (b.mode === 'match') return `<div class="kp-gq" data-gq="${b.id}">${head}${renderQuiz(glossQuiz(b), false)}</div>`;
+    if (b.mode === 'memory') return renderMemory(b, pairs);
+    // Standard: Flipcards, Begriff vorn, Bedeutung hinten
+    return `<div class="kp-gq" data-gq="${b.id}">${head}<div class="kp-flipgrid">${pairs.map(x => `<div class="kp-flip" tabindex="0" role="button" aria-label="${esc(x.left)}: Karte umdrehen"><div class="kp-flip-inner"><div class="kp-flip-front">${esc(x.left)}</div><div class="kp-flip-back">${esc(x.right)}</div></div></div>`).join('')}</div></div>`;
+  }
+  // Memory: Begriff und Bedeutung liegen verdeckt, zwei Karten aufdecken, Paare bleiben offen
+  function renderMemory(b, pairs) {
+    const st = state.self[b.id] || (state.self[b.id] = { open: [], found: [], moves: 0, order: null });
+    const n = pairs.length;
+    if (!st.order || st.order.length !== 2 * n) { st.order = shuffleIds(Array.from({ length: 2 * n }, (x, i) => i)); st.open = []; st.found = []; st.moves = 0; }
+    const done = st.found.length >= n && n > 0;
+    const card = k => {
+      const pair = pairs[k % n];
+      const isTerm = k < n;
+      const up = st.open.includes(k) || st.found.includes(k % n);
+      const cls = ['kp-mem-card', up ? 'up' : '', st.found.includes(k % n) ? 'kp-right' : '', isTerm ? 'kp-mem-term' : 'kp-mem-def'].filter(Boolean).join(' ');
+      return `<button type="button" class="${cls}" data-mem="${k}" data-gq-of="${b.id}" ${up ? 'disabled' : ''} aria-label="${up ? esc(isTerm ? pair.left : pair.right) : T('karteVerdeckt')}"><span class="kp-mem-face">${up ? esc(isTerm ? pair.left : pair.right) : '?'}</span></button>`;
+    };
+    return `<div class="kp-gq" data-gq="${b.id}">
+      <p class="kp-label">${T('begriffeLernen')}</p>${b.title ? `<h2 class="kp-q" style="margin:0 0 6px">${accent(b.title)}</h2>` : ''}
+      <p class="kp-sort-hint">${T('memoryHinweis')}</p>
+      <div class="kp-mem-grid">${st.order.map(card).join('')}</div>
+      <p class="kp-mem-status" role="status">${st.found.length} ${T('von')} ${n} ${T('paareGefunden')} · ${st.moves} ${T('zuege')}</p>
+      ${done ? `<div class="kp-feedback ok">${T('memoryFertig')}</div><div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-mem-reset="${b.id}">${T('nochmalSpielen')}</button></div>` : ''}
+    </div>`;
+  }
+
+  function renderReview(b) {
+    const qs = reviewQuestions(b);
+    return `<div class="kp-review-head"><p class="kp-label">Wiederholung</p><h2 class="kp-q" style="margin:0">${esc(b.title || T('weisstDuNoch'))}</h2>
+      <p style="margin:6px 0 0">${qs.length ? 'Fragen aus früheren Abschnitten. Was zuletzt nicht saß, kommt zuerst. Sie zählen nicht zur Bewertung.' : 'Es gibt noch keine früheren Fragen zum Wiederholen.'}</p></div>
+      <div class="kp-review-list">${qs.map(q => renderQuiz(q, false)).join('')}</div>`;
+  }
+
+  function renderPretest(b) {
+    const qs = b.questions || [];
+    const s = scoreOf(qs.map(q => ({ id: q.id, q, points: Number(q.points) || 10 })));
+    const target = pageIndexById(b.skipTo);
+    let box = '';
+    if (!s.open) {
+      const passed = s.pct >= (Number(b.passPct) || 80);
+      box = `<div class="kp-pretest-box" data-pretest="${b.id}"><p class="kp-label">Einstiegstest</p><div class="kp-score" style="font-size:44px">${s.pct} %</div>
+        ${passed && target >= 0 ? `<p>Du kennst dich schon gut aus. Du kannst direkt zu „${plainTitle(pages[target].title)}“ springen oder trotzdem alles durcharbeiten.</p>
+          <div class="kp-quiz-actions" style="justify-content:center"><button class="kp-btn" data-skip="${b.id}">Überspringen</button><button class="kp-btn kp-sec" data-next>Trotzdem durcharbeiten</button></div>`
+          : `<p>${passed ? 'Gut gemacht.' : 'Kein Problem: Der folgende Abschnitt erklärt alles Schritt für Schritt.'}</p>`}</div>`;
+    }
+    return `${b.intro ? `<div class="kp-text" style="margin-bottom:16px">${res(b.intro)}</div>` : ''}
+      <div class="kp-pretest-list">${qs.map(q => renderQuiz(q, false)).join('')}</div>${box}`;
+  }
+
+  // Folgekarte: die Wahl lag daneben, der Kurs zeigt, was daraus wird (Zeitsprung, Figur, Text), dann geht es zurück zur Frage
+  const hasConseq = o => !!(o && o.consequence && typeof o.consequence === 'object' && (o.consequence.html || (o.consequence.image && o.consequence.image.src) || o.consequence.later));
+  function conseqOf(b) {
+    const tried = state.branch[b.id] == null ? (state.self[b.id] || {}).tried : null;
+    const o = tried != null ? (b.options || [])[tried] : null;
+    return hasConseq(o) ? o : null;
+  }
+  // good: die gewählte Möglichkeit ohne „Nochmal versuchen“ zeigt ebenfalls, was daraus wird (Konsequenz vor Regel), ohne Rückweg zur Frage
+  function conseqCard(b, o, good) {
+    const c = o.consequence, who = c.castId ? castOf({ castId: c.castId }) : null;
+    const pic = c.image && c.image.src ? `<div class="kp-conseq-pic">${photo(c.image)}</div>`
+      : who ? `<div class="kp-conseq-pic kp-conseq-avatar">${who.image && who.image.src ? photo(who.image, who.name) : avatarSvg(who.look || 'a3', good ? 'happy' : 'sad')}</div>` : '';
+    return `<div class="kp-conseq${good ? ' kp-conseq-good' : ''}" role="status" tabindex="-1" ${good ? 'data-conseq-good' : 'data-retry-fb'} data-conseq="${esc(b.id)}">
+      <p class="kp-conseq-later">${esc(c.later || T('folgeLabel'))}</p>
+      <div class="kp-conseq-body">${pic}<div>${c.html ? `<div class="kp-text">${res(c.html)}</div>` : ''}${o.feedback ? `<p class="kp-conseq-fb">${esc(o.feedback)}</p>` : ''}</div></div>
+      ${good ? '' : `<div class="kp-quiz-actions"><button type="button" class="kp-btn" data-conseq-back="${esc(b.id)}">${T('nochmalEntscheiden')}</button></div>`}</div>`;
+  }
+  function retryFeedback(b) {
+    const tried = state.branch[b.id] == null ? (state.self[b.id] || {}).tried : null;
+    const o = tried != null ? (b.options || [])[tried] : null;
+    if (!o) return '';
+    if (hasConseq(o)) return conseqCard(b, o);
+    return `<div class="kp-feedback no" role="status" tabindex="-1" data-retry-fb style="margin-top:14px">${esc([o.feedback, T('nochmalVersuchen')].filter(Boolean).join(' '))}</div>`;
+  }
+  // Hilfe zum Holen: Mentorfigur oder Arbeitshilfe an der Entscheidung; wer sie geöffnet hat, steht in state.self[id].helped
+  const helpOpen = new Set();
+  // Nummern ins Bild (Fragetyp „pins“): Stand bis zum Prüfen je Frage (Ziel je Nummer, -1 = noch im Vorrat) und gewählte Nummer
+  const pinsAt = {}, pinsSel = {};
+  // Ziele tragen Buchstaben in gemischter Reihenfolge, damit die Beschriftung die Lösung nicht verrät
+  function pinsHtml(q, at, done) {
+    const pins = q.pins || [], sel = pinsSel[q.id];
+    const rank = shuffled(pins.length, q.id + 'pins'), letter = t => 'ABCDEFGHIJKLMNOP'[rank.indexOf(t)] || String(t + 1);
+    const list = pins.map((p, i) => {
+      const ok = done && at[i] === i;
+      return `<li class="kp-pins-row${done ? (ok ? ' kp-right' : ' kp-wrong') : ''}"><button type="button" class="kp-pin-num${at[i] >= 0 ? ' is-placed' : ''}${sel === i ? ' is-sel' : ''}" data-pin-sel="${i}" data-quiz="${q.id}" ${done ? 'disabled' : `draggable="true" aria-pressed="${sel === i}"`} aria-label="${esc(T('pinNummer').replace('{n}', i + 1))}${at[i] >= 0 ? ', ' + esc(T('pinGesetzt')) : ''}">${i + 1}</button><span class="kp-pins-text">${esc(p.text || '')}</span>${done ? (ok ? '<b class="kp-pins-mark" aria-label="richtig">✔</b>' : '<b class="kp-pins-mark" aria-label="falsch">✘</b>') : ''}</li>`;
+    }).join('');
+    const targets = pins.map((p, t) => {
+      const h = at.indexOf(t), ok = done && h === t;
+      return `<button type="button" class="kp-pin-target${h >= 0 ? ' is-full' : ''}${sel != null && !done ? ' is-ready' : ''}${done ? (ok ? ' kp-right' : ' kp-wrong') : ''}" style="left:${Number(p.x) || 0}%;top:${Number(p.y) || 0}%" data-pin-target="${t}" data-quiz="${q.id}" ${done ? 'disabled' : ''} aria-label="${esc(T('pinStelle').replace('{n}', letter(t)))}${h >= 0 ? ': ' + (h + 1) : ''}">${h >= 0 ? `<span class="kp-pin-placed"${done ? '' : ` draggable="true" data-pin-drag="${h}"`}>${h + 1}</span>` : ''}${done && !ok ? `<span class="kp-pin-sol" title="${esc(T('pinRichtig'))}">${t + 1}</span>` : ''}</button>`;
+    }).join('');
+    const img = q.image && q.image.src ? `<img src="${esc(res(q.image.src))}" alt="${esc(q.image.alt || '')}" draggable="false">` : '';
+    return `<div class="kp-pins" data-pins="${q.id}">
+      <div class="kp-pins-side">${done ? '' : `<p class="kp-sort-hint">${esc(T('pinHinweis'))}</p>`}<ol class="kp-pins-list">${list}</ol></div>
+      <div class="kp-pins-stage">${img}${targets}</div></div>`;
+  }
+  function pinsRefresh(qid, q, focusSel) {
+    const box = root.querySelector(`[data-pins="${qid}"]`);
+    if (!box) return;
+    const at = pinsAt[qid] || (q.pins || []).map(() => -1);
+    box.outerHTML = pinsHtml(q, at, false);
+    const nb = root.querySelector(`[data-pins="${qid}"]`);
+    if (focusSel && nb) nb.querySelector(focusSel)?.focus();
+  }
+  const helpOf = b => (b && b.help && typeof b.help === 'object' && (b.help.html || b.help.attachment || b.help.castId) ? b.help : null);
+  function helpWho(h) { const who = h.castId ? castOf({ castId: h.castId }) : null; return { who, name: (who && who.name) || h.name || '' }; }
+  function helpButton(b) {
+    const h = helpOf(b); if (!h) return '';
+    const { name } = helpWho(h), open = helpOpen.has(b.id);
+    return `<button type="button" class="kp-help-btn${open ? ' open' : ''}" data-help-open="${esc(b.id)}" aria-expanded="${open}">${icon('question')}<span>${name ? T('fragHilfe').replace('{n}', esc(name)) : T('hilfe')}</span></button>`;
+  }
+  function helpPanel(b) {
+    const h = helpOf(b); if (!h || !helpOpen.has(b.id)) return '';
+    const { who, name } = helpWho(h);
+    const pic = who ? `<div class="kp-help-avatar">${who.image && who.image.src ? photo(who.image, who.name) : avatarSvg(who.look || 'a3', 'explain')}</div>` : '';
+    return `<div class="kp-help" role="region" aria-label="${esc(T('hilfe'))}" data-help="${esc(b.id)}">${pic}<div class="kp-help-body">
+      ${name ? `<p class="kp-help-name">${esc(name)}${who && who.role ? ` <em>${esc(who.role)}</em>` : ''}</p>` : ''}
+      ${h.html ? `<div class="kp-text">${res(h.html)}</div>` : ''}
+      ${h.attachment ? `<p><a class="kp-btn kp-sec" href="${esc(res(h.attachment))}" download>${T('arbeitshilfe')}</a></p>` : ''}</div></div>`;
+  }
+  // Begründung zu einer Entscheidung (explain): gespeichert unter der Block-id mit ~why; ohne sie bleibt die Rückmeldung zu
+  const branchWhy = b => (b.explain ? loadText(b.id + '~why') : null);
+  const branchWhyOpen = b => !!b.explain && state.branch[b.id] != null && !branchWhy(b);
+  function renderBranch(b) {
+    const chosen = state.branch[b.id];
+    const opt = chosen != null ? b.options[chosen] : null;
+    const tried = chosen == null ? (state.self[b.id] || {}).tried : null;
+    const tries = chosen == null ? (state.self[b.id] || {}).tries || [] : []; // frühere Fehlversuche bleiben markiert, auch nach der Folgekarte
+    const whyOpen = branchWhyOpen(b);
+    const mine = branchWhy(b);
+    return `<div class="kp-branch" data-branch="${b.id}">
+      ${b.prompt || helpOf(b) ? `<div class="kp-branch-head">${b.prompt ? `<h2 class="kp-q">${esc(b.prompt)}</h2>` : ''}${chosen == null ? helpButton(b) : ''}</div>` : ''}${chosen == null ? helpPanel(b) : ''}
+      <div class="kp-branch-options"${conseqOf(b) ? ' hidden' : ''}>${(b.options || []).map((o, i) => `
+        <button class="kp-branch-option ${chosen === i ? 'chosen' : ''}${tried === i || tries.includes(i) ? ' tried' : ''}" data-choose="${i}" ${chosen != null && !b.changeable ? 'disabled' : ''} aria-pressed="${chosen === i}">${esc(o.text)}</button>`).join('')}</div>
+      ${retryFeedback(b)}
+      ${whyOpen ? `<div class="kp-why" data-why-box><label><span class="kp-label">${T('warumFrage')}</span><textarea class="kp-notes kp-why-text" rows="2" data-why="${b.id}" placeholder="${esc(T('warumPlatz'))}"></textarea></label><span class="kp-why-missing" role="alert" hidden>${T('warumFehlt')}</span>
+        <div class="kp-quiz-actions"><button class="kp-btn" data-why-save="${b.id}">${T('begruendungSpeichern')}</button></div></div>` : ''}
+      ${mine ? `<div class="kp-why-mine"><span class="kp-label">${T('deineBegruendung')}</span><p>${esc(mine)}</p></div>` : ''}
+      ${opt && !whyOpen ? `${hasConseq(opt) ? conseqCard(b, opt, true) : opt.feedback ? `<div class="kp-feedback neutral" role="status" style="margin-top:14px">${esc(opt.feedback)}</div>` : ''}
+        ${opt.effects ? meterPanel(opt.effects) : ''}
+        ${opt.target ? '<div class="kp-quiz-actions"><button class="kp-btn" data-follow>Weiter</button></div>' : ''}` : ''}
+    </div>`;
+  }
+
+  function renderDebrief(b) {
+    const list = [];
+    let got = 0, max = 0;
+    pages.forEach(p => branchesIn(p).forEach(x => {
+      const c = state.branch[x.id];
+      if (x.scored) { max += Math.max(0, ...(x.options || []).map(o => Number(o.points) || 0)); }
+      if (c == null) return;
+      const o = x.options[c] || {};
+      if (x.scored) got += Number(o.points) || 0;
+      list.push(`<div class="kp-debrief-item"><small>${esc(x.prompt || p.title)}</small><strong>${esc(o.text)}</strong>${o.feedback ? `<span>${esc(o.feedback)}</span>` : ''}</div>`);
+    }));
+    return `<div class="kp-debrief"><p class="kp-label">Nachbesprechung</p><h2 class="kp-q">${esc(b.title || 'Deine Entscheidungen im Überblick')}</h2>
+      ${list.length ? list.join('') : `<p>${esc(T('nochKeineEntscheidung'))}</p>`}
+      ${(course.meters || []).length ? `<p class="kp-label" style="margin-top:16px">${T('werteStand')}</p>${meterPanel(null)}` : ''}
+      ${max ? `<div class="kp-feedback neutral" style="margin-top:14px">Punkte im Szenario: ${got} von ${max}</div>` : ''}
+      ${b.html ? `<div class="kp-text" style="margin-top:14px">${res(b.html)}</div>` : ''}</div>`;
+  }
+
+  // ---------- Ton: Aufnahmen und Browser-Stimme ----------
+  let sound = null; // gerade laufender Ton
+  const plainText = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  function stopSound() {
+    if (!sound) return;
+    const s = sound;
+    sound = null;
+    s.stop();
+  }
+  // Lautstärke und Tempo gelten für alle Aufnahmen und für die Browser-Stimme.
+  // Sie liegen im localStorage, nicht im Lernstand: der Platz dort ist knapp und je Gerät ist das sinnvoller.
+  const audioPrefs = { vol: 1, rate: 1 };
+  // Bedienklänge (Kerstin 17.10.2026, Recherche UI-Sound und Moreno & Mayer 2000): sieben kurze, synthetische Klänge über Web Audio,
+  // keine Dateien, keine Musik, nie als Kulisse. Nur bei bedeutsamen Klicks, nie während Sprechertext oder Video, nie zwei in 400 ms.
+  // Je Stilfamilie ein Klangsatz: Foto warm (Sinus), Comic knackig (Dreieck, kürzer), Microlearning fast stumm (nur richtig, falsch, erledigt).
+  const SOUND_KEY = 'kurs-klang-' + (course.id || 'kurs');
+  const KLANG_MICRO = ['richtig', 'falsch', 'erledigt'];
+  let klangCtx = null, klangLast = 0;
+  function soundsAllowed() { return set.sounds !== false && !opts.renderer; }
+  function soundsOn() { if (!soundsAllowed()) return false; try { return localStorage.getItem(SOUND_KEY) !== 'aus'; } catch (e) { return true; } }
+  function setSoundsOn(on) { try { localStorage.setItem(SOUND_KEY, on ? 'an' : 'aus'); } catch (e) { /* kein Speicher */ } }
+  function klangFamilie() { const st = (course.theme || {}).style || ''; return st === 'micro' ? 'micro' : (st === 'comic' || st === 'praxis') ? 'comic' : 'foto'; }
+  function mediaBusy() {
+    if (sound) return true;
+    return [...root.querySelectorAll('video, audio')].some(m => !m.paused && !m.ended && m.currentTime > 0);
+  }
+  // name: klick | richtig | falsch | erledigt | kapitel | aufdecken | hinweis
+  function uiSound(name) {
+    if (!soundsOn() || mediaBusy()) return false;
+    const fam = klangFamilie();
+    if (fam === 'micro' && !KLANG_MICRO.includes(name)) return false;
+    const now = Date.now();
+    if (name !== 'kapitel' && now - klangLast < 400) return false;
+    klangLast = now;
+    (window.__klaenge = window.__klaenge || []).push(name);
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return true;
+    try {
+      klangCtx = klangCtx || new AC();
+      if (klangCtx.state === 'suspended') klangCtx.resume().catch(() => {});
+      if (klangCtx.state !== 'running') return true;
+      const ctx = klangCtx, t0 = ctx.currentTime + 0.01, warm = fam === 'foto';
+      const master = ctx.createGain(); master.gain.value = (audioPrefs.vol || 1) * 0.16; master.connect(ctx.destination);
+      const tone = (freq, at, dur, kind, vol) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = kind || (warm ? 'sine' : 'triangle'); o.frequency.setValueAtTime(freq, at);
+        g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(vol || 1, at + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+        o.connect(g); g.connect(master); o.start(at); o.stop(at + dur + 0.02);
+      };
+      const noise = (at, dur, freq, vol) => {
+        const n = Math.floor(ctx.sampleRate * dur), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+        const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+        src.buffer = buf; f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 1.2; g.gain.value = vol || 0.6;
+        src.connect(f); f.connect(g); g.connect(master); src.start(at);
+      };
+      const k = warm ? 1 : 0.7; // Comic kürzer
+      if (name === 'klick') tone(warm ? 1100 : 900, t0, 0.045 * k, warm ? 'triangle' : 'square', 0.5);
+      else if (name === 'richtig') { tone(523, t0, 0.12 * k); tone(659, t0 + 0.09 * k, 0.16 * k); }
+      else if (name === 'falsch') { tone(330, t0, 0.14 * k, 'sine', 0.55); tone(262, t0 + 0.1 * k, 0.2 * k, 'sine', 0.45); }
+      else if (name === 'erledigt') { tone(523, t0, 0.07 * k); tone(659, t0 + 0.06 * k, 0.07 * k); tone(784, t0 + 0.12 * k, 0.16 * k); }
+      else if (name === 'kapitel') { [523, 659, 784, 1047].forEach((f, i) => tone(f, t0 + i * 0.09, 1.2 - i * 0.1, 'sine', 0.5)); }
+      else if (name === 'aufdecken') { noise(t0, 0.07, warm ? 1800 : 2600, 0.5); tone(warm ? 880 : 1200, t0 + 0.03, 0.08 * k, 'triangle', 0.35); }
+      else if (name === 'hinweis') { tone(880, t0, 0.14, 'sine', 0.4); tone(1175, t0 + 0.1, 0.16, 'sine', 0.3); }
+    } catch (e) { /* ohne Ton weiter */ }
+    return true;
+  }
+  const klangNachAntwort = qid => {
+    const fresh = root.querySelector(`[data-quiz="${qid}"]`);
+    if (!fresh) return;
+    if (fresh.querySelector('.kp-feedback.ok')) uiSound('richtig');
+    else if (fresh.querySelector('.kp-feedback.no')) uiSound('falsch');
+    fresh.classList.add('kp-fresh'); setTimeout(() => fresh.classList.remove('kp-fresh'), 700);
+  };
+  // Erledigt-Klang: ein Baustein auf der Seite wird während des Besuchs fertig (nicht beim Zeichnen, nicht direkt nach einer Antwort)
+  let doneSeen = null;
+  function klangErledigt() {
+    const page = pages[state.current]; if (!page) return;
+    const ids = (page.blocks || []).filter(b => INTERACTIVE_DONE.includes(b.type) && b.type !== 'quiz').filter(b => blockDone(b)).map(b => b.id);
+    if (!doneSeen) { doneSeen = new Set(ids); return; }
+    const neu = ids.filter(id => !doneSeen.has(id));
+    ids.forEach(id => doneSeen.add(id));
+    if (neu.length) uiSound('erledigt');
+  }
+
+  const audioKey = 'kurs-ton-' + (course.id || '');
+  try {
+    const raw = localStorage.getItem(audioKey);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      if (Number(saved.vol) >= 0) audioPrefs.vol = Math.min(1, Number(saved.vol));
+      if (Number(saved.rate) > 0) audioPrefs.rate = Math.min(2, Math.max(0.5, Number(saved.rate)));
+    }
+  } catch (e) { /* ohne Speicher laufen die Standardwerte */ }
+  function saveAudioPrefs() {
+    try { localStorage.setItem(audioKey, JSON.stringify(audioPrefs)); } catch (e) { /* privates Fenster */ }
+  }
+  // Wirkt sofort auf das, was gerade läuft (die Browser-Stimme erst beim nächsten Satz)
+  function applyAudioPrefs() {
+    if (sound && sound.media) { sound.media.volume = audioPrefs.vol; sound.media.playbackRate = audioPrefs.rate; }
+    root.querySelectorAll('audio, video').forEach(m => { m.volume = audioPrefs.vol; });
+  }
+
+  // Spielt eine Aufnahme oder liest einen Text vor; onEnd wird nach dem Ende aufgerufen
+  function playSound(src, text, onEnd, voiceIndex) {
+    stopSound();
+    const done = () => { if (sound === ctl) { sound = null; } if (onEnd) onEnd(); };
+    let ctl;
+    if (src) {
+      const a = new Audio(res(src));
+      a.volume = audioPrefs.vol;
+      a.playbackRate = audioPrefs.rate;
+      ctl = { stop: () => { a.pause(); a.onended = null; }, media: a };
+      a.onended = done;
+      // started: true, sobald der Ton läuft; 'blocked', wenn der Browser ohne Klick der Lernenden nichts abspielen lässt
+      ctl.started = a.play().then(() => true, err => { if (sound === ctl) sound = null; return err && err.name === 'NotAllowedError' ? 'blocked' : false; });
+    } else if (text && window.speechSynthesis) {
+      const u = new SpeechSynthesisUtterance(plainText(echoPlain(text)).replace(/\*\*/g, ''));
+      u.lang = 'de-DE';
+      u.volume = audioPrefs.vol;
+      u.rate = audioPrefs.rate;
+      const voices = speechSynthesis.getVoices().filter(v => /^de/i.test(v.lang));
+      if (voices.length) u.voice = voices[(voiceIndex || 0) % voices.length];
+      if (voices.length < 2 && voiceIndex) u.pitch = voiceIndex % 2 ? 0.8 : 1.2;
+      u.onend = done;
+      ctl = { stop: () => { u.onend = null; speechSynthesis.cancel(); } };
+      ctl.started = new Promise(ok => { u.onstart = () => ok(true); u.onerror = e => { if (sound === ctl) sound = null; ok(e && e.error === 'not-allowed' ? 'blocked' : false); }; });
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    } else {
+      if (onEnd) setTimeout(onEnd, 0);
+      return null;
+    }
+    sound = ctl;
+    return ctl;
+  }
+  // WebVTT als Liste von Einblendungen; Zeiten wie 00:01:02.500 oder 1:02.5
+  function vttSeconds(stamp) {
+    return String(stamp).trim().split(':').reverse()
+      .reduce((sum, part, i) => sum + (parseFloat(part.replace(',', '.')) || 0) * Math.pow(60, i), 0);
+  }
+  function parseVtt(text) {
+    const cues = [];
+    String(text || '').replace(/\r/g, '').split(/\n\s*\n/).forEach(part => {
+      const lines = part.split('\n').filter(l => l.trim());
+      const i = lines.findIndex(l => l.indexOf('-->') > 0);
+      if (i < 0) return;
+      const [from, to] = lines[i].split('-->').map(x => x.trim().split(/\s+/)[0]);
+      const txt = lines.slice(i + 1).join(' ').replace(/<[^>]*>/g, '').trim();
+      if (txt) cues.push({ from: vttSeconds(from), to: vttSeconds(to), text: txt });
+    });
+    return cues;
+  }
+  const narrCues = {};
+  function narrationCues(b) {
+    if (!narrCues[b.id]) narrCues[b.id] = b.narrationVtt ? parseVtt(b.narrationVtt) : [];
+    return narrCues[b.id];
+  }
+  // Synthetische Stimme kennzeichnen (Artikel 50 EU-KI-Verordnung): Browser-Stimme immer, Aufnahmen mit narrationAi (Piper, ElevenLabs …)
+  const narrAi = b => !!(b.narrationAi || (!b.narration && plainText(b.tts)) || (!b.narration && set.autoNarration));
+  // Sprechertext: Knopf, Untertitel und die Regler für Lautstärke und Tempo
+  function narrationButton(b) {
+    if (!b.narration && !plainText(b.tts)) return '';
+    // Untertitel nur auf Wunsch (settings.narrCaptions): der Text steht meist schon auf der Folie, die Taste verwirrte (Kerstin 23.10.2026)
+    const hasCc = set.narrCaptions === true && !!(b.narrationVtt || plainText(b.tts));
+    return `<div class="kp-narr" data-narr-box="${b.id}">
+      <button data-narr="${b.id}" aria-label="${T('anhoeren')}">▶ ${T('anhoeren')}</button>
+      ${narrAi(b) ? `<span class="kp-ai-voice" title="${esc(T('kiStimme'))}">${esc(T('kiStimmeKurz'))}<span class="kp-sr"> · ${esc(T('kiStimme'))}</span></span>` : ''}
+      ${hasCc ? `<button class="kp-narr-opt" data-narr-cc="${b.id}" aria-pressed="false" title="${T('untertitel')}">${T('untertitel')}</button>` : ''}
+      <button class="kp-narr-opt" data-narr-set="${b.id}" aria-expanded="false" aria-label="${T('toneinstellungen')}">⚙</button>
+      <div class="kp-narr-panel" hidden>
+        <label>${T('lautstaerke')} <input type="range" data-narr-vol min="0" max="1" step="0.05" value="${audioPrefs.vol}"></label>
+        <label>${T('tempo')} <input type="range" data-narr-rate min="0.5" max="2" step="0.25" value="${audioPrefs.rate}"><output>${audioPrefs.rate}×</output></label>
+      </div>
+      ${hasCc ? `<p class="kp-narr-cc" data-narr-cc-text="${b.id}" role="status" hidden></p>` : ''}
+    </div>`;
+  }
+
+  // ---------- Figuren für Comic-Dialoge ----------
+  const AVATARS = {
+    a1: { skin: '#f1c7a5', hair: '#3b2a20', shirt: '#1f3a5f', style: 'short' },
+    a2: { skin: '#e8b48f', hair: '#2a1a12', shirt: '#c8781a', style: 'long' },
+    a3: { skin: '#8d5a3b', hair: '#151515', shirt: '#1f7a4d', style: 'short' },
+    a4: { skin: '#f5d6c0', hair: '#b8862b', shirt: '#6a3fb0', style: 'bun' },
+    a5: { skin: '#c68e65', hair: '#6b6b6b', shirt: '#b3261e', style: 'bald' },
+    a6: { skin: '#6b4430', hair: '#231510', shirt: '#0f6b78', style: 'long' },
+    a7: { skin: '#f1c7a5', hair: '#4a3328', shirt: '#2f4858', style: 'short', beard: true },
+    a8: { skin: '#e8b48f', hair: '#1c1c1c', shirt: '#7a3b6a', style: 'curly' },
+    a9: { skin: '#8d5a3b', hair: '#2b1b12', shirt: '#b87333', style: 'pony' },
+    a10: { skin: '#f5d6c0', hair: '#2b3440', shirt: '#345c8a', style: 'short', glasses: true },
+    a11: { skin: '#c68e65', hair: '#1f2933', shirt: '#4b6b3c', style: 'cap' },
+    a12: { skin: '#6b4430', hair: '#5a5a5a', shirt: '#8a2f3b', style: 'bald', beard: true, glasses: true }
+  };
+  // Haltung und Gesichtsausdruck: machen Comic-Szenen lebendig
+  function avatarSvg(key, pose, bare) {
+    // Gezeichnete Figur (viewBox 100 × 100): Augen mit Iris und Lid, Brauen in jeder Haltung, Nase, Ohren, Hals mit Schatten,
+    // Schultern mit Kragen. Klassen kp-eyes (Blinzeln) und kp-mouth (Sprechen) bleiben, die Haltungen auch.
+    const a = AVATARS[key] || AVATARS.a1;
+    const p = pose || 'neutral';
+    const shirt = `var(--kp-shirt, ${a.shirt})`;
+    const back = /long|pony|curly/.test(a.style) ? `<path d="M24 74c-5-32 5-58 26-58s31 26 26 58z" fill="${a.hair}"/>` : '';
+    const front = {
+      short: `<path d="M27 40c0-15 10-25 23-25s23 10 23 25c-5-7-13-10-23-10s-18 3-23 10z" fill="${a.hair}"/>`,
+      long: `<path d="M28 42c0-16 10-26 22-26s22 10 22 26c-4-9-12-13-22-13s-18 4-22 13z" fill="${a.hair}"/>`,
+      bun: `<circle cx="50" cy="13" r="9" fill="${a.hair}"/><path d="M28 39c0-14 10-23 22-23s22 9 22 23c-5-7-13-10-22-10s-17 3-22 10z" fill="${a.hair}"/>`,
+      curly: `<g fill="${a.hair}"><circle cx="33" cy="30" r="10"/><circle cx="50" cy="24" r="11"/><circle cx="67" cy="30" r="10"/><circle cx="28" cy="42" r="7"/><circle cx="72" cy="42" r="7"/></g>`,
+      pony: `<path d="M28 41c0-15 10-25 22-25s22 10 22 25c-5-8-13-11-22-11s-17 3-22 11z" fill="${a.hair}"/><path d="M70 36c9 4 12 14 10 26-6-4-9-12-12-18z" fill="${a.hair}"/>`,
+      cap: `<path d="M27 38c0-14 10-23 23-23s23 9 23 23H27z" fill="${a.hair}"/><path d="M27 38h34c8 0 14 2 16 5H27z" fill="${a.hair}" opacity=".75"/>`,
+      bald: ''
+    }[a.style] || '';
+    const beard = a.beard ? `<path d="M31 44c0 16 8 25 19 25s19-9 19-25c-3 9-10 12-19 12s-16-3-19-12z" fill="${a.hair}" opacity=".9"/>` : '';
+    const glasses = a.glasses ? `<g fill="none" stroke="#2c3440" stroke-width="1.8"><circle cx="42" cy="44" r="7"/><circle cx="58" cy="44" r="7"/><path d="M49 44h2M29 42l6 1M71 42l-6 1"/></g>` : '';
+    const browCol = a.style === 'bald' ? '#3b3b3b' : a.hair;
+    const brow = d => `<path class="kp-brow" d="${d}" stroke="${browCol}" stroke-width="2" fill="none" stroke-linecap="round"/>`;
+    // Brauen, Mund und Augenöffnung je Ausdruck
+    const faces = {
+      neutral: { brow: brow('M36 37q6-2 11 0M53 37q5-2 11 0'), mouth: 'M43 52q7 3 14 0', eye: 1 },
+      happy: { brow: brow('M36 36q6-3 11 0M53 36q5-3 11 0'), mouth: 'M41 50q9 8 18 0', eye: .9 },
+      think: { brow: brow('M36 38q6-2 11-1M53 37q6-2 11 1'), mouth: 'M44 54q6 1 12-2', eye: .85 },
+      skeptic: { brow: brow('M36 35q6 2 11 3M53 38q6-4 11-2'), mouth: 'M43 54q7-3 14 1', eye: .8 },
+      sad: { brow: brow('M36 36q6 2 11 4M53 40q5-2 11-4'), mouth: 'M43 55q7-6 14 0', eye: .9 },
+      surprised: { brow: brow('M36 33q6-3 11 0M53 33q5-3 11 0'), mouth: 'M46 52a4 4 0 1 0 8 0a4 4 0 1 0-8 0', eye: 1.25 }
+    };
+    const f = faces[{ wave: 'happy', explain: 'neutral', point: 'neutral' }[p] || p] || faces.neutral;
+    const eye = cx => `<ellipse cx="${cx}" cy="44" rx="4.2" ry="${(2.9 * f.eye).toFixed(2)}" fill="#fff"/><circle class="kp-iris" cx="${cx}" cy="44.3" r="${(2.3 * Math.min(1, f.eye + .1)).toFixed(2)}" fill="#3a2f2a"/><circle cx="${cx}" cy="44.3" r="1.1" fill="#111"/><circle cx="${cx + .9}" cy="43.3" r=".6" fill="#fff"/><path d="M${cx - 4.2} 43.6q4.2-${(3.4 * f.eye).toFixed(2)} 8.4 0" stroke="#3a2f2a" stroke-width="1.1" fill="none" stroke-linecap="round"/>`;
+    // Arme je Haltung
+    const arms = {
+      wave: `<path d="M74 84c6-10 9-22 6-30" stroke="${shirt}" stroke-width="9" fill="none" stroke-linecap="round"/><circle cx="79" cy="50" r="6" fill="${a.skin}"/>`,
+      explain: `<path d="M72 88c8-4 12-10 13-16" stroke="${shirt}" stroke-width="9" fill="none" stroke-linecap="round"/><circle cx="86" cy="70" r="6" fill="${a.skin}"/><path d="M28 88c-8-4-12-10-13-16" stroke="${shirt}" stroke-width="9" fill="none" stroke-linecap="round"/><circle cx="14" cy="70" r="6" fill="${a.skin}"/>`,
+      think: `<path d="M70 92c4-8 2-16-4-21" stroke="${shirt}" stroke-width="9" fill="none" stroke-linecap="round"/><circle cx="63" cy="62" r="6" fill="${a.skin}"/>`,
+      point: `<path d="M74 86c7-6 10-14 9-21" stroke="${shirt}" stroke-width="9" fill="none" stroke-linecap="round"/><circle cx="84" cy="62" r="6" fill="${a.skin}"/><path d="M84 58v-8" stroke="${a.skin}" stroke-width="5" stroke-linecap="round"/>`,
+      cross: `<path d="M26 84q24 12 48 0" stroke="${shirt}" stroke-width="9" fill="none" stroke-linecap="round"/><path d="M30 80q20 14 40 2" stroke="${shirt}" stroke-width="7" fill="none" stroke-linecap="round"/>`
+    }[p] || '';
+    return `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${bare ? '' : '<rect width="100" height="100" fill="#eef2f6"/>'}${back}
+      <path d="M11 100c1-16 13-26 29-30l10-2 10 2c16 4 28 14 29 30z" fill="${shirt}"/><path d="M42 70l8 10 8-10" fill="#000" opacity=".16"/>${arms}
+      <rect x="44" y="55" width="12" height="17" rx="3" fill="${a.skin}"/><ellipse cx="50" cy="60" rx="9" ry="4" fill="#000" opacity=".12"/>
+      <circle cx="29.5" cy="45" r="4.5" fill="${a.skin}"/><circle cx="70.5" cy="45" r="4.5" fill="${a.skin}"/>
+      <circle cx="50" cy="42" r="21" fill="${a.skin}"/>${beard}${front}
+      <g class="kp-eyes">${eye(42)}${eye(58)}</g>${f.brow}
+      <path class="kp-nose" d="M50 45v5.5q0 1.8-2 2" stroke="#000" opacity=".3" stroke-width="1.2" fill="none" stroke-linecap="round"/>${glasses}
+      <path class="kp-mouth" d="${f.mouth}" stroke="#7a3f36" stroke-width="2.2" fill="${f.mouth.includes('a4 4') ? '#5a2c27' : 'none'}" stroke-linecap="round"/></svg>`;
+  }
+  // Foto je Haltung: cast[].poses[haltung], sonst das Hauptfoto
+  function poseImage(c, pose) {
+    const p = c.poses && pose && c.poses[pose];
+    return p && p.src ? p.src : (c.image && c.image.src ? c.image.src : '');
+  }
+  function avatarHtml(c, pose) {
+    if (c.look === 'image' && poseImage(c, pose || c.pose)) return `<img src="${esc(res(poseImage(c, pose || c.pose)))}" alt="">`;
+    return avatarSvg(c.look, pose || c.pose);
+  }
+  // Figuren aus der Kurs-Besetzung übernehmen (Name, Rolle, Aussehen, Farbe)
+  // Die gewählte Begleitfigur: castId 'wahl' steht für die Figur, die die Person in „Über dich“ ausgesucht hat
+  function chosenGuideId() {
+    const ud = aboutBlock();
+    const g = ud && (state.self[ud.id] || {}).g;
+    return g && (course.cast || []).some(x => x.id === g) ? g : ((course.cast || [])[0] || {}).id || '';
+  }
+  function castOf(c) {
+    const want = c && c.castId === 'wahl' ? chosenGuideId() : c && c.castId;
+    const m = want && (course.cast || []).find(x => x.id === want);
+    return m ? Object.assign({}, c, { name: m.name, role: m.role, look: m.look, image: m.image, poses: m.poses, color: m.color, face: m.face }) : c;
+  }
+
+  // Maskottchen (cast[].mascot, Vorbild bildungsinnovator „Lernstrategien“: dieselbe Figur an jedem Kapitelanfang,
+  // je Kapitel mit eigener Haltung oder eigenem Requisit aus cast[].poses, gewählt über page.mascotPose)
+  function mascotCast() { return (course.cast || []).find(c => c && c.mascot) || null; }
+  function mascotHtml(pose, cls) {
+    const m = mascotCast(); if (!m) return '';
+    const src = poseImage(m, pose);
+    const inner = src ? `<img src="${esc(res(src))}" alt="">` : m.look && m.look !== 'image' ? avatarSvg(m.look, pose || m.pose, true) : '';
+    return inner ? `<div class="kp-mascot ${cls || ''}" aria-hidden="true"${m.color ? ` style="--kp-shirt:${esc(m.color)}"` : ''}>${inner}</div>` : '';
+  }
+
+  // ---------- Symbole (eigene, schlichte Linien-Symbole) ----------
+  const ICONS = {
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+    volume: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+    mute: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
+    'check-circle': '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    cap: '<path d="M2.5 9.5L12 5l9.5 4.5L12 14z"/><path d="M6.5 11.5v4c1.5 1.6 3.4 2.4 5.5 2.4s4-.8 5.5-2.4v-4M21.5 9.5v5"/>',
+    mind: '<path d="M7 20v-3.2A7 7 0 1 1 18 11.5l1.5 2.8-1.6.6V17a2 2 0 0 1-2 2H14v1"/><circle cx="11.5" cy="9.5" r="2.6"/><path d="M13.4 11.4l2 2"/>',
+    arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    'arrow-circle': '<circle cx="12" cy="12" r="9"/><path d="M8 12h8M13 9l3 3-3 3"/>',
+    chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+    chats: '<path d="M3 4h12v8H7l-4 3z"/><path d="M9 15v2h7l4 3V9h-3"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
+    users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 19c1-3.5 3.5-5 6.5-5s5.5 1.5 6.5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4 1.3 4.8 3.8"/>',
+    target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
+    bulb: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/>',
+    heart: '<path d="M12 20s-7-4.4-9-9a4.8 4.8 0 0 1 9-2.8A4.8 4.8 0 0 1 21 11c-2 4.6-9 9-9 9z"/>',
+    star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+    book: '<path d="M4 5c3-1.5 6-1.5 8 .5 2-2 5-2 8-.5v14c-3-1.5-6-1.5-8 .5-2-2-5-2-8-.5z"/><path d="M12 5.5v14"/>',
+    pencil: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
+    flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+    compass: '<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>',
+    shield: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>',
+    lock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+    map: '<path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/>',
+    key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
+    chart: '<path d="M4 20V4M4 20h16"/><path d="M8 16v-4M12 16V8M16 16v-6"/>',
+    trend: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+    rocket: '<path d="M12 15l-3-3c1-5 4.5-8.5 11-9-.5 6.5-4 10-9 11z"/><path d="M9 12l-4 1-2 3 4 1M12 15l-1 4 3 2 1-4"/><circle cx="15" cy="9" r="1.5"/>',
+    puzzle: '<path d="M4 8h4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4h-4a2 2 0 1 0-4 0H4v-4a2 2 0 1 0 0-4z"/>',
+    hand: '<path d="M8 13V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v7c0 4-2.5 7-6 7-2.5 0-4-1.3-5.5-3.5L3.8 13a1.5 1.5 0 0 1 2.5-1.6L8 13"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+    chev: '<path d="M9 5l7 7-7 7"/>',
+    move: '<path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>',
+    flip: '<rect x="4" y="3" width="10" height="13" rx="1.5"/><path d="M10 21h8.5a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M17 12l3-3 3 3" transform="translate(-1 0)"/>',
+    glasses: '<circle cx="6.5" cy="14" r="3.5"/><circle cx="17.5" cy="14" r="3.5"/><path d="M10 14q2-1.6 4 0M3 14l1.2-6.5Q4.6 6 6 6M21 14l-1.2-6.5Q19.4 6 18 6"/>',
+    ear: '<path d="M7 9a5 5 0 0 1 10 0c0 3-2.5 4-3 6.5S12.5 21 10 20.5"/><path d="M10 9.5a2 2 0 0 1 4 0"/>',
+    mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+    play: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
+    alert: '<path d="M12 3l10 17H2z"/><path d="M12 10v4M12 17v.5"/>',
+    question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17v.5"/>',
+    thumb: '<path d="M7 11v9H4v-9zM7 11l4-8c1.5 0 2.5 1 2.5 2.5V9h5a2 2 0 0 1 2 2.3l-1.2 6.5A2.5 2.5 0 0 1 16.8 20H7"/>',
+    leaf: '<path d="M5 19c0-9 5-14 15-14 0 10-5 15-14 15"/><path d="M5 19l8-8"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6L19 19M5 19l1.4-1.4M17.6 6.4L19 5"/>',
+    home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/>',
+    mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/>',
+    trophy: '<path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 14v3M8 21h8M9 17h6v4H9z"/>',
+    layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+    zap: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+    scale: '<path d="M12 4v16M6 20h12M4 8h16"/><path d="M6 8l-3 6a3 3 0 0 0 6 0zM18 8l-3 6a3 3 0 0 0 6 0z"/>',
+    seedling: '<path d="M12 21v-9"/><path d="M12 12c0-4-3-6-7-6 0 4 3 6 7 6zM12 10c0-3.5 2.5-6 7-6 0 4-2.5 6-7 6z"/>'
+  };
+  function icon(name, cls) {
+    const p = ICONS[name];
+    return p ? `<svg class="kp-ico ${cls || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>` : '';
+  }
+  // *Wort* in Überschriften wird zum kursiven Akzent
+  const accent = s => esc(s).replace(/\*(.+?)\*/g, '<em class="kp-accent">$1</em>');
+  // Derselbe Titel als schlichter Text: die Sternchen des Akzentworts gehören nicht in
+  // Listen, Kopfzeilen und Ausdrucke, sonst stehen sie dort sichtbar herum.
+  const plainTitle = s => esc(String(s == null ? '' : s).replace(/\*(.+?)\*/g, '$1'));
+  const eyebrow = s => (s ? `<p class="kp-eyebrow">${esc(s)}</p>` : '');
+
+  // Geschätzte Lernzeit des Kurses (für den Titelbereich)
+  function estimateMinutes() {
+    return Math.max(1, kursZeit(pages).minutes);
+  }
+
+  // ---------- Titelbereich, Begleitfigur, Agenda, Selbstcheck ----------
+  const focusStyle = img => (img && img.focus ? ` style="object-position:${esc(img.focus)}"` : '');
+  const photo = (img, fallbackLabel) => img && img.src
+    ? `<img src="${esc(res(img.src))}" alt="${esc(img.alt || '')}"${focusStyle(img)}>${img.credit ? `<span class="kp-credit-over">${esc(img.credit)}</span>` : ''}`
+    : `<div class="kp-photo-empty">${icon('user')}<span>${esc(fallbackLabel || 'Foto')}</span></div>`;
+
+  // Hervorgehobener Einschub in einer Karte, z. B. eine Frage zum Nachdenken
+  const calloutHtml = b => (plainText(b.callout) ? `<div class="kp-callout">${b.calloutIcon ? icon(b.calloutIcon) : ''}<div class="kp-text">${res(b.callout)}</div></div>` : '');
+
+  // Bewegtes Titelbild: stummer Clip in Schleife (Pexels oder eigene Datei) über dem Foto, das als Standbild
+  // bleibt. Unter „Bewegung reduzieren“ blendet das CSS den Clip aus, dann steht nur das Foto.
+  function heroVideo(b) {
+    const src = b.video || b.videoUrl;
+    if (!src) return '';
+    return `<video class="kp-hero-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true" tabindex="-1" src="${esc(res(src))}"${b.image && b.image.src ? ` poster="${esc(res(b.image.src))}"` : ''}></video>${b.videoCredit && !(b.image && b.image.credit) ? `<span class="kp-credit-over">${esc(b.videoCredit)}</span>` : ''}`;
+  }
+  // Mosaik-Titel: Titelbild plus bis zu drei weitere Fotos als schräg geschnittene Streifen (Vorbild: Titelseiten
+  // mit mehreren Motiven). Die Schnittlinien laufen alle in dieselbe Richtung, zwischen den Kacheln bleibt ein Spalt
+  // in der Hauptfarbe (Rand des Mosaiks). Die Nennungen aller Bilder stehen zusammen unten rechts.
+  const mosaicTiles = b => [b.image].concat(b.mosaic || []).filter(t => t && t.src);
+  function mosaicHtml(b) {
+    const tiles = mosaicTiles(b), n = tiles.length, sk = 6, gap = .7;
+    const poly = i => {
+      const l = i === 0 ? -40 : i / n * 100, r = i === n - 1 ? 140 : (i + 1) / n * 100;
+      const lt = i === 0 ? l : l + sk + gap, lb = i === 0 ? l : l - sk + gap, rt = i === n - 1 ? r : r + sk - gap, rb = i === n - 1 ? r : r - sk - gap;
+      return `polygon(${lt}% 0, ${rt}% 0, ${rb}% 100%, ${lb}% 100%)`;
+    };
+    const credits = [...new Set(tiles.map(t => String(t.credit || '').trim()).filter(Boolean))];
+    return `<div class="kp-mosaic" style="--n:${n}">${tiles.map((t, i) => `<div class="kp-mosaic-tile" style="clip-path:${poly(i)};--kp-i:${i}"><img src="${esc(res(t.src))}" alt="${esc(t.alt || '')}"${focusStyle(t)}></div>`).join('')}</div>${credits.length ? `<span class="kp-credit-over">${esc(credits.join(' · '))}</span>` : ''}`;
+  }
+  // Titel als Schrift über dem Foto (hero.layout 'schrift', Vorbild „Schwächen überwinden“): das Hauptwort läuft in
+  // großen Versalien über die ganze Bildbreite, das *Akzentwort* steht kleiner rechts darunter; die Ränder sind über einen
+  // SVG-Filter aufgeraut wie mit dem Pinsel. Text, Lernzeit und Start stehen ruhig unter dem Bild.
+  function heroSchrift(b, minutes, start) {
+    const t = String(b.title || '');
+    const m = t.match(/\*([^*]+)\*/);
+    const main = plainText(m ? t.replace(m[0], ' ') : t).replace(/\s+/g, ' ').trim(), sub = m ? plainText(m[1]) : '';
+    const n = Math.max(4, Array.from(main).length), fid = 'kp-rough-' + b.id;
+    return `<div class="kp-hero2 kp-hero-schrift${b.cover ? ' kp-hero-cover' : ''}">
+      <div class="kp-hero-media kp-schrift-media${heroVideo(b) ? ' kp-has-video' : ''}">${photo(b.image, 'Titelbild')}${heroVideo(b)}
+        <svg class="kp-schrift-defs" width="0" height="0" aria-hidden="true" focusable="false"><filter id="${esc(fid)}" x="-4%" y="-8%" width="108%" height="116%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="3" result="w"/><feDisplacementMap in="SourceGraphic" in2="w" scale="6" xChannelSelector="R" yChannelSelector="G" result="d"/>
+          <feTurbulence type="fractalNoise" baseFrequency="0.012 0.16" numOctaves="3" seed="9" result="g"/><feColorMatrix in="g" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -7 5.3" result="k"/>
+          <feComposite in="d" in2="k" operator="in"/></filter></svg>
+        <h2 class="kp-schrift" style="--n:${n};--kp-rough:url(#${esc(fid)})"><span class="kp-schrift-main">${esc(main)}</span>${sub ? ` <span class="kp-schrift-sub">${esc(sub)}</span>` : ''}</h2>
+      </div>
+      <div class="kp-schrift-body">
+        ${firstName() ? `<p class="kp-hello">${T('hallo')} ${esc(firstName())},</p>` : ''}
+        ${eyebrow(b.eyebrow)}
+        ${plainText(b.html) ? `<div class="kp-text">${res(b.html)}</div>` : ''}
+        ${calloutHtml(b)}
+        ${b.showTime !== false ? `<div class="kp-hero-meta"><span>${icon('clock')} ${T('lernzeit')}: ${T('ca')} ${minutes} ${minutes === 1 ? T('minute') : T('minuten')}</span></div>` : ''}
+        ${start ? `<div class="kp-hero-start">${start}</div>` : ''}
+      </div></div>`;
+  }
+  // Kapitelfrage als Schrift (hero.layout 'frage', Vorbild bildungsinnovator „Lernstrategien“): „Wie beeinflussen
+  // *Emotionen* das Lernen?“ wird zu kleiner Zeile, großem Schlagwort, kleiner Zeile und einem großen Fragezeichen in der
+  // Akzentfarbe; rechts das Bild oder das Maskottchen in der Haltung b.pose
+  function heroFrage(b, minutes, start) {
+    const t = plainText(String(b.title || '').replace(/\*([^*]+)\*/, '\u0001$1\u0001')).trim();
+    const parts = t.split('\u0001');
+    const strip = x => String(x || '').replace(/\s*\?\s*$/, '').trim();
+    const pre = parts.length === 3 ? parts[0].trim() : '', word = parts.length === 3 ? parts[1].trim() : strip(t), post = parts.length === 3 ? strip(parts[2]) : '';
+    const n = Math.max(5, ...word.split(/\s+/).map(w => Array.from(w).length));
+    const pic = b.image && b.image.src ? photo(b.image, 'Titelbild') : mascotHtml(b.pose, 'kp-mascot-hero');
+    return `<div class="kp-hero2 kp-hero-frage${b.cover ? ' kp-hero-cover' : ''}${pic ? ' kp-frage-haspic' : ''}">
+      <div class="kp-frage-stage">
+        <h2 class="kp-frage" style="--n:${n}" aria-label="${esc(strip(t.replace(/\u0001/g, '')) + '?')}"><span aria-hidden="true">
+          ${pre ? `<span class="kp-frage-pre">${esc(pre)}</span>` : ''}<span class="kp-frage-word">${esc(word)}<span class="kp-frage-q">?</span></span>${post ? `<span class="kp-frage-post">${esc(post)}</span>` : ''}</span></h2>
+        ${pic ? `<div class="kp-frage-pic">${pic}</div>` : ''}
+      </div>
+      <div class="kp-frage-body">
+        ${firstName() ? `<p class="kp-hello">${T('hallo')} ${esc(firstName())},</p>` : ''}${eyebrow(b.eyebrow)}
+        ${plainText(b.html) ? `<div class="kp-text">${res(b.html)}</div>` : ''}${calloutHtml(b)}
+        ${b.showTime !== false ? `<div class="kp-hero-meta"><span>${icon('clock')} ${T('lernzeit')}: ${T('ca')} ${minutes} ${minutes === 1 ? T('minute') : T('minuten')}</span></div>` : ''}
+        ${start ? `<div class="kp-hero-start">${start}</div>` : ''}
+      </div></div>`;
+  }
+  function renderHero(b) {
+    const minutes = b.time ? Number(b.time) : estimateMinutes();
+    if (b.layout === 'frage') return heroFrage(b, minutes, b.cover ? `<button class="kp-btn" data-next>${esc(b.startLabel || T('starten'))}</button>` : '');
+    if (b.layout === 'schrift') return heroSchrift(b, minutes, b.cover ? `<button class="kp-btn" data-next>${esc(b.startLabel || T('starten'))}</button>` : '');
+    // Naht (Vorbild bildungsinnovator AGG, Arbeitsschutz, Ergonomie, IT-Sicherheit): links eine hellgraue Fläche, rechts das Foto,
+    // die weiße Karte liegt über der Naht; unten Doktorhut, Startsatz und Lernzeit (der Startsatz ist der Knopf)
+    if (b.layout === 'naht') {
+      const startTxt = esc(b.startText || T('nahtStart'));
+      return `<div class="kp-hero2 kp-hero-naht${b.cover ? ' kp-hero-cover' : ''}"><span class="kp-naht-grau" aria-hidden="true"></span>
+        <div class="kp-hero-media${heroVideo(b) ? ' kp-has-video' : ''}">${photo(b.image, 'Titelbild')}${heroVideo(b)}</div>
+        <div class="kp-hero-card kp-naht-karte">${firstName() ? `<p class="kp-hello">${T('hallo')} ${esc(firstName())},</p>` : ''}${eyebrow(b.eyebrow)}<h2 class="kp-hero-title">${accent(b.title)}</h2><div class="kp-text">${res(b.html)}</div>${calloutHtml(b)}
+          <div class="kp-naht-start">${icon(b.icon || 'cap', 'kp-naht-ico')}<div>${b.cover ? `<button type="button" class="kp-naht-go" data-next>${startTxt}</button>` : `<p>${startTxt}</p>`}${b.showTime !== false ? `<p class="kp-naht-time">${T('lernzeit')}: ${minutes} ${minutes === 1 ? T('minute') : T('minuten')}</p>` : ''}</div></div></div></div>`;
+    }
+    // Schleier (Vorbild Diversity, Generationen verstehen, Gelassener führen): das Foto über die ganze Folie, links eine Spalte
+    // über die volle Höhe als Schleier (hell oder mit cardStyle 'dark' dunkel), darin Dachzeile, Titel in Versalien, Text, Lernzeit;
+    // b.sidePhoto steht wie in „Gelassener führen“ als zweites Foto rechts
+    if (b.layout === 'schleier') {
+      const dark = b.cardStyle === 'dark';
+      const go = b.cover ? `<div class="kp-hero-start"><button class="kp-btn" data-next>${esc(b.startLabel || T('starten'))}</button></div>` : '';
+      return `<div class="kp-hero2 kp-hero-schleier${dark ? ' kp-schleier-dunkel' : ''}${b.cover ? ' kp-hero-cover' : ''}${b.sidePhoto && b.sidePhoto.src ? ' kp-schleier-side' : ''}">
+        <div class="kp-hero-media${heroVideo(b) ? ' kp-has-video' : ''}">${photo(b.image, 'Titelbild')}${heroVideo(b)}</div>
+        <div class="kp-schleier${dark ? ' kp-on-dark' : ''}">${firstName() ? `<p class="kp-hello">${T('hallo')} ${esc(firstName())},</p>` : ''}${eyebrow(b.eyebrow)}<h2 class="kp-hero-title">${accent(b.title)}</h2><div class="kp-text">${res(b.html)}</div>${calloutHtml(b)}
+          ${b.showTime !== false ? `<div class="kp-hero-meta"><span>${icon('clock')} ${T('lernzeit')}: ${T('ca')} ${minutes} ${minutes === 1 ? T('minute') : T('minuten')}</span></div>` : ''}${go}</div>
+        ${b.sidePhoto && b.sidePhoto.src ? `<figure class="kp-schleier-foto"><img src="${esc(res(b.sidePhoto.src))}" alt="${esc(b.sidePhoto.alt || '')}"${focusStyle(b.sidePhoto)}></figure>` : ''}
+      </div>`;
+    }
+    // Titelschild (Vorbild „Künstliche Intelligenz am Arbeitsplatz“): Foto über die Breite, das weiße Schild mit dem Titel
+    // in Versalien ragt über die untere Bildkante, Text, Lernzeit und Start stehen mittig darunter
+    if (b.layout === 'band') {
+      const go = b.cover ? `<div class="kp-hero-start"><button class="kp-btn" data-next>${esc(b.startLabel || T('starten'))}</button></div>` : '';
+      return `<div class="kp-hero2 kp-hero-band">
+        <div class="kp-hero-media${heroVideo(b) ? ' kp-has-video' : ''}">${photo(b.image, 'Titelbild')}${heroVideo(b)}</div>
+        <div class="kp-band-plate">${eyebrow(b.eyebrow)}<h2 class="kp-hero-title">${accent(b.title)}</h2></div>
+        <div class="kp-band-body">${firstName() ? `<p class="kp-hello">${T('hallo')} ${esc(firstName())},</p>` : ''}<div class="kp-text">${res(b.html)}</div>${calloutHtml(b)}
+          ${b.showTime !== false ? `<div class="kp-hero-meta"><span>${icon('clock')} ${T('lernzeit')}: ${T('ca')} ${minutes} ${minutes === 1 ? T('minute') : T('minuten')}</span></div>` : ''}${go}</div>
+      </div>`;
+    }
+    const auftrag = b.layout === 'auftrag', start = !b.cover ? '' : b.startArrow && !auftrag ? `<button class="kp-btn kp-hero-arrow" data-next aria-label="${esc(b.startLabel || T('starten'))}"><span aria-hidden="true">»</span></button>` : `<button class="kp-btn" data-next>${esc(b.startLabel || T('starten'))}</button>`;
+    return `<div class="kp-hero2 kp-hero-${b.layout || 'card-left'} ${b.cover ? 'kp-hero-cover' : ''}${b.cardBand && b.eyebrow ? ' kp-hero-hasband' : ''}">
+      <div class="kp-hero-media${heroVideo(b) ? ' kp-has-video' : ''}${mosaicTiles(b).length > 1 ? ' kp-hero-mosaic' : b.image && /\.svg(\?|$)|^data:image\/svg/i.test(String(b.image.src || '')) ? ' kp-hero-drawing' : ''}">${mosaicTiles(b).length > 1 ? mosaicHtml(b) : photo(b.image, 'Titelbild')}${heroVideo(b)}</div>
+      <div class="kp-hero-card kp-card-${b.layout === 'center' ? 'clear' : b.cardStyle === 'farbglas' ? 'primary kp-card-farbglas' : (b.cardStyle || 'white')}">
+        ${firstName() ? `<p class="kp-hello">${T('hallo')} ${esc(firstName())},</p>` : ''}
+        ${b.cardBand && b.eyebrow ? `<p class="kp-hero-cardband">${b.icon ? icon(b.icon) : ''}<span>${esc(b.eyebrow)}</span></p>` : eyebrow(b.eyebrow)}
+        ${auftrag && !b.title ? '' : `<h2 class="kp-hero-title">${accent(b.title)}</h2>`}
+        <div class="kp-text">${res(b.html)}</div>
+        ${calloutHtml(b)}
+        ${auftrag && b.showTime === false ? '' : `<div class="kp-hero-meta">${b.icon && !auftrag && !(b.cardBand && b.eyebrow) ? icon(b.icon, 'kp-ico-lg') : ''}${b.showTime !== false ? `<span>${icon('clock')} ${T('lernzeit')}: ${T('ca')} ${minutes} ${minutes === 1 ? T('minute') : T('minuten')}</span>` : ''}</div>`}
+        ${start && !auftrag ? `<div class="kp-hero-start">${start}</div>` : ''}
+      </div>${start && auftrag ? `<div class="kp-auftrag-start">${start}</div>` : ''}
+    </div>`;
+  }
+
+  function renderGuide(b) {
+    const p = castOf(b);
+    const media = b.video
+      ? `<video controls playsinline preload="metadata" src="${esc(res(b.video))}" ${p.image && p.image.src ? `poster="${esc(res(p.image.src))}"` : ''}></video>`
+      : (p.look && p.look !== 'image' && !(p.image && p.image.src) ? `<div class="kp-guide-avatar"${p.color ? ` style="--c:${esc(p.color)}"` : ''}>${avatarSvg(p.look)}</div>` : photo(p.image, p.name));
+    // Illustration (SVG oder Nennung „Illustration“) steht ganz im Rahmen auf dem Boden statt wie ein Foto beschnitten
+    const illu = !b.video && p.image && p.image.src && (/\.svg(\?|$)|^data:image\/svg|\.json(\?|$)|^data:application\/json/i.test(p.image.src) || /illustration|storyset|undraw|lottie/i.test(p.image.credit || ''));
+    return `<div class="kp-guide kp-guide-${b.side || 'left'}">
+      <div class="kp-guide-media${illu ? ' kp-guide-illu' : ''}">${media}</div>
+      <div class="kp-guide-card kp-card-${b.cardStyle === 'farbglas' ? 'primary kp-card-farbglas' : (b.cardStyle || 'white')}">
+        ${eyebrow(b.eyebrow)}
+        <h3 class="kp-guide-name">${esc(p.name || '')}${p.role ? `, <em class="kp-accent">${esc(p.role)}</em>` : ''}</h3>
+        <div class="kp-text kp-guide-quote">${res(b.html)}</div>
+        ${b.audio ? guideAudio(b) : ''}
+        ${calloutHtml(b)}
+      </div>
+    </div>`;
+  }
+
+  // Stimme in der Karte: Player mit Wellenform (40 Balken aus einem festen Muster je Block), Dauer aus den Metadaten, Sprechblase oben rechts
+  function guideAudio(b, label, noBubble) {
+    let h = 7; const bars = [];
+    for (let i = 0; i < 40; i++) { h = (h * 31 + i * 7 + String(b.id).length) % 97; bars.push(`<i style="height:${22 + h % 70}%"></i>`); }
+    return `<div class="kp-guide-audio" data-guide-audio="${b.id}">
+      ${noBubble ? '' : `<span class="kp-guide-bubble" aria-hidden="true">${icon('chat')}</span>`}
+      <button type="button" class="kp-ga-play" data-ga-play="${b.id}" aria-label="${esc(label || T('anhoerenName'))}" aria-pressed="false">▶</button>
+      <span class="kp-ga-wave" aria-hidden="true">${bars.join('')}</span>
+      <span class="kp-ga-time" data-ga-time="${b.id}">–:––</span>
+      ${b.audioAi ? `<span class="kp-ai-voice" title="${esc(T('kiStimme'))}">${esc(T('kiStimmeKurz'))}<span class="kp-sr"> · ${esc(T('kiStimme'))}</span></span>` : ''}
+      <audio preload="metadata" src="${esc(res(b.audio))}" data-ga-src="${b.id}"></audio>
+    </div>`;
+  }
+
+  function renderAgenda(b) {
+    return `${b.challenge ? `<p class="kp-agenda-challenge">${accent(b.challenge)}</p>` : ''}<div class="kp-agenda">${(b.columns || []).map(c => `
+      <div class="kp-agenda-col fx-reveal">
+        ${eyebrow(c.eyebrow)}
+        ${c.title ? `<h3 class="kp-agenda-title">${accent(c.title)}</h3>` : ''}
+        <ul class="${c.numbered ? 'kp-agenda-num' : ''}">${(c.items || []).filter(Boolean).map((it, k) => `<li>${c.numbered ? `<span class="kp-num" aria-hidden="true">${k + 1}</span>` : icon(c.icon || 'check-circle')}<span>${esc(it)}</span></li>`).join('')}</ul>
+      </div>`).join('')}</div>`;
+  }
+
+  // Regler der Selbsteinschätzung (Vorbild: Storyline „Confidence self-assessment“): drei Ankertexte über der Linie,
+  // Werte 1 bis 5 wie die Skala, damit die Auswertungsbereiche gleich bleiben. Ankertexte und Symbole sind
+  // Listen oder Objekte mit Indizes (der Editor schreibt anchors.0, icons.2 …).
+  const scAnchors = b => { const a = [0, 1, 2].map(k => plainText((b.anchors || {})[k] || '')); return a.some(Boolean) ? a : [T('scNicht'), T('scEtwas'), T('scSicher')]; };
+  const scValText = (b, v) => { const a = scAnchors(b); return v == null ? T('scOffen') : v <= 1 ? a[0] : v >= 5 ? a[2] : v === 3 ? a[1] : (v < 3 ? a[0] : a[1]) + ' bis ' + (v < 3 ? a[1] : a[2]); };
+  // Profil nach dem Absenden: je Aussage Symbol, Name und Balken (Vorbild: „Boundaries start with self awareness“)
+  function scProfile(b, st) {
+    return `<ul class="kp-profile" aria-label="${T('deinProfil')}">${(b.statements || []).map((s, i) => {
+      const v = Number(st.a[i]) || 1, ic = (b.icons || {})[i];
+      return `<li class="kp-prof-row fx-reveal" style="--kp-i:${i}"><span class="kp-prof-ico" aria-hidden="true">${icon(ic || 'target')}</span><span class="kp-prof-name">${esc(s)}</span><span class="kp-prof-bar" role="img" aria-label="${esc(scValText(b, v))}"><i style="--w:${Math.round(6 + (v - 1) / 4 * 94)}%"></i></span></li>`;
+    }).join('')}</ul>`;
+  }
+  function renderSelfcheck(b) {
+    const st = state.self[b.id] || { a: [] };
+    st.a = st.a || [];
+    const scale = b.mode === 'scale';
+    if (b.mode === 'regler') {
+      const an = scAnchors(b);
+      const rows = (b.statements || []).map((s, i) => {
+        const v = st.a[i];
+        return `<div class="kp-sc-rg${v == null ? '' : ' is-set'}"><span class="kp-sc-label">${esc(s)}</span><div class="kp-sc-track"><span class="kp-sc-anchors" aria-hidden="true">${an.map(x => `<i>${esc(x)}</i>`).join('')}</span>
+          <input type="range" min="1" max="5" step="1" value="${v == null ? 1 : v}" data-sc-r="${i}" aria-label="${esc(s)}" aria-valuetext="${esc(scValText(b, v))}" ${st.done ? 'disabled' : ''}></div></div>`;
+      }).join('');
+      const r = st.done ? (b.results || []).find(x => { const sum = st.a.reduce((p, q) => p + (Number(q) || 0), 0); return sum >= Number(x.min) && sum <= Number(x.max); }) : null;
+      return `<div class="kp-selfcheck kp-sc-regler" data-self="${b.id}">
+        ${eyebrow(b.eyebrow)}
+        ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+        ${b.intro ? `<div class="kp-text" style="margin-bottom:12px">${res(b.intro)}</div>` : ''}
+        ${st.done ? scProfile(b, st) + (r ? `<div class="kp-sc-result fx-fade-in" role="status">${res(r.html)}</div>` : '') + `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-self-reset="${b.id}">${T('scAendern')}</button></div>`
+          : `<div class="kp-sc-rows">${rows}</div><div class="kp-quiz-actions"><button class="kp-btn" data-self-eval="${b.id}">${T('scAbsenden')}</button></div>`}
+      </div>`;
+    }
+    const rows = (b.statements || []).map((s, i) => {
+      const v = st.a[i];
+      const ctl = scale
+        ? `<span class="kp-scale" role="radiogroup" aria-label="${esc(s)}">${[1, 2, 3, 4, 5].map(n => `<label><input type="radio" name="sc-${b.id}-${i}" value="${n}" ${v === n ? 'checked' : ''} ${st.done ? 'disabled' : ''}>${n}</label>`).join('')}</span>`
+        : `<span class="kp-yesno${b.mode === 'janein' ? ' kp-yesno3' : ''}" role="radiogroup" aria-label="${esc(s)}">
+            <label><input type="radio" name="sc-${b.id}-${i}" value="1" ${v === 1 ? 'checked' : ''} ${st.done ? 'disabled' : ''}>${T('ja')}</label>
+            ${b.mode === 'janein' ? `<label title="${esc(T('weissNicht'))}"><input type="radio" name="sc-${b.id}-${i}" value="-1" ${v === -1 ? 'checked' : ''} ${st.done ? 'disabled' : ''} aria-label="${esc(T('weissNicht'))}">?</label>` : ''}
+            <label><input type="radio" name="sc-${b.id}-${i}" value="0" ${v === 0 ? 'checked' : ''} ${st.done ? 'disabled' : ''}>${T('nein')}</label></span>`;
+      return `<div class="kp-sc-row"><span>${esc(s)}</span>${ctl}</div>`;
+    }).join('');
+    let result = '';
+    if (st.done) {
+      const sum = st.a.reduce((x, y) => x + Math.max(0, Number(y) || 0), 0);
+      const r = (b.results || []).find(x => sum >= Number(x.min) && sum <= Number(x.max));
+      result = `${scale && b.profile ? scProfile(b, st) : ''}<div class="kp-sc-result fx-fade-in" role="status">${r ? res(r.html) : ''}</div>
+        <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-self-reset="${b.id}">Antworten ändern</button></div>`;
+    }
+    // Zweispaltig (Vorbild „Was sind deine Herausforderungen?“): Titel und Einleitung links, die Aussagen mit Ja/?/Nein rechts
+    const zwei = b.look === 'zweispaltig';
+    const kopf = `${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text" style="margin-bottom:12px">${res(b.intro)}</div>` : ''}`;
+    const rumpf = `<div class="kp-sc-rows">${rows}</div>${st.done ? result : `<div class="kp-quiz-actions"><button class="kp-btn" data-self-eval="${b.id}">${T('auswerten')}</button></div>`}`;
+    return `<div class="kp-selfcheck${zwei ? ' kp-sc-zwei' : ''}${b.look === 'schalter' && !scale ? ' kp-sc-schalter' : ''}" data-self="${b.id}">${zwei ? `<div class="kp-sc-kopf">${kopf}</div><div class="kp-sc-rumpf">${rumpf}</div>` : kopf + rumpf}</div>`;
+  }
+
+  // ---------- Comic-Dialog ----------
+  // ---------- Szenen-Bühne: Raum, Figuren, Kamera ----------
+  // Räume als SVG in den Farben des Stil-Pakets; back liegt hinter, front vor den Figuren
+  const SP = 'var(--kp-primary)', SA = 'var(--kp-accent)', SS = 'var(--kp-surface)', SW = 'var(--kp-bg)';
+  const STAGE_SETS = {
+    buero: {
+      back: `<rect width="800" height="360" fill="${SW}"/><rect width="800" height="276" fill="${SP}" fill-opacity=".05"/>
+        <rect x="56" y="46" width="176" height="150" rx="4" fill="${SA}" fill-opacity=".14" stroke="currentColor" stroke-opacity=".22" stroke-width="3"/>
+        <g stroke="currentColor" stroke-opacity=".12" stroke-width="2">${[70, 92, 114, 136, 158, 180].map(y => `<line x1="60" y1="${y}" x2="228" y2="${y}"/>`).join('')}</g>
+        <rect x="578" y="96" width="170" height="7" fill="currentColor" fill-opacity=".18"/><rect x="578" y="176" width="170" height="7" fill="currentColor" fill-opacity=".18"/>
+        ${[0, 1, 2, 3, 4, 5].map(i => `<rect x="${590 + i * 22}" y="${i % 2 ? 58 : 52}" width="16" height="${i % 2 ? 38 : 44}" rx="2" fill="${i === 2 ? SA : SP}" fill-opacity="${i === 2 ? 0.7 : 0.35 + (i % 3) * 0.12}"/>`).join('')}
+        ${[0, 1, 2].map(i => `<rect x="${596 + i * 30}" y="138" width="24" height="38" rx="2" fill="${SP}" fill-opacity=".25"/>`).join('')}
+        <rect x="0" y="276" width="800" height="84" fill="${SP}" fill-opacity=".09"/>`,
+      front: `<rect x="-10" y="300" width="820" height="70" rx="6" fill="${SP}" fill-opacity=".2"/><rect x="-10" y="300" width="820" height="6" fill="${SP}" fill-opacity=".35"/>
+        <rect x="352" y="226" width="96" height="64" rx="6" fill="currentColor" fill-opacity=".7"/><rect x="358" y="232" width="84" height="50" rx="3" fill="${SA}" fill-opacity=".25"/><rect x="392" y="290" width="16" height="12" fill="currentColor" fill-opacity=".6"/>
+        <rect x="490" y="278" width="20" height="24" rx="4" fill="${SA}" fill-opacity=".8"/>`
+    },
+    besprechung: {
+      back: `<rect width="800" height="360" fill="${SW}"/><rect width="800" height="270" fill="${SP}" fill-opacity=".04"/>
+        <rect x="296" y="36" width="208" height="126" rx="8" fill="${SS}" stroke="currentColor" stroke-opacity=".2" stroke-width="3"/>
+        ${[30, 52, 40, 70].map((h, i) => `<rect x="${326 + i * 40}" y="${140 - h}" width="24" height="${h}" rx="3" fill="${i === 3 ? SA : SP}" fill-opacity="${i === 3 ? 0.8 : 0.35}"/>`).join('')}
+        <rect x="632" y="30" width="130" height="190" rx="4" fill="${SA}" fill-opacity=".12" stroke="currentColor" stroke-opacity=".18" stroke-width="3"/><line x1="697" y1="30" x2="697" y2="220" stroke="currentColor" stroke-opacity=".18" stroke-width="3"/>
+        <rect x="58" y="206" width="34" height="46" rx="5" fill="${SP}" fill-opacity=".5"/><ellipse cx="66" cy="192" rx="16" ry="26" fill="${SP}" fill-opacity=".35"/><ellipse cx="86" cy="186" rx="14" ry="30" fill="${SA}" fill-opacity=".45"/>
+        <rect x="0" y="270" width="800" height="90" fill="${SP}" fill-opacity=".08"/>`,
+      front: `<ellipse cx="400" cy="352" rx="440" ry="64" fill="${SP}" fill-opacity=".22"/><ellipse cx="400" cy="342" rx="440" ry="58" fill="none" stroke="${SP}" stroke-opacity=".3" stroke-width="4"/>
+        <path d="M366 312h68l8-26h-84z" fill="currentColor" fill-opacity=".55"/><rect x="310" y="306" width="22" height="16" rx="4" fill="${SA}" fill-opacity=".8"/><rect x="470" y="302" width="40" height="26" rx="2" fill="${SS}" stroke="currentColor" stroke-opacity=".3"/>`
+    },
+    videocall: {
+      back: `<rect width="800" height="360" fill="${SP}"/><rect width="800" height="360" fill="#000" fill-opacity=".25"/>
+        <rect x="28" y="22" width="360" height="262" rx="16" fill="${SS}"/><rect x="412" y="22" width="360" height="262" rx="16" fill="${SS}"/>
+        <rect x="28" y="22" width="360" height="262" rx="16" fill="${SA}" fill-opacity=".1"/><rect x="600" y="40" width="140" height="90" rx="4" fill="${SP}" fill-opacity=".12"/>
+        <rect x="324" y="300" width="152" height="46" rx="23" fill="#000" fill-opacity=".35"/>
+        <circle cx="352" cy="323" r="14" fill="#fff" fill-opacity=".85"/><circle cx="400" cy="323" r="14" fill="#fff" fill-opacity=".85"/><circle cx="448" cy="323" r="14" fill="#d93025"/>`,
+      front: ''
+    },
+    flur: {
+      back: `<rect width="800" height="360" fill="${SW}"/><rect width="800" height="250" fill="${SP}" fill-opacity=".05"/>
+        ${[120, 400, 680].map(x => `<rect x="${x - 50}" y="0" width="100" height="10" rx="3" fill="${SA}" fill-opacity=".35"/>`).join('')}
+        <rect x="70" y="72" width="104" height="178" rx="3" fill="${SP}" fill-opacity=".16" stroke="currentColor" stroke-opacity=".15" stroke-width="3"/><circle cx="160" cy="166" r="5" fill="currentColor" fill-opacity=".45"/>
+        <rect x="626" y="72" width="104" height="178" rx="3" fill="${SP}" fill-opacity=".16" stroke="currentColor" stroke-opacity=".15" stroke-width="3"/><circle cx="640" cy="166" r="5" fill="currentColor" fill-opacity=".45"/>
+        <rect x="324" y="62" width="152" height="100" rx="4" fill="${SA}" fill-opacity=".14" stroke="currentColor" stroke-opacity=".18" stroke-width="3"/>
+        <rect x="340" y="78" width="38" height="30" fill="${SS}" transform="rotate(-4 359 93)"/><rect x="392" y="80" width="34" height="42" fill="${SS}" transform="rotate(3 409 101)"/><rect x="436" y="84" width="26" height="26" fill="${SA}" fill-opacity=".6"/>
+        <path d="M0 250H800V360H0z" fill="${SP}" fill-opacity=".1"/><g stroke="currentColor" stroke-opacity=".08" stroke-width="2">${[-300, -100, 100, 300, 500, 700, 900, 1100].map(x => `<line x1="400" y1="250" x2="${x}" y2="360"/>`).join('')}</g>`,
+      front: ''
+    },
+    anlage: {
+      back: `<rect width="800" height="360" fill="${SA}" fill-opacity=".1"/><rect width="800" height="360" fill="${SW}" fill-opacity=".55"/><circle cx="690" cy="68" r="30" fill="${SA}" fill-opacity=".45"/>
+        <g fill="none" stroke="currentColor" stroke-opacity=".42" stroke-width="3" stroke-linejoin="round">
+          <path d="M400 24L372 236M400 24L428 236M378 190h44M384 146h32M390 100h20M360 64h80M352 110h96M378 190L416 146M422 190L384 146M384 146L410 100M416 146L390 100"/>
+          <path d="M744 110L730 236M744 110L758 236M722 136h44M726 176h36"/>
+        </g>
+        <g fill="none" stroke="currentColor" stroke-opacity=".3" stroke-width="2"><path d="M-10 90Q180 130 360 64M440 64Q600 110 722 136M-10 132Q180 170 352 110M448 110Q600 150 766 136"/></g>
+        <rect x="0" y="236" width="800" height="124" fill="${SP}" fill-opacity=".14"/>
+        <g stroke="currentColor" stroke-opacity=".22" stroke-width="2">${Array.from({ length: 41 }, (x, i) => `<line x1="${i * 20}" y1="226" x2="${i * 20}" y2="252"/>`).join('')}<line x1="0" y1="232" x2="800" y2="232"/></g>
+        <rect x="560" y="196" width="70" height="44" rx="3" fill="${SP}" fill-opacity=".35"/><rect x="570" y="186" width="12" height="12" fill="${SP}" fill-opacity=".35"/><rect x="608" y="186" width="12" height="12" fill="${SP}" fill-opacity=".35"/>`,
+      front: ''
+    }
+  };
+  const STAGE_MOODS = ['neutral', 'angespannt', 'positiv'];
+  const STAGE_SHOTS = ['totale', 'schulter', 'nah'];
+  const NARRATOR = 'erzaehler'; // line.char für das Zwischenbild des Erzählers
+  // Entscheidung direkt im Bild, solange sie offen ist und die Möglichkeiten kurz genug sind
+  function stageChoices(b, lines, n) {
+    const d = b.decision, opts = d && d.options || [];
+    if (n < lines.length || !opts.length) return false;
+    if (state.branch[d.id] != null) return branchWhyOpen(d); // nach der Wahl bleibt das Feld „Warum?“ im Bild, bis die Begründung steht
+    return opts.length <= 4 && opts.reduce((s, o) => s + String(o.text || '').length, 0) <= 360;
+  }
+  // Dialogzeilen: **Wort** wird fett (wie im Textfeld einer Storyline-Szene), alles andere bleibt Text
+  function dlgText(t) { return esc(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>'); }
+  const GROSS_ARROW = '<svg viewBox="0 0 34 24" aria-hidden="true"><path d="M3 7h17M3 12h24M3 17h17M20 3l9 9-9 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const GROSS_SOUND = on => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/>${on ? '<path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' : '<path d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>'}</svg>`;
+  const grossOf = b => !!(b && b.stage && b.stage.setting === 'illustration' && b.stage.look === 'gross');
+  // Vorlesen: Aufnahme je Zeile, sonst die Browser-Stimme, wenn b.tts gesetzt ist; die große Szene liest immer vor (abschaltbar über stage.voice: false)
+  const dlgSpeaks = b => !!b.tts || (grossOf(b) && b.stage.voice !== false);
+  const dlgVoiceIndex = (b, line) => line.char === NARRATOR ? (b.characters || []).length : (b.characters || []).findIndex(c => c.id === line.char);
+  function grossVoice(b, on) {
+    const btn = root.querySelector(`[data-dialog="${b.id}"] [data-gs-voice]`);
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', String(on));
+    btn.setAttribute('aria-label', T(on ? 'vorlesenStopp' : 'vorlesen'));
+    btn.title = T(on ? 'vorlesenStopp' : 'vorlesen');
+    btn.textContent = on ? '❚❚' : '▶';
+    const nx = root.querySelector(`[data-dialog="${b.id}"] .kp-gross-next`);
+    if (nx) nx.classList.toggle('kp-ready', !on);
+  }
+  function renderStage(b, chars, lines, n, choices) {
+    const st = b.stage || {};
+    // Illustrationsbühne: Kulisse ist das Hintergrundbild (Storyset), Figuren sind Bilder, kein gezeichneter Raum
+    const illu = st.setting === 'illustration';
+    // Große Szene (Vorbild Storyline): Figur groß im Vordergrund, Text im breiten Feld unten mit Namensreiter, Pfeil führt weiter
+    const gross = illu && st.look === 'gross';
+    const set = STAGE_SETS[st.setting] || { back: '', front: '' };
+    const cast = b.characters || [];
+    const cur = n > 0 ? lines[n - 1] : null;
+    const speaker = cur ? chars[cur.char] : null;
+    // Haltung je Figur: die ihrer letzten Zeile
+    const pose = {};
+    lines.slice(0, n).forEach(l => { pose[l.char] = l.pose || 'neutral'; });
+    const sides = { left: [], right: [] };
+    cast.forEach(c => sides[chars[c.id].side === 'right' ? 'right' : 'left'].push(c.id));
+    const actors = cast.map(c => {
+      const ch = chars[c.id], side = ch.side === 'right' ? 'right' : 'left', slot = sides[side].indexOf(c.id);
+      const talking = !!(speaker && cur.char === c.id);
+      const pic = poseImage(ch, pose[c.id]);
+      const img = (ch.look === 'image' || illu) && pic ? `<img src="${esc(res(pic))}" alt="">` : avatarSvg(ch.look, pose[c.id], true);
+      return `<div class="kp-actor kp-actor-${side}${talking ? ' kp-speaking' : ''}${ch.flip ? ' kp-actor-flip' : ''}" style="--slot:${slot};--c:${esc(ch.color || '#1f3a5f')};--kp-shirt:${esc(ch.color || '#1f3a5f')}">
+        <div class="kp-avatar${talking ? ' kp-talking' : ''}">${img}</div>${st.setting === 'videocall' ? `<span class="kp-actor-tag">${esc(ch.name || '')}</span>` : ''}</div>`;
+    }).join('');
+    const photo = b.background && b.background.src ? `<img class="kp-stage-photo" src="${esc(res(b.background.src))}" alt="">` : '';
+    const narr = !!(cur && cur.char === NARRATOR);
+    const focus = speaker ? (speaker.side === 'right' ? 'right' : 'left') : '';
+    const film = !!st.film;
+    const sub = !!st.subtitles || film;
+    const bubble = gross ? '' : cur && speaker ? `<div class="${sub ? 'kp-stage-sub' : `kp-stage-bubble kp-sb-${focus}`}" data-line="${n - 1}" style="--c:${esc(speaker.color || '#1f3a5f')}"><b>${esc(speaker.name || '')}</b>${dlgText(cur.text)}</div>` : '';
+    // Bauchbinde im Filmlook: Name und Rolle, nur wenn die sprechende Person wechselt
+    const prevSpeaker = n >= 2 ? lines[n - 2].char : null;
+    const lowerThird = film && speaker && cur.char !== prevSpeaker ? `<div class="kp-lower-third" style="--c:${esc(speaker.color || '#1f3a5f')}"><b>${esc(speaker.name || '')}</b>${speaker.role ? `<span>${esc(speaker.role)}</span>` : ''}</div>` : '';
+    const mood = STAGE_MOODS.includes(st.mood) ? st.mood : 'neutral';
+    const shot = cur && focus && st.setting !== 'videocall' && STAGE_SHOTS.includes(cur.shot) ? cur.shot : '';
+    // Statisten: kleine, unscharfe Figuren im Hintergrund, Aussehen aus den nicht besetzten Figuren
+    const used = new Set(cast.map(c => chars[c.id].look));
+    const free = Object.keys(AVATARS).filter(k => !used.has(k));
+    const extras = st.setting === 'videocall' || illu ? '' : Array.from({ length: Math.max(0, Math.min(3, Number(st.extras) || 0)) }, (x, i) =>
+      `<div class="kp-extra kp-extra-${i}"><div class="kp-avatar">${avatarSvg(free[(i * 3 + 1) % free.length] || 'a3', i === 1 ? 'think' : 'neutral', true)}</div></div>`).join('');
+    // Zwischenbild des Erzählers: Abblende, Text auf dunklem Grund; die Zeile danach blendet wieder auf
+    const prevNarr = !narr && n >= 2 && lines[n - 2].char === NARRATOR;
+    const narrCard = narr && !gross ? `<div class="kp-stage-narr" aria-live="polite" data-line="${n - 1}"><p class="kp-narr-label">${T('erzaehler')}</p><p class="kp-narr-text">${dlgText(cur.text)}</p></div>` : '';
+    const d = b.decision;
+    const whyOnStage = choices && branchWhyOpen(d);
+    const pick = whyOnStage ? `<div class="kp-stage-choices kp-stage-why kp-sc-${focus === 'right' ? 'left' : 'right'}" data-branch="${esc(d.id)}" role="group" aria-label="${esc(T('warumFrage'))}">
+        <p class="kp-stage-prompt">${esc((d.options[state.branch[d.id]] || {}).text || '')}</p>
+        <div class="kp-why" data-why-box><label><span class="kp-label">${T('warumFrage')}</span><textarea class="kp-notes kp-why-text" rows="2" data-why="${esc(d.id)}" placeholder="${esc(T('warumPlatz'))}"></textarea></label><span class="kp-why-missing" role="alert" hidden>${T('warumFehlt')}</span>
+        <div class="kp-quiz-actions"><button class="kp-btn" data-why-save="${esc(d.id)}">${T('begruendungSpeichern')}</button></div></div></div>`
+      : choices ? `<div class="kp-stage-choices kp-sc-${focus === 'right' ? 'left' : 'right'}" data-branch="${esc(d.id)}" role="group" aria-label="${esc(d.prompt || T('entscheidung'))}">
+        ${d.prompt ? `<p class="kp-stage-prompt">${esc(d.prompt)}</p>` : ''}
+        ${helpButton(d)}${helpPanel(d)}<div class="kp-stage-choice-list"${conseqOf(d) ? ' hidden' : ''}>${d.options.map((o, i) => `<button class="kp-stage-choice${(state.self[d.id] || {}).tried === i || ((state.self[d.id] || {}).tries || []).includes(i) ? ' tried' : ''}" data-choose="${i}">${esc(o.text)}</button>`).join('')}</div>${retryFeedback(d)}</div>` : '';
+    const filmCard = film && n === 0 ? `<div class="kp-film-card"><span class="kp-film-eyebrow">${esc(T('szene'))}</span><h3>${esc(b.title || T('szene'))}</h3><p>${esc(cast.map(c => chars[c.id].name).filter(Boolean).join(' · '))}</p><button class="kp-film-play" data-dlg-next="${b.id}" aria-label="${esc(T('abspielen'))}">▶</button></div>`
+      : film && n >= lines.length && !(b.decision && (b.decision.options || []).length) ? `<div class="kp-film-card kp-film-end"><span class="kp-film-eyebrow">${esc(T('ende'))}</span><h3>${esc(b.title || '')}</h3><button class="kp-film-play" data-dlg-restart="${b.id}" aria-label="${esc(T('nochmalAnsehen'))}">↺</button></div>` : '';
+    const filmState = film ? (n === 0 ? ' kp-film-idle' : n >= lines.length ? ' kp-film-done' : '') : '';
+    // Fortschritt je Zeile als Punkte unten im Bild (nicht im Filmlook, der hat die Leiste)
+    const dots = !film && !gross && lines.length > 1 && n > 0 && n <= lines.length ? `<div class="kp-stage-dots" aria-hidden="true">${lines.map((l, i) => `<i class="${i < n - 1 ? 'done' : i === n - 1 ? 'now' : ''}"></i>`).join('')}</div>` : '';
+    // Große Szene: der Text steht im Feld unten, auch Anfang, Ende und Entscheidung
+    let panel = '';
+    if (gross) {
+      const hasDec = !!(d && (d.options || []).length);
+      const next = n === 0 ? `<button class="kp-gross-next kp-gross-start" data-dlg-next="${b.id}" aria-label="${esc(T('szeneStarten'))}"><span aria-hidden="true">▶</span></button>`
+        : n < lines.length ? `<button class="kp-gross-next" data-dlg-next="${b.id}" aria-label="${esc(T('naechsteZeile'))}">${GROSS_ARROW}</button>`
+        : !hasDec ? `<button class="kp-gross-next" data-dlg-restart="${b.id}" aria-label="${esc(T('szeneNochmal'))}"><span aria-hidden="true">↺</span></button>` : '';
+      const who = choices ? T('duBistDran') : n === 0 ? T('szene') : narr ? T('erzaehler') : speaker ? speaker.name || '' : '';
+      const body = choices ? pick
+        : n === 0 ? `<p class="kp-gross-text"><strong>${esc(b.title || T('szene'))}</strong>${cast.length ? `<br>${esc(cast.map(c => chars[c.id].name).filter(Boolean).join(' · '))}` : ''}</p>`
+        : `<p class="kp-gross-text">${dlgText(cur.text)}</p>`;
+      panel = `<div class="kp-gross-panel${choices ? ' kp-gross-choosing' : ''}${narr ? ' kp-gross-narr' : ''}"${cur && !choices ? ` data-line="${n - 1}"` : ''} style="--c:${esc((speaker && speaker.color) || '#1f3a5f')}"><span class="kp-gross-tab">${esc(who)}</span>${body}${choices ? '' : next}</div>`;
+    }
+    return `<div class="kp-stage-wrap${gross ? ' kp-gross' : ''}${film ? ' kp-film' + filmState : ''}${illu ? ' kp-illu' : ''}${filmCc.has(b.id) ? ' kp-cc-off' : ''} kp-set-${esc(st.setting)} kp-mood-${mood}${shot ? ' kp-shot-' + shot : ''}${choices ? ' kp-choosing' : ''}${sub ? ' kp-subtitled' : ''}${narr ? ' kp-narrating' : ''}" data-focus="${focus}" data-shot="${shot}"${film ? ` data-film-stage="${b.id}"` : ''}><div class="kp-stage">
+      <div class="kp-stage-back${photo ? ' kp-has-photo' : ''}" aria-hidden="true">
+        ${photo || (illu ? '' : `<svg class="kp-stage-art" viewBox="0 0 800 360" preserveAspectRatio="xMidYMax slice">${set.back}</svg>`)}
+        ${extras ? `<div class="kp-stage-extras">${extras}</div>` : ''}
+      </div>
+      <div class="kp-stage-cam" aria-hidden="true">
+        <div class="kp-stage-cast">${actors}</div>
+        ${!photo && !illu && set.front ? `<svg class="kp-stage-art kp-stage-front" viewBox="0 0 800 360" preserveAspectRatio="xMidYMax slice">${set.front}</svg>` : ''}
+      </div>
+      ${narrCard}${prevNarr ? '<div class="kp-stage-fade" aria-hidden="true"></div>' : ''}
+      ${b.title && !gross ? `<p class="kp-stage-caption">${esc(b.title)}</p>` : ''}${lowerThird}${filmCard}${dots}</div>
+      <div class="kp-stage-say" aria-live="polite">${gross ? panel : bubble}</div>${gross ? '' : pick}
+    </div>`;
+  }
+
+  function renderDialog(b) {
+    const chars = {};
+    (b.characters || []).forEach((c, i) => { chars[c.id] = Object.assign({ index: i }, castOf(c)); });
+    const lines = b.lines || [];
+    const n = Math.min(state.dlg[b.id] || 0, lines.length);
+    const shownList = lines.slice(0, n).map((l, i) => {
+      if (l.char === NARRATOR) return `<p class="kp-dlg-narr" data-line="${i}"><b>${T('erzaehler')}:</b> ${dlgText(l.text)}</p>`;
+      const c = chars[l.char] || { name: '', side: 'left', color: '#1f3a5f', look: 'a1' };
+      return `<div class="kp-line ${c.side === 'right' ? 'right' : ''}" style="--c:${esc(c.color || '#1f3a5f')}">
+        <div class="kp-avatar ${i === n - 1 ? 'kp-talking' : ''}">${avatarHtml(c, l.pose)}</div>
+        <div class="kp-bubble" data-line="${i}"><b>${esc(c.name)}</b>${dlgText(l.text)}</div></div>`;
+    });
+    const shown = shownList.join('');
+    // Ablauf: nach „Szene starten“ laufen die Zeilen von selbst weiter (Standard), Pause und Weiter bleiben möglich; mode 'click' = jede Zeile per Klick
+    const autoMode = dialogAuto(b);
+    const playing = filmAuto.has(b.id);
+    let actions;
+    if (n === 0) {
+      actions = `<button class="kp-btn" data-dlg-next="${b.id}">▶ ${T('szeneStarten')}</button>`;
+    } else if (n < lines.length) {
+      actions = autoMode
+        ? `<button class="kp-btn kp-sec" data-film-play="${b.id}" aria-pressed="${playing}">${playing ? '❚❚ ' + T('pause') : '▶ ' + T('weiterAbspielen')}</button>
+           <button class="kp-btn kp-sec" data-dlg-next="${b.id}">${T('weiter')} ▸</button>
+           <button class="kp-btn kp-sec" data-dlg-all="${b.id}">${T('allesAnzeigen')}</button>`
+        : `<button class="kp-btn" data-dlg-next="${b.id}">${T('weiter')} ▸</button>
+           <button class="kp-btn kp-sec" data-dlg-all="${b.id}">${T('allesAnzeigen')}</button>`;
+    } else if (b.decision && (b.decision.options || []).length) {
+      actions = '';
+    } else {
+      actions = `<button class="kp-btn kp-sec" data-dlg-restart="${b.id}">↺ ${T('szeneNochmal')}</button>`;
+    }
+    const decision = n >= lines.length && b.decision && (b.decision.options || []).length ? `<div class="kp-dlg-decision">${renderBranch(b.decision)}</div>` : '';
+    // Szenen-Bühne: aktuelle Zeile auf der Bühne, frühere Zeilen im Verlauf
+    if (b.stage && (STAGE_SETS[b.stage.setting] || b.stage.setting === 'illustration')) {
+      const earlier = shownList.slice(0, Math.max(0, n - 1)).join('');
+      const choices = stageChoices(b, lines, n);
+      const film = !!b.stage.film;
+      const gross = grossOf(b);
+      // Große Szene: schlanke Leiste unter dem Bild wie im Storyline-Player, Vorlesen links, Ton rechts
+      const aiVoice = gross && dlgSpeaks(b) && lines.some(l => !l.audio) ? `<span class="kp-ai-voice" title="${esc(T('kiStimme'))}">${esc(T('kiStimmeKurz'))}<span class="kp-sr"> · ${esc(T('kiStimme'))}</span></span>` : '';
+      const grossBar = gross ? `<div class="kp-gross-bar" role="group" aria-label="${esc(T('szene'))}">
+          ${dlgSpeaks(b) ? `<button data-gs-voice="${b.id}" aria-pressed="false" aria-label="${esc(T('vorlesen'))}" title="${esc(T('vorlesen'))}">▶</button>` : ''}
+          <div class="kp-film-progress" aria-hidden="true">${lines.map((l, i) => `<i class="${i < n - 1 ? 'done' : i === n - 1 ? 'now' : ''}"></i>`).join('')}</div>
+          <span class="kp-film-time">${n} / ${lines.length}</span>${aiVoice}
+          ${dlgSpeaks(b) ? `<button data-gs-mute="${b.id}" aria-pressed="${!(audioPrefs.vol > 0)}" aria-label="${esc(T(audioPrefs.vol > 0 ? 'tonAus' : 'tonAn'))}" title="${esc(T(audioPrefs.vol > 0 ? 'tonAus' : 'tonAn'))}">${GROSS_SOUND(audioPrefs.vol > 0)}</button>` : ''}
+        </div>` : '';
+      // Steuerleiste wie im Videoplayer: Abspielen/Pause, Fortschritt je Zeile, Untertitel, Vollbild; ohne Filmlook eine schlanke Leiste, solange die Szene läuft
+      const bar = gross ? grossBar : film ? `<div class="kp-film-bar" role="group" aria-label="${esc(T('szene'))}">
+          <button data-film-play="${b.id}" aria-pressed="${playing}" title="${esc(playing ? T('pause') : T('abspielen'))}">${playing && n < lines.length ? '❚❚' : '▶'}</button>
+          <button data-dlg-next="${b.id}" title="${esc(T('naechsteZeile'))}" ${n >= lines.length ? 'disabled' : ''}>▸</button>
+          <div class="kp-film-progress" aria-hidden="true">${lines.map((l, i) => `<i class="${i < n - 1 ? 'done' : i === n - 1 ? 'now' : ''}"></i>`).join('')}</div>
+          <span class="kp-film-time">${n} / ${lines.length}</span>
+          <button data-film-cc="${b.id}" aria-pressed="${!filmCc.has(b.id)}" title="${esc(T('untertitel'))}">CC</button>
+          <button data-film-full="${b.id}" title="${esc(T('vollbild'))}">⛶</button>
+        </div>` : autoMode && n > 0 && n < lines.length ? `<div class="kp-dlg-bar" role="group" aria-label="${esc(T('szene'))}">
+          <button data-film-play="${b.id}" aria-pressed="${playing}" aria-label="${esc(playing ? T('pause') : T('weiterAbspielen'))}" title="${esc(playing ? T('pause') : T('weiterAbspielen'))}">${playing ? '❚❚' : '▶'}</button>
+          <button data-dlg-next="${b.id}" aria-label="${esc(T('naechsteZeile'))}" title="${esc(T('naechsteZeile'))}">▸</button>
+          <div class="kp-film-progress" aria-hidden="true">${lines.map((l, i) => `<i class="${i < n - 1 ? 'done' : i === n - 1 ? 'now' : ''}"></i>`).join('')}</div>
+          <span class="kp-film-time">${n} / ${lines.length}</span>
+          <button data-dlg-all="${b.id}" class="kp-dlg-all" title="${esc(T('allesAnzeigen'))}">${T('allesAnzeigen')}</button>
+        </div>` : '';
+      const showActions = actions && !film && !gross && (!autoMode || n === 0 || n >= lines.length);
+      return `<div class="kp-dialog kp-staged${film ? ' kp-film-wrap' : ''}" data-dialog="${b.id}">${renderStage(b, chars, lines, n, choices)}${bar}
+        ${earlier ? `<details class="kp-dlg-history"><summary>${T('verlauf')} (${n - 1})</summary><div class="kp-dlg-lines">${earlier}</div></details>` : ''}
+        ${showActions ? `<div class="kp-dlg-actions">${actions}</div>` : ''}${choices ? '' : decision}</div>`;
+    }
+    const bg = b.background && b.background.src ? ` style="background-image:linear-gradient(rgba(255,255,255,.55),rgba(255,255,255,.55)),url('${esc(res(b.background.src))}')"` : '';
+    // Vor dem Start: die Figuren der Szene mit Namen statt einer leeren Fläche über „Szene starten“
+    const castRow = n === 0 ? `<ul class="kp-dlg-cast" aria-label="${esc(T('szene'))}">${(b.characters || []).map(c => { const p = chars[c.id]; return `<li style="--c:${esc(p.color || '#1f3a5f')}"><div class="kp-avatar">${avatarHtml(p)}</div><b>${esc(p.name || '')}</b>${p.role ? `<span>${esc(p.role)}</span>` : ''}</li>`; }).join('')}</ul>` : '';
+    return `<div class="kp-dialog${b.look === 'versetzt' ? ' kp-dlg-versetzt' : ''}" data-dialog="${b.id}"${bg}>
+      ${b.title ? `<p class="kp-label">${esc(b.title)}</p>` : ''}${castRow}
+      <div class="kp-dlg-lines" aria-live="polite">${shown}</div>
+      ${actions ? `<div class="kp-dlg-actions">${actions}</div>` : ''}${decision}</div>`;
+  }
+  let dlgTimer = null;
+  const filmAuto = new Set(); // Szenen, die gerade von selbst weiterlaufen (nach „Szene starten“, im Filmlook, bis Pause)
+  const dialogAuto = b => b.mode !== 'click'; // Standard: nach dem Start laufen die Zeilen von selbst; 'click' = jede Zeile per Klick
+  const filmCc = new Set();   // Szenen mit ausgeschalteten Untertiteln
+  let grossPrevVol = 1;       // Lautstärke vor „Ton aus“ in der großen Szene
+  function dialogStep(b, all) {
+    clearTimeout(dlgTimer);
+    const lines = b.lines || [];
+    state.dlg[b.id] = all ? lines.length : Math.min((state.dlg[b.id] || 0) + 1, lines.length);
+    const box = root.querySelector(`[data-dialog="${b.id}"]`);
+    if (!box) return;
+    const had = box.contains(document.activeElement);
+    const old = box.querySelector('.kp-stage-wrap');
+    const before = old && { focus: old.dataset.focus, shot: old.dataset.shot };
+    refreshBlock(box, renderDialog(b));
+    const wrap = root.querySelector(`[data-dialog="${b.id}"] .kp-stage-wrap`);
+    // Gleiche Einstellung: die Kamera fährt zur sprechenden Person. Neue Einstellung: harter Schnitt wie im Film.
+    if (wrap && before && !before.shot && !wrap.dataset.shot && before.focus !== wrap.dataset.focus) {
+      const now = wrap.dataset.focus;
+      wrap.dataset.focus = before.focus;
+      void wrap.offsetWidth;
+      wrap.dataset.focus = now;
+    }
+    // Wer mit der Tastatur weiterklickt, landet auf der Entscheidung im Bild oder wieder auf „Weiter“
+    const target = had && root.querySelector(`[data-dialog="${b.id}"] .kp-stage-choice, [data-dialog="${b.id}"] [data-dlg-next]`);
+    if (target) target.focus({ preventScroll: true });
+    if (all) return stopSound();
+    const i = state.dlg[b.id] - 1;
+    const line = lines[i];
+    const bubble = root.querySelector(`[data-dialog="${b.id}"] [data-line="${i}"]`);
+    if (bubble) { bubble.classList.add('speaking'); bubble.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+    // Der Erzähler bekommt eine eigene Stimme hinter den Figuren
+    const charIndex = dlgVoiceIndex(b, line);
+    const auto = filmAuto.has(b.id);
+    const finished = () => {
+      // Ende der Szene beim Abspielen: Abspann, und die Aufnahme im Editor erfährt davon
+      filmAuto.delete(b.id);
+      const box2 = root.querySelector(`[data-dialog="${b.id}"]`);
+      if (box2) refreshBlock(box2, renderDialog(b));
+      if (window.parent !== window) { try { window.parent.postMessage({ type: 'kurs-film-end', id: b.id }, '*'); } catch (e) { /* ohne Elternfenster */ } }
+    };
+    const next = () => {
+      if (bubble) bubble.classList.remove('speaking');
+      grossVoice(b, false);
+      if (auto && state.dlg[b.id] < lines.length) dlgTimer = setTimeout(() => dialogStep(b), 500);
+      else if (auto && filmAuto.has(b.id)) dlgTimer = setTimeout(finished, 1200);
+    };
+    // Ohne Aufnahme und Stimme meldet playSound sofort „fertig“; dann zählt allein die Lesezeit unten, sonst liefen zwei Zeitgeber (500 ms und Lesezeit) und die Szene sprang
+    const ctl = playSound(line.audio, dlgSpeaks(b) ? line.text : '', () => { if (ctl) next(); }, charIndex);
+    if (ctl) grossVoice(b, true);
+    if (ctl && ctl.media) lipSync(ctl, root.querySelector(`[data-dialog="${b.id}"]`));
+    if (!ctl) {
+      // ohne Ton: Lesezeit abwarten
+      if (bubble) setTimeout(() => bubble.classList.remove('speaking'), 1200);
+      // Lesezeit: rund 190 Wörter je Minute plus Zeit zum Hinschauen, nie unter 2 s
+      const wait = Math.max(2000, plainText(line.text).split(/\s+/).filter(Boolean).length * 320 + 900);
+      if (auto && state.dlg[b.id] < lines.length) dlgTimer = setTimeout(() => dialogStep(b), wait);
+      else if (auto && filmAuto.has(b.id)) dlgTimer = setTimeout(finished, wait);
+    }
+  }
+  // Lippen am Ton: Lautstärke der Aufnahme steuert die Mundöffnung (--kp-mouth). Ohne Web Audio bleibt die feste Animation.
+  let audioCtx = null;
+  function lipSync(ctl, box) {
+    if (!box || reducedMotion() || !(window.AudioContext || window.webkitAudioContext)) return;
+    const src = ctl.media.currentSrc || ctl.media.src || '';
+    // Fremde Adressen würden über den Analyser stumm, deshalb nur eigene Dateien
+    if (!/^(data:|blob:)/.test(src) && !src.startsWith(location.origin) && !src.startsWith('file:')) return;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const node = audioCtx.createMediaElementSource(ctl.media);
+      const an = audioCtx.createAnalyser();
+      an.fftSize = 512;
+      node.connect(an); an.connect(audioCtx.destination);
+      const buf = new Uint8Array(an.fftSize);
+      const wrap = box.closest('[data-block]') || box;
+      wrap.classList.add('kp-lips');
+      let level = 0;
+      const tick = () => {
+        const w = root.querySelector(`[data-block="${wrap.dataset.block}"]`) || wrap;
+        if (ctl.media.paused || ctl.media.ended || !w.isConnected) { w.classList.remove('kp-lips'); w.style.removeProperty('--kp-mouth'); return; }
+        w.classList.add('kp-lips');
+        an.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+        const rms = Math.sqrt(sum / buf.length);
+        level = level * .5 + Math.min(1, rms * 6) * .5;
+        w.style.setProperty('--kp-mouth', level.toFixed(3));
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    } catch (e) { /* Rückfall: feste Mundanimation */ }
+  }
+
+  // ---------- Vertonte Erklärsequenz ----------
+  function seqStage(b, idx) {
+    const steps = b.steps || [];
+    const visible = b.mode === 'slides' ? [idx] : steps.map((s, i) => i).filter(i => i <= idx);
+    return visible.filter(i => steps[i]).map(i => {
+      const s = steps[i];
+      const img = s.image && s.image.src ? `<img src="${esc(res(s.image.src))}" alt="${esc(s.image.alt || '')}">` : '';
+      return `<div class="kp-seq-step ${img ? 'has-img' : ''} ${i === idx ? 'fx-' + (b.animation || 'slide-up') : ''}"><div class="kp-text">${res(s.html)}</div>${img}</div>`;
+    }).join('');
+  }
+  function renderSequence(b) {
+    const steps = b.steps || [];
+    const idx = Math.min(state.seq[b.id] == null ? 0 : state.seq[b.id], Math.max(0, steps.length - 1));
+    return `<div class="kp-seq" data-seq="${b.id}">
+      <div class="kp-seq-stage" aria-live="polite">${seqStage(b, idx)}</div>
+      <div class="kp-seq-ctrl">
+        <button data-seq-prev aria-label="Zurück">◀</button>
+        <button data-seq-play aria-label="Abspielen">▶</button>
+        <button data-seq-next aria-label="Weiter">▶▏</button>
+        <div class="kp-seq-prog"><b style="width:${steps.length ? (idx + 1) / steps.length * 100 : 0}%"></b></div>
+        <span class="kp-seq-count">${idx + 1} / ${steps.length}</span>
+      </div>
+      ${b.audio ? `<audio data-seq-audio src="${esc(res(b.audio))}" preload="auto"></audio>` : ''}
+    </div>`;
+  }
+
+  // ---------- Interaktives Video ----------
+  const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  function renderIVideo(b) {
+    const yt = b.source === 'youtube';
+    const ytId = (String(b.url || '').match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([\w-]{6,})/) || [])[1];
+    const track = !yt ? trackHtml(b.captions, b.captionsText) : '';
+    const player = yt
+      ? (ytId ? `<div class="kp-iv-yt"><div id="yt-${b.id}"></div></div>` : '<p class="kp-label" style="color:#fff;padding:20px">Keine gültige YouTube-Adresse.</p>')
+      : (b.src ? `<video playsinline controls controlslist="nofullscreen" preload="metadata" src="${esc(res(b.src))}">${track}</video>` : '<p class="kp-label" style="color:#fff;padding:20px">Kein Video hinterlegt.</p>');
+    // eigenes Vollbild für den ganzen Rahmen: so bleibt die Frage im Vollbild sichtbar (das Vollbild des Videos zeigt nur das Bild)
+    const full = fsEnabled() && (b.src || ytId) ? `<button class="kp-iv-full" data-iv-full="${b.id}" aria-label="${esc(T('vollbild'))}" title="${esc(T('vollbild'))}">⛶</button>` : '';
+    const chapters = (b.chapters || []).slice().sort((x, y) => x.t - y.t);
+    return `<div class="kp-ivwrap" data-ivideo="${b.id}" ${yt ? `data-yt="${esc(ytId || '')}"` : ''}>
+      <div class="kp-iv">${player}${full}<div class="kp-iv-overlay" hidden role="dialog" aria-label="Frage im Video"><div class="kp-iv-card"></div></div></div>
+      <div class="kp-iv-bar" aria-hidden="true"><b></b></div>
+      ${chapters.length ? `<div class="kp-iv-chapters">${chapters.map(c => `<button data-vseek="${Number(c.t) || 0}">${fmtTime(Number(c.t) || 0)} ${esc(c.title)}</button>`).join('')}</div>` : ''}
+      ${b.requireWatch ? `<p class="kp-iv-note">${state.watched[b.id] ? '✔ Video vollständig angesehen' + (b.freeAfterWatch ? ' · Vorspulen ist jetzt frei' : '') : T('videoBisEnde')}</p>` : ''}
+    </div>`;
+  }
+  function markerHtml(b, m) {
+    const cont = (attrs, label) => `<div class="kp-quiz-actions"><button class="kp-btn" data-vcontinue="${b.id}" ${attrs || ''}>${label || 'Weiter ansehen ▶'}</button></div>`;
+    if (m.kind === 'question' && m.q) {
+      const done = state.answers[m.q.id] != null;
+      return renderQuiz(m.q, m.q.graded !== false) + cont(`data-q="${m.q.id}" ${done ? '' : 'disabled'}`);
+    }
+    if (m.kind === 'jump') {
+      return `<h2 class="kp-q">${esc(m.prompt || 'Wie geht es weiter?')}</h2>
+        <div class="kp-branch-options">${(m.options || []).map(o => `<button class="kp-branch-option" data-vjump="${b.id}" data-t="${Number(o.t) || 0}">${esc(o.text)}</button>`).join('')}</div>`;
+    }
+    return `${m.title ? `<h2 class="kp-q">${esc(m.title)}</h2>` : ''}<div class="kp-text">${res(m.html)}</div>${cont()}`;
+  }
+  const videoCtl = {};
+  let mediaTimers = [];
+  function loadScript(src) {
+    return new Promise((ok, fail) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
+  }
+  let ytReady = null;
+  function loadYouTube() {
+    if (window.YT && window.YT.Player) return Promise.resolve();
+    if (!ytReady) ytReady = new Promise(ok => { window.onYouTubeIframeAPIReady = ok; loadScript('https://www.youtube.com/iframe_api'); });
+    return ytReady;
+  }
+  function setupVideo(wrap) {
+    const b = findBlock(wrap.dataset.ivideo);
+    if (!b || wrap.dataset.ready) return;
+    wrap.dataset.ready = '1';
+    const overlay = wrap.querySelector('.kp-iv-overlay');
+    const card = overlay.querySelector('.kp-iv-card') || overlay;
+    const bar = wrap.querySelector('.kp-iv-bar');
+    const markers = (b.markers || []).slice().sort((x, y) => x.t - y.t);
+    const shown = new Set();
+    let maxT = 0, api = null, lastT = 0;
+    const ctl = videoCtl[b.id] = {
+      showMarker(m) {
+        api.pause();
+        shown.add(m.id);
+        // läuft nur das Videobild im Vollbild (iPhone, ältere Browser), wäre die Frage unsichtbar: Vollbild verlassen
+        const vid = wrap.querySelector('video');
+        if (vid && (document.fullscreenElement === vid || document.webkitFullscreenElement === vid)) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        if (vid && vid.webkitDisplayingFullscreen && vid.webkitExitFullscreen) vid.webkitExitFullscreen();
+        card.innerHTML = markerHtml(b, m);
+        overlay.hidden = false;
+        activateComponents(overlay);
+        (overlay.querySelector('.kp-q') || overlay).setAttribute('tabindex', '-1');
+        (overlay.querySelector('.kp-q') || overlay).focus({ preventScroll: true });
+      },
+      resume() { overlay.hidden = true; card.innerHTML = ''; api.play(); },
+      jump(t) { overlay.hidden = true; card.innerHTML = ''; maxT = Math.max(maxT, t); api.seek(t); api.play(); },
+      seek(t) {
+        if (locked() && t > maxT + 1) return;
+        api.seek(t); api.play();
+      }
+    };
+    // Vorspul-Sperre: beim ersten Durchlauf gesperrt, danach frei, wenn der Kurs das erlaubt
+    const locked = () => b.requireWatch && !(b.freeAfterWatch && state.watched[b.id]);
+    const drawTicks = dur => {
+      if (!dur || bar.dataset.ticks) return;
+      bar.dataset.ticks = '1';
+      markers.forEach(m => bar.insertAdjacentHTML('beforeend', `<i style="left:${Math.min(100, m.t / dur * 100)}%" title="${esc(m.kind === 'question' ? 'Frage' : m.kind === 'jump' ? 'Entscheidung' : 'Hinweis')}"></i>`));
+    };
+    const finish = () => {
+      if (!state.watched[b.id]) {
+        state.watched[b.id] = true;
+        const note = wrap.querySelector('.kp-iv-note');
+        if (note) note.textContent = '✔ Video vollständig angesehen' + (b.freeAfterWatch ? ' · Vorspulen ist jetzt frei' : '');
+        renderFooter();
+        report();
+      }
+    };
+    const tick = () => {
+      if (!api) return;
+      const t = api.time();
+      const rawDur = api.duration();
+      const dur = isFinite(rawDur) && rawDur > 0 ? rawDur : 0; // manche Videos melden ihre Länge erst spät
+      drawTicks(dur);
+      // Vorspulen über noch nicht gesehene Stellen verhindern, wenn das Video Pflicht ist
+      if (locked() && t > maxT + 2) { api.seek(maxT); return; }
+      if (t <= maxT + 2) maxT = Math.max(maxT, t);
+      if (dur) bar.querySelector('b').style.width = Math.min(100, t / dur * 100) + '%';
+      if (overlay.hidden) {
+        const m = markers.find(x => !shown.has(x.id) && x.t <= t && x.t > lastT - 1.5 && !(x.kind === 'question' && x.q && state.answers[x.q.id] != null));
+        if (m) ctl.showMarker(m);
+      }
+      lastT = t;
+      if (dur && t >= dur - 0.6) finish();
+    };
+    if (wrap.dataset.yt !== undefined) {
+      const id = wrap.dataset.yt;
+      if (!id) return;
+      loadYouTube().then(() => {
+        const yp = new YT.Player('yt-' + b.id, {
+          videoId: id, host: 'https://www.youtube-nocookie.com',
+          playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
+          events: { onStateChange: e => { if (e.data === 0) finish(); } }
+        });
+        api = {
+          time: () => (yp.getCurrentTime ? yp.getCurrentTime() : 0), duration: () => (yp.getDuration ? yp.getDuration() : 0),
+          play: () => yp.playVideo && yp.playVideo(), pause: () => yp.pauseVideo && yp.pauseVideo(), seek: t => yp.seekTo && yp.seekTo(t, true)
+        };
+        mediaTimers.push(setInterval(tick, 250));
+      });
+    } else {
+      const v = wrap.querySelector('video');
+      if (!v) return;
+      api = { time: () => v.currentTime, duration: () => v.duration || 0, play: () => v.play().catch(() => { }), pause: () => v.pause(), seek: t => { v.currentTime = t; } };
+      v.addEventListener('timeupdate', tick);
+      v.addEventListener('seeking', () => { if (locked() && v.currentTime > maxT + 2) v.currentTime = maxT; });
+      v.addEventListener('loadedmetadata', () => drawTicks(v.duration));
+      v.addEventListener('ended', finish);
+      mediaTimers.push(setInterval(() => { if (!v.paused) tick(); }, 250));
+    }
+  }
+
+  // ---------- Fallsammlung (moderierte Fallarbeit) ----------
+  // Zustand: state.self[b.id] = { f: Bereichsfilter, c: { Fall-id: { p: gewählte Antwort, r: 1 = Einordnung angesehen } } }
+  // Notizen je Fall als Freitext unter „Block-id~Fall-id“ (fallen bei Platzmangel aus suspend_data, bleiben im Browser)
+  const cbNoteId = (b, c) => b.id + '~' + c.id;
+  function cbState(b) { const s = state.self[b.id] || (state.self[b.id] = { f: '', c: {} }); if (!s.c) s.c = {}; return s; }
+  function cbCase(b, c) { const s = cbState(b); return s.c[c.id] || (s.c[c.id] = {}); }
+  const cbNotes = (b, c) => String(loadText(cbNoteId(b, c)) || '');
+  function cbDone(b, c) { const x = ((state.self[b.id] || {}).c || {})[c.id] || {}; return x.p != null || !!x.r || !!cbNotes(b, c).trim(); }
+  const cbDoneCount = b => (b.cases || []).filter(c => cbDone(b, c)).length;
+  const cbGoal = b => { const n = (b.cases || []).length || 1; return Math.max(1, Math.min(n, Number(b.goal) || n)); };
+  let cbOpen = null; // geöffneter Fall: { bid, cid, panel: null | 'notes' | 'mc', rev, anek }
+
+  function renderCasebank(b) {
+    const s = state.self[b.id] || {}, cases = b.cases || [], goal = cbGoal(b), done = cbDoneCount(b);
+    const cats = (b.categories || []).map(x => String(x).trim()).filter(Boolean);
+    const f = cats.includes(s.f) ? s.f : '';
+    const dots = Array.from({ length: goal }, (x, i) => `<span class="kp-cb-dot${i < done ? ' on' : ''}"></span>`).join('') + (done >= goal ? '<span class="kp-cb-ok">✓</span>' : '');
+    const tabs = cats.length > 1 ? `<div class="kp-cb-tabs" role="group" aria-label="${esc(T('cbBereiche'))}">${[''].concat(cats).map(cat => {
+      const n = cat ? cases.filter(c => c.cat === cat).length : cases.length;
+      return `<button data-cb-filter="${esc(cat)}" aria-pressed="${f === cat}">${esc(cat || T('cbAlle'))} <span>${n}</span></button>`;
+    }).join('')}</div>` : '';
+    const cards = cases.map((c, i) => ({ c, i })).filter(x => !f || x.c.cat === f).map(({ c, i }) => {
+      const d = cbDone(b, c);
+      return `<button class="kp-cb-card${d ? ' done' : ''}" data-cb-open="${esc(c.id)}">
+        <span class="kp-cb-top">${c.cat ? `<span class="kp-cb-badge">${esc(c.cat)}</span>` : ''}<span class="kp-cb-no">${T('cbFall')} ${i + 1}</span>${d ? '<span class="kp-cb-check" aria-hidden="true">✓</span>' : ''}</span>
+        <span class="kp-cb-t">${esc(c.title || '')}</span>${c.card ? `<span class="kp-cb-s">${esc(c.card)}</span>` : ''}
+        <span class="kp-cb-cfoot"><span class="kp-cb-status">${d ? T('cbBesprochen') : T('cbOffen')}</span><span class="kp-cb-go">${T('cbOeffnen')} ▸</span></span></button>`;
+    }).join('');
+    return `<div class="kp-casebank" data-casebank="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      ${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      <div class="kp-cb-progress"><span class="kp-cb-dots" aria-hidden="true">${dots}</span><span role="status">${esc(T('cbStand').replace('{n}', Math.min(done, goal)).replace('{z}', goal).replace('{m}', cases.length))}</span></div>
+      ${tabs}<div class="kp-cb-grid">${cards}</div>
+      <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-cb-ml="${b.id}">${icon('book')} ${T('cbMl')}</button></div></div>`;
+  }
+
+  function cbModalHtml(b, c) {
+    const x = cbCase(b, c), o = cbOpen, cases = b.cases || [], i = cases.indexOf(c), opts = c.options || [];
+    const notes = cbNotes(b, c);
+    const person = c.anecdote && plainText(c.anecdote.text) ? personOf(c.anecdote) : null;
+    const anek = person ? `<div class="kp-cb-anek${o.anek ? ' open' : ''}">
+        <button class="kp-cb-anek-head" data-cb-anek aria-expanded="${!!o.anek}" aria-label="${esc(T('cbAnekdote') + (person.name ? ': ' + person.name : ''))}">${avatarHtml(person, 'happy')}<span class="kp-cb-anek-badge" aria-hidden="true">${icon('chat')}</span></button>
+        ${o.anek ? `<div class="kp-cb-anek-tip" role="note"><b>${esc(person.name || '')}${person.role ? ' · ' + esc(person.role) : ''}</b><p>„${esc(c.anecdote.text)}“</p></div>` : ''}</div>` : '';
+    const sw = (key, ic, t, sub, tag) => `<button class="kp-cb-sw${o.panel === key ? ' on' : ''}" data-cb-panel="${key}" aria-expanded="${o.panel === key}"><span class="kp-cb-sw-ic" aria-hidden="true">${ic}</span><span><b>${t}</b><small>${sub}</small></span>${tag ? `<span class="kp-cb-tag">${tag}</span>` : ''}</button>`;
+    let panel = '';
+    if (o.panel === 'notes') panel = `<div class="kp-cb-panel"><textarea class="kp-notes" data-cb-notes rows="4" aria-label="${esc(T('cbUeberlegungen'))}" placeholder="${esc(c.notePrompt || T('cbNotizHinweis'))}">${esc(notes)}</textarea><p class="kp-label">${esc(T('cbNotizGespeichert'))}</p></div>`;
+    if (o.panel === 'mc' && opts.length) {
+      const picked = x.p != null ? opts[x.p] : null;
+      panel = `<div class="kp-cb-panel"><p class="kp-label">${esc(T('cbAuswahl'))}</p><div class="kp-cb-opts">${opts.map((op, k) => {
+        const cls = !picked ? '' : k === x.p ? (op.correct ? ' ok' : ' no') : op.correct ? ' reveal' : ' dim';
+        return `<button class="kp-cb-opt${cls}" ${picked ? 'aria-disabled="true"' : `data-cb-pick="${k}"`}><span class="kp-cb-k" aria-hidden="true">${String.fromCharCode(65 + k)}</span><span>${esc(op.text)}</span></button>`;
+      }).join('')}</div>
+        ${picked ? `<div class="kp-feedback ${picked.correct ? 'ok' : 'no'}" role="status"><strong>${picked.correct ? T('cbPasst') : T('cbNichtGanz')}</strong> ${esc(picked.feedback || '')}</div>
+          <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-cb-reset>↺ ${T('cbReset')}</button></div>` : ''}</div>`;
+    }
+    const reveal = plainText(c.reveal) || c.takeaway ? `<div class="kp-cb-acc${o.rev ? ' open' : ''}"><button class="kp-cb-acc-btn" data-cb-reveal aria-expanded="${!!o.rev}"><span aria-hidden="true">${icon('bulb')}</span> <b>${T('cbEinordnung')}</b>${x.r ? `<span class="kp-cb-tag">${T('cbAngesehen')}</span>` : ''}<span class="kp-cb-chev" aria-hidden="true">▾</span></button>
+      ${o.rev ? `<div class="kp-cb-acc-body"><div class="kp-text">${res(c.reveal || '')}</div>${c.takeaway ? `<div class="kp-cb-merk"><span>${T('cbMerksatz')}</span><strong>${esc(c.takeaway)}</strong></div>` : ''}</div>` : ''}</div>` : '';
+    const allDone = cases.every(y => cbDone(b, y));
+    return `<div class="kp-cb-panelwrap">
+      <div class="kp-cb-head"><div><span class="kp-cb-eyebrow">${c.cat ? esc(c.cat) + ' · ' : ''}${T('cbFall')} ${i + 1} ${T('von')} ${cases.length}</span><h2 id="cb-t-${b.id}">${esc(c.title || '')}</h2></div><button class="kp-cb-x" data-cb-close aria-label="${esc(T('cbZurueck'))}">✕</button></div>
+      <div class="kp-cb-body">
+        ${plainText(c.scenario) ? `<div class="kp-cb-sit"><div><span class="kp-cb-lb">${T('cbSzenario')}</span><div class="kp-text">${res(c.scenario)}</div></div>${anek}</div>` : anek}
+        ${c.question ? `<div class="kp-cb-lead"><span class="kp-cb-lb">${T('cbLeitfrage')}</span><p>${esc(c.question)}</p></div>` : ''}
+        <div class="kp-cb-sws">${sw('notes', '✎', T('cbUeberlegungen'), T('cbNotieren'), notes.trim() ? T('cbNotiert') : '')}${opts.length ? sw('mc', '☰', T('cbVergleichen'), T('cbMc'), x.p != null ? T('cbGewaehlt') : '') : ''}</div>
+        ${panel}${reveal}
+      </div>
+      <div class="kp-cb-foot"><button class="kp-btn kp-sec" data-cb-close>◀ ${T('cbZurueck')}</button>${allDone ? `<button class="kp-btn" data-cb-close>${T('cbFertig')}</button>` : `<button class="kp-btn" data-cb-next>${T('cbNaechster')} ▶</button>`}</div></div>`;
+  }
+  function cbModal(cls) {
+    let m = root.querySelector('.kp-cb-modal');
+    if (!m) {
+      m = document.createElement('div');
+      m.setAttribute('role', 'dialog');
+      m.setAttribute('aria-modal', 'true');
+      m.addEventListener('keydown', e => { if (e.key === 'Escape') cbClose(); });
+      m.addEventListener('mousedown', e => { if (e.target === m) cbClose(); });
+      root.appendChild(m);
+    }
+    m.className = 'kp-cb-modal ' + cls;
+    return m;
+  }
+  function cbShow(b, cid) {
+    const c = (b.cases || []).find(x => x.id === cid);
+    if (!c) return;
+    const again = cbOpen && cbOpen.bid === b.id && cbOpen.cid === cid && root.querySelector('.kp-cb-modal.kp-cb-case');
+    if (!cbOpen || cbOpen.bid !== b.id || cbOpen.cid !== cid) cbOpen = { bid: b.id, cid, panel: null, rev: false, anek: false };
+    const m = cbModal('kp-cb-case');
+    const old = m.querySelector('.kp-cb-body'), top = old ? old.scrollTop : 0;
+    m.setAttribute('aria-labelledby', 'cb-t-' + b.id);
+    m.innerHTML = cbModalHtml(b, c);
+    const body = m.querySelector('.kp-cb-body');
+    if (again) body.scrollTop = top; else body.scrollTop = 0;
+    const ta = m.querySelector('[data-cb-notes]');
+    if (ta) ta.oninput = () => {
+      saveText(cbNoteId(b, c), ta.value);
+      const tag = m.querySelector('[data-cb-panel="notes"]');
+      if (tag && !tag.querySelector('.kp-cb-tag') && ta.value.trim()) tag.insertAdjacentHTML('beforeend', `<span class="kp-cb-tag">${T('cbNotiert')}</span>`);
+    };
+    if (!again) m.querySelector('.kp-cb-x').focus();
+  }
+  function cbClose() {
+    const m = root.querySelector('.kp-cb-modal');
+    if (m) m.remove();
+    if (!cbOpen) return;
+    const { bid, cid } = cbOpen;
+    cbOpen = null;
+    const b = findBlock(bid), box = root.querySelector(`[data-casebank="${bid}"]`);
+    if (b && box) refreshBlock(box, renderCasebank(b)); else report();
+    const card = root.querySelector(`[data-casebank="${bid}"] [data-cb-open="${cid}"]`);
+    if (card) card.focus({ preventScroll: true });
+  }
+  // Musterlösung: alle Fälle, auch nicht besprochene, mit Wahl und Notizen der Gruppe
+  function cbMlBody(list) {
+    return list.map(b => `<section class="kp-cb-ml-sec">${list.length > 1 || b.title ? `<h3>${esc(String(b.title || '').replace(/\*/g, ''))}</h3>` : ''}
+      ${(b.cases || []).map((c, i) => {
+        const x = ((state.self[b.id] || {}).c || {})[c.id] || {}, right = (c.options || []).filter(o => o.correct), notes = cbNotes(b, c).trim();
+        const chosen = x.p != null ? (c.options || [])[x.p] : null;
+        return `<article class="kp-cb-ml-item"><header><span class="kp-cb-ml-no">${i + 1}</span><div><span class="kp-cb-eyebrow">${esc(c.cat || '')}</span><h4>${esc(c.title || '')}</h4></div><span class="kp-cb-ml-state${cbDone(b, c) ? ' on' : ''}">${cbDone(b, c) ? '✓ ' + T('cbImKurs') : T('cbNichtGewaehlt')}</span></header>
+          ${c.question ? `<p class="kp-cb-ml-q">${esc(c.question)}</p>` : ''}
+          ${right.length ? `<p><strong>${T('cbPassend')}:</strong> ${right.map(o => esc(o.text)).join(' · ')}</p>` : ''}
+          ${plainText(c.reveal) ? `<div class="kp-text">${res(c.reveal)}</div>` : ''}
+          ${c.takeaway ? `<p class="kp-cb-ml-merk">${esc(c.takeaway)}</p>` : ''}
+          ${c.anecdote && plainText(c.anecdote.text) ? `<p class="kp-cb-ml-sub"><strong>${esc(personOf(c.anecdote).name || T('cbAnekdote'))}:</strong> „${esc(c.anecdote.text)}“</p>` : ''}
+          ${chosen ? `<p class="kp-cb-ml-sub">${chosen.correct ? '✓' : '!'} ${T('cbGewaehltImKurs')}: „${esc(chosen.text)}“</p>` : ''}
+          ${notes ? `<p class="kp-cb-ml-sub">${T('cbNotizAusKurs')}: „${esc(notes)}“</p>` : ''}</article>`;
+      }).join('')}</section>`).join('');
+  }
+  function cbShowMl(bid) {
+    const list = bid ? [findBlock(bid)].filter(Boolean) : pages.flatMap(p => (p.blocks || []).filter(x => x.type === 'casebank'));
+    if (!list.length) return;
+    closeDrawer();
+    cbOpen = null;
+    const m = cbModal('kp-cb-mlmodal');
+    m.setAttribute('aria-labelledby', 'cb-ml-title');
+    m.innerHTML = `<div class="kp-cb-panelwrap"><div class="kp-cb-head"><div><span class="kp-cb-eyebrow">${esc(course.title || '')}</span><h2 id="cb-ml-title">${T('cbMl')}</h2></div><button class="kp-cb-x" data-cb-close aria-label="${esc(T('schliessen'))}">✕</button></div>
+      <div class="kp-cb-body">${cbMlBody(list)}</div>
+      <div class="kp-cb-foot"><button class="kp-btn kp-sec" data-cb-print="${bid || ''}">${icon('book')} ${T('cbDrucken')}</button><button class="kp-btn" data-cb-close>${T('schliessen')}</button></div></div>`;
+    m.querySelector('.kp-cb-x').focus();
+  }
+  function cbPrint(bid) {
+    const list = bid ? [findBlock(bid)].filter(Boolean) : pages.flatMap(p => (p.blocks || []).filter(x => x.type === 'casebank'));
+    printWindow(T('cbMl'), `body { font-family: ${theme.font || 'Segoe UI, sans-serif'}; color: #1d2530; max-width: 760px; margin: 30px auto; padding: 0 20px; line-height: 1.5; }
+      h1 { color: ${theme.primary || '#1f3a5f'}; font-size: 24px; } h3 { margin: 26px 0 8px; color: ${theme.primary || '#1f3a5f'}; }
+      article { border-bottom: 1px solid #e4e9ef; padding: 12px 0; } header { display: flex; gap: 10px; align-items: baseline; } h4 { margin: 0; font-size: 16px; }
+      .kp-cb-ml-no { font-weight: 700; } .kp-cb-eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #5d6877; display: block; } .kp-cb-ml-state { margin-left: auto; font-size: 12px; color: #5d6877; }
+      .kp-cb-ml-q { font-weight: 700; } .kp-cb-ml-sub { color: #444; font-size: 14px; }`,
+      `<h1>${esc(T('cbMl'))}</h1><p>${esc(course.title || '')} · ${new Date().toLocaleDateString('de-DE')}</p>${cbMlBody(list)}`);
+  }
+  function cbStep(dir) {
+    if (!cbOpen) return;
+    const b = findBlock(cbOpen.bid), cases = b.cases || [];
+    const i = cases.findIndex(c => c.id === cbOpen.cid);
+    for (let n = 1; n <= cases.length; n++) {
+      const c = cases[(i + n * dir + cases.length * n) % cases.length];
+      if (!cbDone(b, c)) { cbOpen = null; return cbShow(b, c.id); }
+    }
+    cbClose();
+  }
+
+  // ---------- Trainer-Modus (settings.trainerMode) ----------
+  // Schublade mit freien Notizen, Sammelansicht aus der Fallarbeit und Reflexionen, Export und „Lösungen zeigen“
+  const trainerKey = 'kurs-trainer-' + (course.id || 'kurs');
+  function trainerEntries() {
+    const out = [];
+    pages.forEach(p => (p.blocks || []).forEach(b => {
+      if (b.type === 'casebank') (b.cases || []).forEach(c => {
+        if (!cbDone(b, c)) return;
+        const x = ((state.self[b.id] || {}).c || {})[c.id] || {}, chosen = x.p != null ? (c.options || [])[x.p] : null;
+        out.push({ src: String(b.title || T('cbFallarbeit')).replace(/\*/g, ''), title: c.title || '', rows: [[T('cbLeitfrage'), c.question], [T('cbUeberlegungen'), cbNotes(b, c)], [T('cbGewaehltImKurs'), chosen ? chosen.text + (chosen.correct ? ' (passend)' : ' (greift zu kurz)') : ''], [T('cbMerksatz'), x.r ? c.takeaway : '']].filter(r => String(r[1] || '').trim()) });
+      });
+      if ((b.type === 'reflection' || b.type === 'actionplan') && state.texts[b.id] != null) {
+        const v = state.texts[b.id];
+        out.push({ src: String(p.title || '').replace(/\*/g, ''), title: plainText(b.prompt || b.title || ''), rows: Array.isArray(v) ? (b.fields || []).map((f, i) => [f.label, v[i]]).filter(r => String(r[1] || '').trim()) : [['', v]] });
+      }
+    }));
+    return out;
+  }
+  function trainerExport() {
+    let notes = '';
+    try { notes = localStorage.getItem(trainerKey) || ''; } catch (e) { /* kein Speicher */ }
+    const line = '-'.repeat(56);
+    return `${T('trTitel')}: ${course.title || ''}\n${new Date().toLocaleString('de-DE')}\n${line}\n\n${T('trFreieNotizen').toUpperCase()}\n${notes.trim() || '–'}\n\n${line}\n${T('trAusKurs').toUpperCase()}\n` +
+      (trainerEntries().map(e => `\n[${e.src}] ${e.title}\n` + e.rows.map(r => `  ${r[0] ? r[0] + ': ' : ''}${String(r[1]).trim()}`).join('\n')).join('\n') || '–') + '\n';
+  }
+  function trainerDrawerBody() {
+    let saved = '';
+    try { saved = localStorage.getItem(trainerKey) || ''; } catch (e) { /* kein Speicher */ }
+    const banks = pages.flatMap(p => (p.blocks || []).filter(x => x.type === 'casebank'));
+    const entries = trainerEntries();
+    return `<p class="kp-label">${T('trFreieNotizen')}</p>
+      <textarea class="kp-notes" data-tr-notes aria-label="${esc(T('trFreieNotizen'))}" placeholder="${esc(T('trPlatzhalter'))}">${esc(saved)}</textarea>
+      <div class="kp-tr-actions"><button class="kp-btn kp-sec" data-tr-copy>${T('trKopieren')}</button><button class="kp-btn kp-sec" data-tr-save>${T('trSpeichern')}</button></div>
+      <p class="kp-label" data-tr-status role="status"></p>
+      <h3 class="kp-tr-h">${T('trAusKurs')}</h3>
+      ${entries.length ? entries.map(e => `<div class="kp-tr-entry"><span class="kp-cb-eyebrow">${esc(e.src)}</span><b>${esc(e.title)}</b>${e.rows.map(r => `<p>${r[0] ? `<em>${esc(r[0])}:</em> ` : ''}${esc(String(r[1]).trim())}</p>`).join('')}</div>`).join('') : `<p class="kp-label">${T('trLeer')}</p>`}
+      <h3 class="kp-tr-h">${T('trWerkzeuge')}</h3>
+      ${banks.length ? `<p><button class="kp-btn kp-sec" data-cb-ml="">${icon('book')} ${T('cbMl')}</button></p>` : ''}
+      <p><button class="kp-btn kp-sec" data-tr-solve>✓ ${T('trLoesen')}</button></p><p class="kp-label">${T('trLoesenHinweis')}</p>`;
+  }
+  // „Lösungen zeigen“: setzt Fallsammlungen und Fragen auf die richtige Antwort (für Vorführung und Abnahme)
+  function solveAll() {
+    pages.forEach(p => (p.blocks || []).forEach(b => {
+      if (b.type !== 'casebank') return;
+      (b.cases || []).forEach(c => { const x = cbCase(b, c), k = (c.options || []).findIndex(o => o.correct); if (k >= 0) x.p = k; x.r = 1; });
+    }));
+    items.forEach(it => {
+      if (!it.q || it.branch) return;
+      const q = it.q;
+      let a = null;
+      if (q.kind === 'truefalse') a = [q.correctBool !== false ? 0 : 1];
+      else if (q.kind === 'order') a = (q.items || []).map((x, i) => i);
+      else if (q.kind === 'match') a = (q.pairs || []).map((x, i) => i);
+      else if (q.kind === 'fill') a = fillSolutions(q).map(s => s[0]);
+      else if (q.kind === 'numeric') a = [String(Number(q.answer) || 0)];
+      else if (q.kind === 'hotspot') { const s = (q.spots || []).find(x => x.correct); if (s) a = [s.x, s.y]; }
+      else if (q.kind === 'pins') a = (q.pins || []).map((x, i) => i);
+      else if (q.kind === 'claims') a = (q.claims || []).map(x => (x.yes === false ? 0 : 1));
+      else { const r = normAnswers(q).map((x, i) => x.correct ? i : -1).filter(i => i >= 0); if (r.length) a = r; }
+      if (a) { state.answers[it.id] = a; state.tries[it.id] = (state.tries[it.id] || 0) + 1; }
+    });
+    closeDrawer();
+    report();
+    render();
+  }
+  function saveTextFile(name, text, mime) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' }));
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+
+  // ---------- Mini-Missionen (Runtime js/vendor/mini-missionen.js) ----------
+  // Ergebnisse je Mission unter state.self.mm[id] = { ok, e, r, k } (gelöst, Fehler, Lösung gezeigt, übersprungen)
+  const missionRank = r => !r ? -1 : r.ok ? (r.r ? 1 : 2) : 0;
+  function setupMission(el) {
+    const b = findBlock(el.dataset.mission);
+    const MM = window.MiniMissionen;
+    if (!b || !MM || el.dataset.ready) return;
+    el.dataset.ready = '1';
+    let theme = course.missionTheme || '';
+    if (!theme) theme = MM.suggestTheme(course.title || '').preset;
+    const cfg = { id: b.id, type: b.mechanic, theme, title: b.title || '', intro: b.intro || '', hint: b.hint || '', successText: b.successText || '',
+      skippable: b.skippable !== false, sound: !!b.sound, headingLevel: 'h2', data: b.data || {} };
+    let m;
+    try {
+      m = MM.mount(el, cfg, {
+        loadResults: () => state.self.mm || {},
+        saveResults: all => {
+          // Das beste Ergebnis bleibt stehen: wer eine gelöste Mission noch einmal überspringt, verliert es nicht
+          const keep = state.self.mm || {};
+          Object.keys(all).forEach(k => { if (missionRank(all[k]) >= missionRank(keep[k])) keep[k] = all[k]; });
+          state.self.mm = keep;
+        },
+        onComplete: () => { renderFooter(); report(); },
+        onNavigate: page => {
+          const i = pageIndexById(page) >= 0 ? pageIndexById(page) : Number(page) - 1;
+          if (i >= 0 && i < pages.length) go(i);
+        }
+      });
+    } catch (e) { el.textContent = 'Die Mini-Mission konnte nicht aufgebaut werden.'; return; }
+    // Farben und Schrift aus dem Stil-Paket statt der festen Farben der Runtime
+    const r = m.root;
+    // Die Runtime schreibt weisse Schrift auf --mm-panel und benutzt --mm-panel als Schrift
+    // auf --mm-accent. Beides setzt eine dunkle Flaeche voraus. Eine helle Hauptfarbe
+    // (etwa #2B7FFF: Weiss darauf nur 3,8 : 1) wird deshalb abgedunkelt, bis 4,5 : 1 steht.
+    // panel traegt weisse Schrift und ist zugleich die Schrift auf --mm-accent, deshalb 7 : 1;
+    // panel2 (Kacheln, Blasen) traegt nur weisse Schrift, dort reichen 4,5 : 1.
+    const panel = darkEnough(cssColor('--kp-primary') || [31, 58, 95], 7);
+    const panel2 = darkEnough((cssColor('--kp-primary') || [31, 58, 95]).map(x => Math.min(255, Math.round(x * 1.3) + 12)), 4.5);
+    // Die Akzentfarbe traegt panel als Schrift (Knoepfe, Nummern): eine dunkle Akzentfarbe wird
+    // dafuer aufgehellt, bis 4,5 : 1 gegen panel stehen (Sichtpruefung: „Fertig“ auf #b44c2c nur 3,4 : 1).
+    const accent = lightEnough(cssColor('--kp-accent') || [200, 120, 26], panel2, 4.5); // panel2 ist die hellere Flaeche, damit passt es auch auf panel
+    [['panel', `rgb(${panel.join(',')})`], ['panel2', `rgb(${panel2.join(',')})`],
+      ['accent', `rgb(${accent.join(',')})`], ['text', '#fff'],
+      ['muted', 'color-mix(in srgb, #fff 70%, var(--kp-primary))'], ['font', 'var(--kp-font)'], ['wire-0', 'var(--kp-accent)']].forEach(([k, v]) => r.style.setProperty('--mm-' + k, v));
+    mediaTimers.push({ stop: () => m.destroy() });
+  }
+
+  // Eine Farbe aus dem Stylesheet als [r,g,b] lesen (Hex oder rgb)
+  function cssColor(name) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    const h = v.replace('#', '').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    if (h) return h.slice(1).map(x => parseInt(x, 16));
+    const n = v.match(/\d+(\.\d+)?/g);
+    return n && n.length >= 3 ? n.slice(0, 3).map(Number) : null;
+  }
+  // So weit abdunkeln, bis weisse Schrift darauf das verlangte Verhaeltnis erreicht
+  function darkEnough(c, ziel) {
+    const lum = x => { const v = x.map(y => { y /= 255; return y <= 0.03928 ? y / 12.92 : Math.pow((y + 0.055) / 1.055, 2.4); }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+    let out = c.slice();
+    for (let k = 0; k < 30 && 1.05 / (lum(out) + 0.05) < (ziel || 4.5); k++) out = out.map(x => Math.round(x * 0.88));
+    return out;
+  }
+  // Farbe schrittweise Richtung Weiss mischen, bis sie gegen die dunkle Flaeche das Ziel erreicht
+  function lightEnough(c, dark, ziel) {
+    const lum = x => { const v = x.map(y => { y /= 255; return y <= 0.03928 ? y / 12.92 : Math.pow((y + 0.055) / 1.055, 2.4); }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+    const ld = lum(dark);
+    let out = c.slice();
+    for (let k = 0; k < 30 && (lum(out) + 0.05) / (ld + 0.05) < (ziel || 4.5); k++) out = out.map(x => Math.min(255, Math.round(x + (255 - x) * 0.12)));
+    return out;
+  }
+
+  // ---------- Lottie ----------
+  const LOTTIE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js';
+  function setupLottie(el) {
+    const b = findBlock(el.dataset.lottie);
+    if (!b || el.dataset.ready) return;
+    el.dataset.ready = '1';
+    const src = b.src ? res(b.src) : b.url;
+    if (!src) { el.innerHTML = '<p class="kp-label">Keine Animation hinterlegt.</p>'; return; }
+    // In der Vorschau des Tools liegt Lottie schon im Elternfenster (offline); im LMS ist das Elternfenster fremd
+    if (!window.lottie) { try { if (window.parent !== window && window.parent.lottie) window.lottie = window.parent.lottie; } catch (e) { /* fremdes Fenster */ } }
+    const lib = window.lottie ? Promise.resolve() : loadScript(LOTTIE_CDN);
+    Promise.all([lib, fetch(src).then(r => r.json())]).then(([, data]) => {
+      const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const anim = window.lottie.loadAnimation({ container: el, renderer: 'svg', loop: b.loop !== false, autoplay: false, animationData: data });
+      anim.setSpeed(Number(b.speed) || 1);
+      if (reduce) return anim.goToAndStop(0, true);
+      if (b.play === 'click') {
+        el.style.cursor = 'pointer';
+        el.tabIndex = 0;
+        const toggle = () => (anim.isPaused ? anim.play() : anim.pause());
+        el.onclick = toggle;
+        el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
+        anim.goToAndStop(0, true);
+      } else if (b.play === 'scroll' && window.IntersectionObserver) {
+        new IntersectionObserver(es => es.forEach(e => (e.isIntersecting ? anim.play() : anim.pause())), { threshold: .3 }).observe(el);
+      } else {
+        anim.play();
+      }
+    }).catch(() => { el.innerHTML = '<p class="kp-label">Die Animation konnte nicht geladen werden.</p>'; });
+  }
+
+  // Lottie-Figuren: steht als Bild einer Figur (cast[].image, Haltung, Team, Begleitfigur) eine Lottie-Datei, läuft sie
+  // als Animation. Gezeichnet wird auf eine Leinwand, zugeschnitten auf den Umriss der Figur über einige Einzelbilder,
+  // und das <img> bekommt je Takt das neue Bild. So gelten alle Regeln für Bilder weiter (Größe, Spiegeln, Filter im Comic-Stil).
+  const isLottieSrc = s => /^data:application\/json|\.json([?#]|$)/i.test(String(s || ''));
+  const LOTTIE_FIGS = new Map();
+  const BLANK_IMG = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  function lottieLib() {
+    if (!window.lottie) { try { if (window.parent !== window && window.parent.lottie) window.lottie = window.parent.lottie; } catch (e) { /* fremdes Fenster */ } }
+    return window.lottie ? Promise.resolve() : loadScript(LOTTIE_CDN);
+  }
+  function lottieFigData(src) {
+    if (!LOTTIE_FIGS.has(src)) {
+      LOTTIE_FIGS.set(src, Promise.all([lottieLib(), fetch(src).then(r => r.json())]).then(([, data]) => {
+        // Umriss messen: Hintergrund-Flächen (ty 1) weg, fünf Einzelbilder auf einer kleinen Leinwand, sichtbare Pixel vereinen
+        data.layers = (data.layers || []).filter(l => l.ty !== 1);
+        const k = Math.min(1, 400 / Math.max(data.w, data.h));
+        const cv = document.createElement('canvas'); cv.width = Math.round(data.w * k); cv.height = Math.round(data.h * k);
+        const a = window.lottie.loadAnimation({ renderer: 'canvas', loop: false, autoplay: false, animationData: JSON.parse(JSON.stringify(data)), rendererSettings: { context: cv.getContext('2d'), clearCanvas: true } });
+        // eingebettete Bilder (Gabor K: PNG je Körperteil) lädt lottie nach; erst danach messen, sonst ist der Umriss leer oder halb
+        const ready = (data.assets || []).some(as => as.p) ? new Promise(res => { a.addEventListener('loaded_images', res); setTimeout(res, 4000); }) : Promise.resolve();
+        return ready.then(() => {
+        let box = null;
+        try {
+          const x = cv.getContext('2d'), ip = data.ip || 0, op = data.op || 60;
+          [ip, ip + (op - ip) * 0.25, (ip + op) / 2, ip + (op - ip) * 0.75, op - 1].forEach(f => {
+            a.goToAndStop(f, true);
+            const d = x.getImageData(0, 0, cv.width, cv.height).data;
+            for (let yy = 0; yy < cv.height; yy += 2) for (let xx = 0; xx < cv.width; xx += 2) if (d[(yy * cv.width + xx) * 4 + 3] > 30) {
+              if (!box) box = [xx, yy, xx, yy];
+              else { box[0] = Math.min(box[0], xx); box[1] = Math.min(box[1], yy); box[2] = Math.max(box[2], xx); box[3] = Math.max(box[3], yy); }
+            }
+          });
+        } catch (e) { box = null; }
+        a.destroy();
+        const p = 0.02;
+        const b = box ? [Math.max(0, box[0] / cv.width - p), Math.max(0, box[1] / cv.height - p), Math.min(1, box[2] / cv.width + p), Math.min(1, box[3] / cv.height + p / 2)] : [0, 0, 1, 1];
+        return { data, box: b };
+        });
+      }));
+    }
+    return LOTTIE_FIGS.get(src);
+  }
+  function lottieFigs(scope) {
+    scope.querySelectorAll('img').forEach(img => {
+      const src = img.getAttribute('src');
+      if (img.dataset.lf || !isLottieSrc(src)) return;
+      img.dataset.lf = '1';
+      img.src = BLANK_IMG;
+      lottieFigData(src).then(fig => startLottieFig(img, fig)).catch(() => { img.style.visibility = 'hidden'; });
+    });
+  }
+  function startLottieFig(img, fig) {
+    const { data, box } = fig;
+    const bw = (box[2] - box[0]) * data.w, bh = (box[3] - box[1]) * data.h;
+    const k = Math.min(1.5, 720 / bh);
+    const full = document.createElement('canvas'); full.width = Math.round(data.w * k); full.height = Math.round(data.h * k);
+    const out = document.createElement('canvas'); out.width = Math.max(1, Math.round(bw * k)); out.height = Math.max(1, Math.round(bh * k));
+    const anim = window.lottie.loadAnimation({ renderer: 'canvas', loop: true, autoplay: false, animationData: JSON.parse(JSON.stringify(data)), rendererSettings: { context: full.getContext('2d'), clearCanvas: true } });
+    const oc = out.getContext('2d');
+    let busy = false, last = 0, url = '';
+    const paint = () => {
+      if (busy) return;
+      busy = true;
+      oc.clearRect(0, 0, out.width, out.height);
+      oc.drawImage(full, box[0] * full.width, box[1] * full.height, out.width, out.height, 0, 0, out.width, out.height);
+      out.toBlob(bl => {
+        busy = false;
+        if (!bl || !img.isConnected) return;
+        const u = URL.createObjectURL(bl);
+        img.src = u;
+        if (url) URL.revokeObjectURL(url);
+        url = u;
+      });
+    };
+    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    anim.goToAndStop(0, true); paint();
+    if (reduce) return;
+    // 15 Bilder je Sekunde reichen für Atmen und Gesten; außerhalb des Bildes und nach dem Seitenwechsel ruht die Figur
+    anim.addEventListener('enterFrame', () => {
+      if (!img.isConnected) { anim.destroy(); if (url) URL.revokeObjectURL(url); return; }
+      const now = performance.now();
+      if (now - last < 66) return;
+      last = now; paint();
+    });
+    if (window.IntersectionObserver) new IntersectionObserver(es => es.forEach(e => (e.isIntersecting ? anim.play() : anim.pause()))).observe(img);
+    else anim.play();
+  }
+
+  // Erklärsequenz steuern
+  function setupSequence(box) {
+    const b = findBlock(box.dataset.seq);
+    if (!b || box.dataset.ready) return;
+    box.dataset.ready = '1';
+    const steps = b.steps || [];
+    const audio = box.querySelector('[data-seq-audio]');
+    const stage = box.querySelector('.kp-seq-stage');
+    const playBtn = box.querySelector('[data-seq-play]');
+    let timer = null;
+    const show = idx => {
+      idx = Math.max(0, Math.min(steps.length - 1, idx));
+      if (idx === state.seq[b.id]) return;
+      state.seq[b.id] = idx;
+      stage.innerHTML = seqStage(b, idx);
+      box.querySelector('.kp-seq-prog b').style.width = (idx + 1) / steps.length * 100 + '%';
+      box.querySelector('.kp-seq-count').textContent = `${idx + 1} / ${steps.length}`;
+    };
+    if (state.seq[b.id] == null) state.seq[b.id] = 0;
+    const setPlaying = on => { playBtn.textContent = on ? '❚❚' : '▶'; playBtn.setAttribute('aria-label', on ? 'Pause' : 'Abspielen'); };
+    const stepAt = t => { let i = 0; steps.forEach((s, k) => { if ((Number(s.start) || 0) <= t) i = k; }); return i; };
+    if (audio) {
+      audio.addEventListener('timeupdate', () => show(stepAt(audio.currentTime)));
+      audio.addEventListener('play', () => setPlaying(true));
+      audio.addEventListener('pause', () => setPlaying(false));
+      audio.addEventListener('ended', () => setPlaying(false));
+    }
+    const autoNext = () => {
+      const cur = state.seq[b.id];
+      if (cur >= steps.length - 1) { timer = null; setPlaying(false); return; }
+      timer = setTimeout(() => { show(cur + 1); autoNext(); }, Math.max(2500, plainText(steps[cur + 1] && steps[cur + 1].html).split(' ').length * 350));
+    };
+    playBtn.onclick = () => {
+      if (audio) {
+        if (audio.paused) { stopSound(); audio.currentTime = Number(steps[state.seq[b.id]].start) || 0; audio.play(); } else audio.pause();
+        return;
+      }
+      if (timer) { clearTimeout(timer); timer = null; setPlaying(false); } else { setPlaying(true); autoNext(); }
+    };
+    const jump = d => {
+      const idx = Math.max(0, Math.min(steps.length - 1, state.seq[b.id] + d));
+      if (audio) { audio.currentTime = Number(steps[idx].start) || 0; if (audio.paused) show(idx); }
+      else show(idx);
+    };
+    box.querySelector('[data-seq-prev]').onclick = () => jump(-1);
+    box.querySelector('[data-seq-next]').onclick = () => jump(1);
+    mediaTimers.push({ stop: () => { clearTimeout(timer); if (audio) audio.pause(); } });
+  }
+
+  // Freitexte bleiben zusätzlich im Browser, weil SCORM 1.2 wenig Platz hat
+  const textKey = id => 'kurs-text-' + (course.id || 'kurs') + '-' + id;
+  function loadText(id) {
+    if (state.texts[id] != null) return state.texts[id];
+    try { const v = localStorage.getItem(textKey(id)); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+  }
+  function saveText(id, v) {
+    state.texts[id] = v;
+    try { localStorage.setItem(textKey(id), JSON.stringify(v)); } catch (e) { /* kein Speicher */ }
+  }
+
+  const fmtClock = sec => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}`;
+  function renderReflection(b) {
+    const saved = loadText(b.id);
+    const done = state.texts[b.id] != null;
+    const before = plainText(b.before) ? b.before : '';
+    const rw = done && before && b.sample
+      ? `<div class="kp-rw" role="status"><div class="kp-rw-col kp-rw-old"><p class="kp-label">${T('rwVorher')}</p><div class="kp-text">${res(before)}</div></div>
+          <div class="kp-rw-col kp-rw-mine"><p class="kp-label">${T('rwDeine')}</p><p>${esc(saved || '').replace(/\n/g, '<br>')}</p></div>
+          <div class="kp-rw-col kp-rw-model"><p class="kp-label">${T('rwMuster')}</p><div class="kp-text">${res(b.sample)}</div></div></div>` : '';
+    return `<div class="kp-reflect" data-reflect="${b.id}">
+      <p class="kp-label">${before ? T('rwTitel') : 'Reflexion'}</p>
+      <h2 class="kp-q">${esc(b.prompt)}</h2>
+      ${b.timer && !done ? `<div class="kp-timer" data-timer="${b.id}"><button class="kp-btn kp-sec" data-timer-start="${b.id}">${icon('clock')} ${esc(T('denkpauseStart').replace('{m}', fmtClock(+b.timer)))}</button><span class="kp-timer-left" data-timer-left aria-live="polite"></span></div>` : ''}
+      ${before && !done ? `<div class="kp-rw-before"><p class="kp-label">${T('rwVorher')}</p><div class="kp-text">${res(before)}</div></div>` : ''}
+      <textarea data-reflect-text aria-label="${esc(b.prompt)}" placeholder="${esc(b.placeholder || T('gedankenPh'))}">${esc(saved || '')}</textarea>
+      <div class="kp-quiz-actions"><button class="kp-btn" data-reflect-save="${b.id}">${done ? 'Aktualisieren' : (b.sample ? 'Speichern und Musterantwort ansehen' : 'Speichern')}</button>${done ? '<span class="kp-saved" role="status">✔ gespeichert</span>' : ''}</div>
+      ${rw || (done && b.sample ? `<div class="kp-note kp-text kp-sample"><strong>${T('zumVergleich')}</strong>${res(b.sample)}</div>` : '')}
+      ${done ? reflectCriteria(b) : ''}
+    </div>`;
+  }
+  // Eigenes Kästchen für Checkliste und Kriterien: das echte Kästchen bleibt (Tastatur, Screenreader, Klick) und liegt unsichtbar darüber,
+  // der Haken zeichnet sich beim Abhaken (Klasse kp-just, nur nach einem Klick, nicht beim Laden)
+  const TICK = '<span class="kp-tick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>';
+  // Kriterien zum Selbst-Abhaken nach dem Speichern: Stand in state.self[id].crit (Indizes)
+  function reflectCriteria(b) {
+    const list = (b.criteria || []).filter(t => String(t || '').trim());
+    if (!list.length) return '';
+    const c = (state.self[b.id] || {}).crit || [];
+    return `<div class="kp-crit" data-crit="${b.id}"><p class="kp-label">${T('kritTitel')}</p><p class="kp-crit-hint">${T('kritHinweis')}</p>
+      <ul class="kp-cl-list">${list.map((t, i) => `<li><label class="${c.includes(i) ? 'done' : ''}"><input type="checkbox" data-crit-item="${i}" ${c.includes(i) ? 'checked' : ''}>${TICK}<span>${esc(t)}</span></label></li>`).join('')}</ul>
+      ${critStatus(b)}</div>`;
+  }
+  function critStatus(b) {
+    const n = (b.criteria || []).filter(t => String(t || '').trim()).length;
+    const c = (state.self[b.id] || {}).crit || [];
+    const all = c.length >= n;
+    return `<p class="kp-cl-status ${all ? 'all' : ''}" data-crit-status role="status">${all ? T('kritAlle') : `${c.length} ${T('von')} ${n} ${T('kritErfuellt')}`}</p>`;
+  }
+
+  function renderPlan(b) {
+    const saved = loadText(b.id) || [];
+    const done = state.texts[b.id] != null;
+    return `<div class="kp-plan" data-plan="${b.id}">
+      <p class="kp-label">Umsetzungsplan</p>
+      <h2 class="kp-q">${esc(b.title || 'Mein Umsetzungsplan')}</h2>
+      ${b.intro ? `<div class="kp-text" style="margin-bottom:14px">${res(b.intro)}</div>` : ''}
+      ${(b.fields || []).map((f, i) => `<div class="kp-plan-row"><label for="pl-${b.id}-${i}">${esc(f.label)}</label>
+        <textarea id="pl-${b.id}-${i}" data-plan-field="${i}" placeholder="${esc(f.placeholder || '')}">${esc(saved[i] || '')}</textarea></div>`).join('')}
+      <div class="kp-quiz-actions">
+        <button class="kp-btn" data-plan-save="${b.id}">${done ? 'Aktualisieren' : 'Plan speichern'}</button>
+        <button class="kp-btn kp-sec" data-plan-print="${b.id}">Drucken oder als PDF sichern</button>
+        ${done ? '<span class="kp-saved" role="status">✔ gespeichert</span>' : ''}
+      </div></div>`;
+  }
+
+  function renderSurvey(b) {
+    const s = state.survey[b.id];
+    const scale = Number(b.scale) || 5;
+    if (s) return `<div class="kp-survey"><p class="kp-label">Rückmeldung</p><h2 class="kp-q">${esc(b.thanks || T('umfrageDanke'))}</h2></div>`;
+    return `<div class="kp-survey" data-survey="${b.id}">
+      <p class="kp-label">Rückmeldung</p><h2 class="kp-q">${esc(b.title || T('umfrageFrage'))}</h2>
+      ${(b.statements || []).map((st, i) => `<div class="kp-survey-row"><span id="sv-${b.id}-${i}">${esc(st)}</span>
+        <div class="kp-scale" role="radiogroup" aria-labelledby="sv-${b.id}-${i}">${Array.from({ length: scale }, (v, k) => `<label title="${k + 1}"><input type="radio" name="s-${b.id}-${i}" value="${k + 1}">${k + 1}</label>`).join('')}</div></div>`).join('')}
+      <p class="kp-scale-legend"><span>1 = ${esc(b.low || 'trifft nicht zu')}</span><span>${scale} = ${esc(b.high || 'trifft voll zu')}</span></p>
+      ${b.comment !== false ? `<div class="kp-plan-row" style="margin-top:14px"><label for="svc-${b.id}">${esc(b.commentLabel || T('umfrageKommentar'))}</label><textarea id="svc-${b.id}" data-survey-comment></textarea></div>` : ''}
+      <div class="kp-quiz-actions"><button class="kp-btn" data-survey-send="${b.id}">Absenden</button></div></div>`;
+  }
+
+  // ---------- Zertifikat ----------
+  let lmsName = '';
+  function learnerName() {
+    if (state.name) return state.name;
+    const raw = String(lmsName || '').trim();
+    return raw.indexOf(',') > 0 ? raw.split(',').map(s => s.trim()).reverse().join(' ') : raw;
+  }
+  // Vorname für die Anrede; leer ohne LMS, ohne Namen oder wenn die Anrede abgeschaltet ist
+  function firstName() {
+    if (set.greet === false) return '';
+    const n = learnerName().replace(/\s+/g, ' ').trim();
+    if (!n || /^(unknown|undefined|null|student|learner)$/i.test(n)) return '';
+    return n.split(' ')[0];
+  }
+  function certReady(b) {
+    if (!graded().length) return { ok: true };
+    const s = score();
+    if (s.open) return { ok: false, why: 'Das Zertifikat steht bereit, sobald alle Testfragen beantwortet sind.' };
+    if (b.requirePass !== false && s.pct < passScore) return { ok: false, why: T('zertAb').replace('{p}', passScore).replace('{s}', s.pct) };
+    return { ok: true, s };
+  }
+  // Kursmotiv für das Zertifikat: eigenes Bild am Block, sonst das Foto des Titelbereichs
+  function certMotif(b) {
+    if (b.image && b.image.src) return res(b.image.src);
+    for (const p of pages) for (const x of (p.blocks || [])) if (x.type === 'hero' && x.image && x.image.src) return res(x.image.src);
+    return '';
+  }
+  // Der eigene Vorsatz (Wenn-Dann-Plan aus einer Reflexion, b.planRef) steht auf dem Zertifikat und auf der Ergebnisseite:
+  // das Ende trägt die Erinnerung (Peak-End), und der selbst geschriebene Satz wirkt stärker als jede Zusammenfassung (Gollwitzer & Sheeran 2006)
+  function certPlan(b) {
+    if (!b || !b.planRef) return '';
+    const v = loadText(b.planRef);
+    return typeof v === 'string' ? v.trim() : Array.isArray(v) ? v.filter(Boolean).join(' · ') : '';
+  }
+  const certBlock = () => { for (const p of pages) for (const x of (p.blocks || [])) if (x.type === 'certificate') return x; return null; };
+  function planCard(b) {
+    const v = certPlan(b);
+    if (!v) return '';
+    return `<div class="kp-plan-card"><span class="kp-label">${T('deinVorsatz')}</span><p>${esc(v)}</p></div>`;
+  }
+  // Rückbezug: {{antwort:ID}}, {{warum:ID}} und {{je:ID|Text 1|Text 2}} setzen ein, was die Person vorher gesagt oder gewählt hat.
+  // Aus Monolog wird Dialog: der Kurs kommt auf die eigenen Worte zurück. Nur eigene Eingaben, nichts erfunden, kein Netz.
+  // {{ziel}} und {{fall}} greifen Ziel und eigenen Fall aus dem Einstieg „Über dich“ auf ({{ziel|Ersatz}} mit Ersatztext)
+  const ECHO_RE = /\{\{(antwort|warum|je|ziel|fall)((?::|\|)[^{}<>]*?)?\}\}/g;
+  const aboutBlock = () => { for (const p of pages) for (const b of p.blocks || []) if (b.type === 'ueberdich') return b; return null; };
+  const aboutText = kind => { const ud = aboutBlock(); const v = ud ? loadText(ud.id + '~' + kind) : ''; return typeof v === 'string' ? v.trim() : ''; };
+  function echoIndex(id) {
+    const b = findBlock(id);
+    if (b && (b.type === 'branch' || (b.options && !b.type))) return state.branch[id] != null ? Number(state.branch[id]) : -1;
+    if (b && b.type === 'predict') { const st = state.self[id] || {}; return st.done && b.mode === 'choice' && typeof st.v === 'number' ? st.v : -1; }
+    if (b && b.type === 'selfcheck') {
+      const st = state.self[id] || {};
+      if (!st.done || !st.a) return -1;
+      const sum = Object.values(st.a).reduce((x, y) => x + (Number(y) || 0), 0);
+      return (b.results || []).findIndex(r => sum >= Number(r.min) && sum <= Number(r.max));
+    }
+    if (b && b.type === 'chat') { const pk = (state.self[id] || {}).pick || {}; const ks = Object.keys(pk).map(Number); return ks.length ? pk[Math.max(...ks)] : -1; }
+    if (b && b.type === 'fragen') { const a = (state.self[id] || {}).asked || []; return a.length ? a[0] : -1; }
+    if (b && b.type === 'ueberdich') { const r = (state.self[id] || {}).r; return typeof r === 'number' ? r : -1; }
+    if (b && b.type === 'kurzfrage') { const v = (state.self[id] || {}).v; return typeof v === 'number' ? v : -1; }
+    if (b && b.type === 'markieren') return (state.self[id] || {}).done ? mkMarked(b).length : -1; // Anzahl markierter Sätze
+    const a = state.answers[id];
+    return Array.isArray(a) && a.length && typeof a[0] === 'number' ? a[0] : -1;
+  }
+  function echoText(kind, id) {
+    if (kind === 'warum') { const w = loadText(id + '~why'); return typeof w === 'string' ? w.trim() : ''; }
+    const t = loadText(id);
+    if (typeof t === 'string') return t.trim();
+    if (Array.isArray(t)) return t.map(x => String(x || '').trim()).filter(Boolean).join(' · ');
+    const b = findBlock(id);
+    const i = echoIndex(id);
+    if (b && b.type === 'predict') {
+      const st = state.self[id] || {};
+      if (!st.done) return '';
+      const u = b.unit ? ' ' + b.unit : '';
+      if (b.mode === 'choice') return plainText((b.options || [])[st.v] || '');
+      if (b.mode === 'range' && Array.isArray(st.v)) return st.v[0] + '–' + st.v[1] + u;
+      if (b.mode === 'slider') return st.v + u;
+      return String(st.v || '').trim();
+    }
+    if (b && (b.type === 'branch' || (b.options && !b.type))) return i >= 0 ? plainText(((b.options || [])[i] || {}).text || '') : '';
+    if (b && b.type === 'selfcheck') return i >= 0 ? plainText(((b.results || [])[i] || {}).title || ((b.results || [])[i] || {}).html || '') : '';
+    if (b && b.type === 'chat') {
+      const pk = (state.self[id] || {}).pick || {}; const ks = Object.keys(pk).map(Number);
+      const o = ks.length ? ((((b.turns || [])[Math.max(...ks)] || {}).options || [])[i] || {}) : {};
+      return plainText(o.text || '');
+    }
+    if (b && b.type === 'fragen') return i >= 0 ? plainText(((b.items || [])[i] || {}).q || '') : '';
+    if (b && b.type === 'ueberdich') return i >= 0 ? plainText((b.roles || [])[i] || '') : '';
+    if (b && b.type === 'kurzfrage') return i >= 0 ? plainText(((b.options || [])[i] || {}).text || '') : '';
+    if (b && b.type === 'markieren') { const it = mkItems(b); return mkMarked(b).map(k => it[k]).join(' · '); }
+    const fq = findQuestion(id);
+    const a = state.answers[id];
+    if (fq && a != null) {
+      if (fq.q.kind === 'fill') return a.filter(Boolean).join(', ');
+      const ans = normAnswers(fq.q);
+      if (Array.isArray(a) && typeof a[0] === 'number') return a.map(k => plainText((ans[k] || {}).text || '')).filter(Boolean).join(', ');
+    }
+    return '';
+  }
+  // Ein Platzhalter als fertiger Text (Ersatztext, wenn noch nichts da ist)
+  function echoValue(kind, raw) {
+    raw = String(raw || '');
+    if (kind === 'ziel' || kind === 'fall') return aboutText(kind) || (raw[0] === '|' ? raw.slice(1).trim() : '');
+    const parts = raw.replace(/^:/, '').split('|');
+    const id = parts[0].trim();
+    if (kind === 'je') { const i = echoIndex(id); return i >= 0 && parts[i + 1] != null ? parts[i + 1].trim() : ''; }
+    return echoText(kind, id) || (parts[1] != null ? parts.slice(1).join('|').trim() : '');
+  }
+  const echoPlain = s => String(s == null ? '' : s).replace(ECHO_RE, (m, k, r) => echoValue(k, r));
+  // In Text: Platz zum Nachziehen (updateEchoes), in Attributen gleich der Text; srcdoc (eigene Interaktion) bleibt unberührt
+  const echoHtml = html => String(html).indexOf('{{') < 0 ? html : String(html).split(/(<[^>]*>)/).map((part, i) => {
+    if (i % 2) return /\ssrcdoc=/.test(part) ? part : part.replace(ECHO_RE, (m, k, r) => esc(echoValue(k, r)));
+    return part.replace(ECHO_RE, (m, k, r) => {
+      const v = echoValue(k, r);
+      return `<span class="kp-echo${k === 'je' ? '' : ' kp-echo-own'}" data-echo="${esc(k + (r || ''))}"${v ? '' : ' data-empty'}>${esc(v)}</span>`;
+    });
+  }).join('');
+  function updateEchoes(scope) {
+    (scope || root).querySelectorAll('[data-echo]').forEach(el => {
+      const m = el.dataset.echo.match(/^([a-z]+)([\s\S]*)$/) || [];
+      const v = echoValue(m[1], m[2]);
+      if (el.textContent !== v) el.textContent = v;
+      el.toggleAttribute('data-empty', !v);
+    });
+  }
+  // Über dich: Lage, eigenes Ziel und eigener Fall am Anfang. Der Kurs richtet sich danach (je/antwort), das Ziel bleibt sichtbar,
+  // der Fall wandert durch den Kurs ({{fall}}). Zustand state.self[id] = { r, done }, Texte id~ziel und id~fall (Lernstand x).
+  const udWords = t => String(t || '').trim().split(/\s+/).filter(Boolean).length;
+  // Kurz gefragt: eine Frage nach Erfahrung oder Gefühl („Hast du schon mal erlebt, dass …?“, „Wie geht es dir mit dem Thema?“).
+  // Jede Antwort bekommt eine eigene Reaktion, danach darf die Person erzählen (freiwillig). Zustand state.self[id].v, Text id~text.
+  // Standard ist die Sprechblase, die über der Seite aufpoppt (mode 'text' = im Text der Seite)
+  const kfBubble = b => b && b.type === 'kurzfrage' && b.mode !== 'text';
+  function renderKurzfrage(b, inBubble) {
+    if (kfBubble(b) && !inBubble) return `<div data-kf-anchor="${b.id}" hidden></div>`;
+    const st = state.self[b.id] || {};
+    const opts = (b.options || []).filter(o => String(o.text || '').trim());
+    const v = typeof st.v === 'number' && opts[st.v] ? st.v : null;
+    const told = loadText(b.id + '~text');
+    return `<div class="kp-kf${b.look === 'skala' ? ' kp-kf-skala' : ''}" data-kf="${b.id}">
+      ${b.eyebrow ? `<p class="kp-eyebrow">${esc(b.eyebrow)}</p>` : ''}
+      <h2 class="kp-q kp-kf-q" id="kfq-${b.id}">${accent(b.question || '')}</h2>
+      ${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      <div class="kp-kf-opts" role="group" aria-label="${esc(plainText(b.question || ''))}">${opts.map((o, i) => `<button type="button" class="kp-kf-opt${v === i ? ' on' : ''}" data-kf-pick="${i}" data-block="${b.id}" aria-pressed="${v === i}">${esc(o.text)}</button>`).join('')}</div>
+      ${v != null && plainText(opts[v].reply) ? `<div class="kp-kf-reply" role="status" data-kf-reply><div class="kp-text">${res(opts[v].reply)}</div></div>` : ''}
+      ${v != null ? kfShares(b, opts, v) : ''}
+      ${v != null ? kfFact(b) : ''}
+      ${v != null && b.askMore ? `<label class="kp-kf-more"><span>${esc(b.askMore)}</span>
+        <textarea data-kf-text rows="2" placeholder="${esc(b.placeholder || T('kfFreiwillig'))}">${esc(told || '')}</textarea></label>
+        <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-kf-save="${b.id}">${T('kfFesthalten')}</button>${told ? `<span class="kp-saved" role="status">✔ ${T('kfImLernbuch')}</span>` : ''}</div>` : ''}
+    </div>`;
+  }
+  // Wissensnugget: ein überraschender Fakt mit Quelle, erst nach der eigenen Vermutung (Neugier und Hypercorrection, Kang u. a. 2009)
+  const kfHasFact = b => b && b.type === 'kurzfrage' && !!plainText(b.fact || '');
+  function kfFact(b) {
+    if (!kfHasFact(b)) return '';
+    const src = String(b.factSource || '').trim();
+    return `<div class="kp-kf-fact" data-kf-fact><p class="kp-kf-fact-h">${icon('bulb')}${T('kfFakt')}</p><div class="kp-text">${res(b.fact)}</div>${src ? `<p class="kp-kf-src">${T('quelle')}: ${esc(src)}</p>` : ''}</div>`;
+  }
+  // So antworten andere: Verteilung aus einer Studie (options[].share in Prozent, b.sharesSource Pflicht), erst nach der eigenen Wahl
+  function kfShares(b, opts, v) {
+    const src = String(b.sharesSource || '').trim();
+    if (!src || !opts.some(o => o.share !== '' && o.share != null && isFinite(Number(o.share)))) return '';
+    return `<div class="kp-kf-others" data-kf-others><p class="kp-kf-others-h">${T('soAntwortenAndere')}</p>
+      <ul>${opts.map((o, i) => { const n = Math.max(0, Math.min(100, Number(o.share) || 0)); return `<li class="${i === v ? 'kp-kf-mine' : ''}"><span class="kp-kf-ot">${esc(o.text)}${i === v ? ` <em>(${T('deineWahl')})</em>` : ''}</span><span class="kp-kf-bar" aria-hidden="true"><i style="--w:${n}%"></i></span><span class="kp-kf-pct">${n} %</span></li>`; }).join('')}</ul>
+      <p class="kp-kf-src">${T('quelle')}: ${esc(src)}</p></div>`;
+  }
+  // Sprechblase: erscheint nach b.delay Sekunden (Standard 2) unten rechts über der Seite, eine zur Zeit.
+  // Geschlossen und unbeantwortet bleibt sie als kleiner Knopf; beantwortete Fragen kommen beim nächsten Besuch nicht wieder.
+  let kfOpen = null, kfTried = new Set(), kfPlanned = new Set();
+  const kfVisible = () => (pages[state.current] && pages[state.current].blocks || []).filter(kfBubble).filter(b => { const s = root.querySelector(`section[data-block="${b.id}"]`); return s && !s.hidden; });
+  const kfAnswered = b => typeof (state.self[b.id] || {}).v === 'number';
+  function kfPops() {
+    const dock = root.querySelector('[data-kf-dock]');
+    if (!dock || opts.renderer) return;
+    const next = !kfOpen && kfVisible().find(b => !kfAnswered(b) && !kfTried.has(b.id) && !kfPlanned.has(b.id));
+    if (next) {
+      kfPlanned.add(next.id);
+      const d = Math.max(0, Number(next.delay != null && next.delay !== '' ? next.delay : 2)) * 1000;
+      const tm = setTimeout(() => {
+        // Läuft gerade eine Szene von selbst, wartet die Blase: sie verdeckte sonst Steuerleiste und Blasen der Szene. Das Ende der Szene zeichnet den Dialog neu, dann plant kfPops() erneut.
+        if (filmAuto.size) { kfPlanned.delete(next.id); return; }
+        if (!kfOpen && dock.isConnected) { kfOpen = next.id; kfTried.add(next.id); kfDraw(); }
+      }, d);
+      mediaTimers.push({ stop: () => clearTimeout(tm) });
+    }
+    kfDraw();
+  }
+  function kfDraw(force) {
+    const dock = root.querySelector('[data-kf-dock]');
+    if (!dock) return;
+    const b = kfOpen && findBlock(kfOpen);
+    const chips = b ? [] : kfVisible().filter(x => kfTried.has(x.id) && !kfAnswered(x));
+    const view = b ? 'open:' + b.id + (kfAnswered(b) ? ':a' : '') : 'chips:' + chips.map(x => x.id).join(',');
+    if (!force && dock.dataset.view === view) return;
+    const wasOpen = /^open:/.test(dock.dataset.view || '');
+    dock.dataset.view = view;
+    if (b) {
+      if (!wasOpen && !kfAnswered(b)) uiSound('hinweis');
+      const who = castOf(b);
+      const face = who && (who.look || (who.image && who.image.src)) ? (who.look === 'image' || (!who.look && who.image && who.image.src) ? `<img src="${esc(res((who.image || {}).src || ''))}" alt="">` : avatarSvg(who.look, kfAnswered(b) ? 'happy' : 'neutral')) : icon('chat');
+      dock.innerHTML = `<div class="kp-kf-pop" role="dialog" aria-modal="false" aria-labelledby="kfq-${b.id}">
+        <span class="kp-kf-face" aria-hidden="true">${face}</span>
+        <div class="kp-kf-bubble"><button type="button" class="kp-kf-x" data-kf-close aria-label="${esc(T('schliessen'))}">✕</button>
+          ${renderKurzfrage(b, true)}
+          ${kfAnswered(b) ? `<div class="kp-kf-end"><button type="button" class="kp-btn" data-kf-close>${T('weiter')}</button></div>` : ''}</div></div>`;
+      activateComponents(dock);
+      updateEchoes(dock);
+    } else {
+      dock.innerHTML = chips.map(x => `<button type="button" class="kp-kf-chip" data-kf-open="${x.id}">${icon('chat')}<span>${T('kurzGefragt')}</span></button>`).join('');
+    }
+  }
+  // Begleitfigur zur Wahl: nur mit Frage und mindestens zwei Figuren in der Besetzung
+  const udGuides = b => b && b.guideQ && (course.cast || []).length >= 2 ? course.cast : [];
+  function castFace(who) {
+    if (!who) return icon('user');
+    if (who.image && who.image.src && (who.look === 'image' || !who.look)) return `<img src="${esc(res(who.image.src))}" alt="">`;
+    return who.look ? avatarSvg(who.look, 'happy') : icon('user');
+  }
+  function renderUeberdich(b, edit) {
+    const st = state.self[b.id] || {};
+    const roles = (b.roles || []).filter(x => String(x || '').trim());
+    const goal = loadText(b.id + '~ziel') || '', fall = loadText(b.id + '~fall') || '';
+    const guides = udGuides(b);
+    if (st.done && !edit) {
+      const row = (label, v) => v ? `<div class="kp-ud-row"><span class="kp-label">${label}</span><p>${esc(v)}</p></div>` : '';
+      return `<div class="kp-ud kp-ud-done" data-ud="${b.id}">
+        ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+        <p class="kp-saved" role="status">${esc(b.thanks || T('udDanke'))}</p>
+        <div class="kp-ud-card">${row(T('udLage'), roles[st.r] || '')}${guides.length ? row(b.guideQ || T('udBegleitFrage'), (guides.find(g => g.id === st.g) || {}).name || '') : ''}${row(T('deinZiel'), goal)}${udGoalLinks(b, goal)}${row(T('deinFall'), fall)}</div>
+        <button class="kp-btn kp-sec" data-ud-edit="${b.id}">${T('aendern')}</button></div>`;
+    }
+    const field = (kind, q, ph, v) => q ? `<label class="kp-ud-field"><span class="kp-ud-q">${esc(q)}</span>
+      <textarea data-ud-text="${kind}" rows="${kind === 'fall' ? 3 : 2}" placeholder="${esc(ph || '')}">${esc(v)}</textarea></label>` : '';
+    return `<div class="kp-ud" data-ud="${b.id}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      ${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      ${roles.length ? `<fieldset class="kp-ud-roles"><legend class="kp-ud-q">${esc(b.roleQ || T('udLageFrage'))}</legend>
+        <div class="kp-answers">${roles.map((r, i) => `<label class="kp-answer${st.r === i ? ' kp-chosen' : ''}"><input type="radio" name="ud-${b.id}" value="${i}" ${st.r === i ? 'checked' : ''}><span>${esc(r)}</span></label>`).join('')}</div></fieldset>` : ''}
+      ${guides.length ? `<fieldset class="kp-ud-roles kp-ud-guides"><legend class="kp-ud-q">${esc(b.guideQ || T('udBegleitFrage'))}</legend>
+        <div class="kp-answers">${guides.map(g => `<label class="kp-answer kp-ud-guide${st.g === g.id ? ' kp-chosen' : ''}"><input type="radio" name="udg-${b.id}" value="${esc(g.id)}" ${st.g === g.id ? 'checked' : ''}><span class="kp-ud-face" aria-hidden="true">${castFace(g)}</span><span><strong>${esc(g.name || '')}</strong>${g.role ? `<small>${esc(g.role)}</small>` : ''}</span></label>`).join('')}</div></fieldset>` : ''}
+      ${field('ziel', b.goalQ, b.goalPh, goal)}
+      ${field('fall', b.caseQ, b.casePh, fall)}
+      <p class="kp-ud-missing" data-ud-missing hidden>${T('udFehlt')}</p>
+      <div class="kp-quiz-actions"><button class="kp-btn" data-ud-save="${b.id}">${esc(b.button || T('udLos'))}</button></div>
+      <p class="kp-ud-note">${T('udPrivat')}</p></div>`;
+  }
+  // Wo das eigene Ziel im Kurs vorkommt (Gagné, Ereignis 2): b.goalLinks [{ words: 'Feedback; Rückmeldung', chapter }] vom Autor;
+  // ein Kapitel erscheint, wenn eines seiner Schlagwörter im Ziel steht (ohne Groß- und Kleinschreibung). Nichts wird erraten.
+  function udGoalChapters(b, goal) {
+    const g = String(goal || '').toLowerCase(), out = [];
+    (b.goalLinks || []).forEach(l => {
+      const words = String(l && l.words || '').split(/[;,]/).map(w => w.trim().toLowerCase()).filter(w => w.length >= 3);
+      const ch = plainText(l && l.chapter);
+      if (ch && words.some(w => g.includes(w)) && !out.includes(ch)) out.push(ch);
+    });
+    return out;
+  }
+  function udGoalLinks(b, goal) {
+    if (!(b.goalLinks || []).length || !String(goal || '').trim()) return '';
+    const chs = udGoalChapters(b, goal);
+    const link = ch => { const pi = pages.findIndex(p => (p.chapter || '') === ch); return pi < 0 ? esc(ch) : `<button type="button" class="kp-ud-link" data-goto="${pi}">${esc(ch)}</button>`; };
+    return `<div class="kp-ud-row kp-ud-links" data-ud-links><span class="kp-label">${T('udZielKommt')}</span><p>${chs.length ? chs.map(link).join(', ') : esc(T('udZielOffen'))}</p></div>`;
+  }
+  // Das eigene Ziel: im Inhaltsverzeichnis, in der Seitenleiste, beim Wiedereinstieg, am Kapitelende und auf der Ergebnisseite
+  function goalCard(cls) {
+    const ud = aboutBlock();
+    const g = ud && ud.showGoal !== false ? aboutText('ziel') : '';
+    return g ? `<div class="kp-goal-card ${cls || ''}" data-goal><span class="kp-label">${T('deinZiel')}</span><p>${esc(g)}</p></div>` : '';
+  }
+  // Mein Lernbuch: alles, was die Person selbst geschrieben, geschätzt, gewählt oder begründet hat, in Kursreihenfolge
+  // Prompt zum Kopieren (text.copy): fertiger Text für Copilot und Co., mit Knopf in die Zwischenablage, landet im Lernbuch
+  function copyBox(b) {
+    if (!b.copy || !String(b.copy).trim()) return '';
+    const done = (state.self[b.id] || {}).cp;
+    return `<div class="kp-copy"><p class="kp-copy-label">${icon('zap')} ${esc(b.copyTitle || T('promptVorlage'))}</p><pre class="kp-copy-text" data-copy-text>${esc(echoPlain(String(b.copy)))}</pre><div class="kp-copy-row"><button type="button" class="kp-btn kp-copy-btn" data-copy="${esc(b.id)}">${esc(b.copyLabel || T('promptKopieren'))}</button><span class="kp-copy-status" data-copy-status aria-live="polite">${done ? esc(T('promptKopiert')) : ''}</span></div></div>`;
+  }
+  function lernbuchEntries(upTo) {
+    const out = [];
+    let cur = '';
+    const add = (pi, label, text) => { text = String(text == null ? '' : text).trim(); if (text) out.push({ page: pi, chapter: pages[pi].chapter || '', label: plainText(echoPlain(label)).replace(/\*/g, ''), text, type: cur }); };
+    pages.forEach((p, pi) => {
+      if (upTo != null && pi > upTo) return;
+      const nt = noteFor(pi);
+      if (pi === 0 && (notesAll())._) { cur = 'notiz'; add(0, T('notizAllgemein'), (notesAll())._); }
+      (p.blocks || []).forEach(b => {
+        cur = b.type;
+        const why = id => { const w = loadText(id + '~why'); return typeof w === 'string' ? w : ''; };
+        if (b.type === 'ueberdich') {
+          const r = (state.self[b.id] || {}).r;
+          if (typeof r === 'number') add(pi, b.roleQ || T('udLage'), (b.roles || [])[r]);
+          const g = udGuides(b).find(x => x.id === (state.self[b.id] || {}).g);
+          if (g) add(pi, b.guideQ || T('udBegleitFrage'), g.name);
+          add(pi, T('deinZiel'), loadText(b.id + '~ziel')); add(pi, T('deinFall'), loadText(b.id + '~fall'));
+        }
+        if (b.type === 'markieren' && (state.self[b.id] || {}).done) add(pi, b.title || b.intro || T('markiert'), echoText('antwort', b.id));
+        if (b.type === 'kartenstapel' && (state.self[b.id] || {}).done) { const d = deckResult(b); add(pi, b.title || T('deckTitel'), [T('deckErgebnis').replace('{k}', d.known.length).replace('{n}', d.cards.length)].concat(d.retry.map(c => '• ' + plainText(c.front))).join('\n')); }
+        if (b.type === 'reflection') add(pi, b.prompt || b.title || T('reflexion'), loadText(b.id));
+        if (b.type === 'text' && b.copy && String(b.copy).trim()) add(pi, b.copyTitle || T('promptVorlage'), echoPlain(String(b.copy)));
+        if (b.type === 'kurzfrage') { add(pi, b.question, echoText('antwort', b.id)); add(pi, b.askMore, loadText(b.id + '~text')); if (kfHasFact(b) && typeof (state.self[b.id] || {}).v === 'number') add(pi, T('kfFakt'), plainText(b.fact) + (b.factSource ? ` (${T('quelle')}: ${b.factSource})` : '')); }
+        if (b.type === 'actionplan') { const v = loadText(b.id) || []; (b.fields || []).forEach((f, k) => add(pi, f.label, v[k])); }
+        if (b.type === 'predict') add(pi, b.question || b.title, echoText('antwort', b.id));
+        const dec = b.type === 'branch' ? b : b.decision && (b.decision.options || []).length ? b.decision : null;
+        if (dec) { add(pi, dec.prompt || b.title, echoText('antwort', dec.id)); add(pi, T('deineBegruendung'), why(dec.id)); }
+        if (b.type === 'quiz' && b.explain) add(pi, b.question, why(b.id));
+        if (b.type === 'checklist') { const c = (state.self[b.id] || {}).c || []; if (c.length) add(pi, b.title || T('checkliste'), c.map(i => '✓ ' + plainText((b.items || [])[i] || '')).join('\n')); }
+      });
+      if (nt) { cur = 'notiz'; add(pi, T('deineNotiz'), nt); }
+    });
+    return out;
+  }
+  const hasLernbuch = () => !!set.notes || pages.some(p => (p.blocks || []).some(b => ['ueberdich', 'kurzfrage', 'reflection', 'actionplan', 'predict', 'branch', 'checklist', 'markieren', 'kartenstapel'].includes(b.type)
+    || (b.decision && (b.decision.options || []).length) || (b.type === 'quiz' && b.explain)));
+  // Wiedereinstieg: der eigene letzte Satz statt nur „weiter, wo du warst“
+  function lastOwnWords(loc) {
+    const list = lernbuchEntries(loc).filter(e => e.label !== T('deinZiel'));
+    const e = list[list.length - 1];
+    if (!e) return '';
+    const t = e.text.length > 180 ? e.text.slice(0, 178).replace(/\s+\S*$/, '') + ' …' : e.text;
+    return `<p class="kp-resume-own" data-own-last>${T('zuletztGeschrieben')} <q>${esc(t)}</q></p>`;
+  }
+  // Ergebnisseite: zurück zum eigenen Ziel, dazu das Lernbuch zum Mitnehmen
+  // „Dein Weg“: das Persönliche am Ende als kleine Geschichte (Fall, Schätzungen vorher/nachher, Selbstbild, eigene Worte)
+  function wegHtml() {
+    const rows = [];
+    const row = (label, html) => rows.push(`<div class="kp-weg-row"><span class="kp-label">${esc(label)}</span>${html}</div>`);
+    const ud = aboutBlock();
+    const fall = ud ? aboutText('fall') : '';
+    if (fall) row(T('deinFall'), `<p>${esc(fall)}</p>`);
+    const sch = [];
+    pages.forEach(p => (p.blocks || []).forEach(b => {
+      if (b.type !== 'predict' || b.mode !== 'slider') return;
+      const st = state.self[b.id] || {};
+      if (!st.done || typeof st.v !== 'number') return;
+      const u = b.unit ? ' ' + b.unit : '';
+      const q = plainText(b.question || b.title || '');
+      if (b.compareRef) { const f = state.self[b.compareRef] || {}; if (f.done && typeof f.v === 'number') sch.push(`<li><span>${esc(q)}</span><em>${T('wegVorher')} ${f.v}${u} · ${T('wegHeute')} ${st.v}${u}</em></li>`); }
+      else if (b.actual != null && b.actual !== '') sch.push(`<li><span>${esc(q)}</span><em>${T('deineSchaetzung')} ${st.v}${u} · ${T('wegWirklich')} ${esc(String(b.actual))}${u}</em></li>`);
+    }));
+    if (sch.length) row(T('wegSchaetzung'), `<ul class="kp-weg-list">${sch.join('')}</ul>`);
+    // Selbstbild: zwei Selbstchecks mit gemeinsamen Aussagen (Mittel 1–5)
+    const scs = [];
+    pages.forEach(p => (p.blocks || []).forEach(b => { if (b.type === 'selfcheck' && (b.mode === 'scale' || b.mode === 'regler') && (state.self[b.id] || {}).done) scs.push(b); }));
+    const avg = (b, idx) => { const st = state.self[b.id] || {}; const v = idx.map(i => Number((st.a || [])[i])).filter(x => x >= 1); return v.length ? Math.round(v.reduce((x, y) => x + y, 0) / v.length * 10) / 10 : null; };
+    outer: for (let i = 0; i < scs.length; i++) for (let j = i + 1; j < scs.length; j++) {
+      const a = (scs[i].statements || []).map(x => plainText(x)), c = (scs[j].statements || []).map(x => plainText(x));
+      const ia = [], ic = [];
+      a.forEach((t, k) => { const m = c.indexOf(t); if (t && m >= 0) { ia.push(k); ic.push(m); } });
+      if (ia.length < 2) continue;
+      const v1 = avg(scs[i], ia), v2 = avg(scs[j], ic);
+      if (v1 != null && v2 != null) { row(T('wegSelbst'), `<p class="kp-weg-cmp"><em>${T('wegVorher')} ${v1} ${T('von')} 5</em> · <em>${T('wegHeute')} ${v2} ${T('von')} 5</em>${v2 > v1 ? ' <span class="kp-weg-up" aria-hidden="true">▲</span>' : ''}</p>`); break outer; }
+    }
+    const words = lernbuchEntries().filter(e => e.type === 'reflection').slice(-3);
+    if (words.length) row(T('wegWorte'), `<ul class="kp-weg-words">${words.map(e => `<li><q>${esc(e.text.length > 160 ? e.text.slice(0, 158).replace(/\s+\S*$/, '') + ' …' : e.text)}</q></li>`).join('')}</ul>`);
+    if (!rows.length) return '';
+    return `<section class="kp-weg" aria-labelledby="kp-weg-h"><h2 id="kp-weg-h">${T('deinWeg')}</h2>${rows.join('')}</section>`;
+  }
+  // Willkommenskarte zum Lernbuch: poppt beim ersten Öffnen über der Startseite auf und erklärt Notizen, Sammeln und Mitnehmen
+  const lbwKey = 'kurs-lernbuch-intro-' + (course.id || 'kurs');
+  function lbwSeen() { try { return (opts.preview ? sessionStorage : localStorage).getItem(lbwKey) === '1'; } catch (e) { return true; } }
+  function lbwMark() { try { (opts.preview ? sessionStorage : localStorage).setItem(lbwKey, '1'); } catch (e) { /* kein Speicher */ } }
+  function lernbuchWelcome() {
+    if (document.querySelector('.kp-lbw')) return;
+    const rows = [set.notes ? ['pencil', 'lbwNotizT', 'lbwNotiz'] : null, ['book', 'lbwSammeltT', 'lbwSammelt'], ['mail', 'lbwMailT', 'lbwMail']].filter(Boolean);
+    const box = document.createElement('div');
+    box.className = 'kp-lbw';
+    box.innerHTML = `<div class="kp-lbw-box" role="dialog" aria-modal="true" aria-labelledby="kp-lbw-title">
+      <div class="kp-lbw-art" aria-hidden="true"><svg viewBox="0 0 120 120"><defs><linearGradient id="kp-lbw-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--kp-accent)"/><stop offset="1" stop-color="var(--kp-primary)"/></linearGradient></defs>
+        <rect class="kp-lbw-cover" x="24" y="18" width="64" height="84" rx="8"/><rect class="kp-lbw-page" x="34" y="26" width="58" height="84" rx="8"/>
+        <g class="kp-lbw-lines"><path d="M44 44h36"/><path d="M44 56h36"/><path d="M44 68h24"/></g>
+        <g class="kp-lbw-rings"><circle cx="30" cy="36" r="4"/><circle cx="30" cy="60" r="4"/><circle cx="30" cy="84" r="4"/></g>
+        <g class="kp-lbw-pen"><path d="M98 50l12 12-36 36-16 4 4-16z"/><path class="kp-lbw-tip" d="M66 86l4-16 12 12z"/></g></svg></div>
+      <p class="kp-label kp-lbw-eyebrow">${T('lbwEyebrow')}</p>
+      <h2 id="kp-lbw-title">${T('lernbuch')}</h2>
+      <p class="kp-lbw-lead">${T('lbwLead')}</p>
+      <ul class="kp-lbw-list">${rows.map((r, i) => `<li style="--kp-i:${i}"><span class="kp-lbw-ico">${icon(r[0])}</span><span><strong>${T(r[1])}</strong><span>${T(r[2])}</span></span></li>`).join('')}</ul>
+      <div class="kp-lbw-actions"><button type="button" class="kp-btn" data-lbw-close>${T('lbwLos')}</button>${set.notes ? `<button type="button" class="kp-btn kp-sec" data-lbw-notes>${T('lbwProbieren')}</button>` : ''}</div>
+      <p class="kp-lbw-where">${icon('menu')} ${T('lbwWo')}</p></div>`;
+    const close = () => { lbwMark(); box.classList.add('out'); document.removeEventListener('keydown', onKey); setTimeout(() => box.remove(), reducedMotion() ? 0 : 250); };
+    const onKey = e => { if (e.key === 'Escape') close(); };
+    box.addEventListener('click', e => {
+      if (e.target.closest('[data-lbw-notes]')) { close(); openDrawer('notes'); const ta = root.querySelector('#kp-drawer [data-notes]'); if (ta) ta.focus(); return; }
+      if (e.target === box || e.target.closest('[data-lbw-close]')) close();
+    });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(box);
+    box.querySelector('[data-lbw-close]').focus({ preventScroll: true });
+  }
+  function goalBack() {
+    const g = goalCard('kp-goal-result');
+    const lb = hasLernbuch() && lernbuchEntries().length;
+    if (!g && !lb) return '';
+    return `<div class="kp-goal-back">${g}${g ? `<p class="kp-goal-q">${T('zielRueckblick')}</p>` : ''}${lb ? `<button class="kp-btn kp-sec" data-drawer="lernbuch">${T('lernbuchOeffnen')}</button>` : ''}</div>`;
+  }
+  function lernbuchBody() {
+    const list = lernbuchEntries();
+    if (!list.length) return `<p class="kp-lock">${T('lernbuchLeer')}</p>`;
+    let ch = null;
+    return goalCard() + list.map(e => {
+      const head = e.chapter !== ch ? (ch = e.chapter, e.chapter ? `<div class="kp-toc-chapter">${esc(e.chapter)}</div>` : '') : '';
+      return `${head}<div class="kp-lb-entry"><span class="kp-lb-q">${esc(e.label)}</span><p>${esc(e.text).replace(/\n/g, '<br>')}</p><button type="button" class="kp-lb-go" data-goto="${e.page}">${T('zurSeite')} ${e.page + 1}</button></div>`;
+    }).join('') + `<p class="kp-lb-actions"><button class="kp-btn" data-lb-print>${T('drucken')}</button><button class="kp-btn kp-sec" data-lb-save>${T('alsTextSpeichern')}</button><a class="kp-btn kp-sec" data-lb-mail href="${lernbuchMailto()}">${T('perMail')}</a></p>`;
+  }
+  // Lernbuch an die eigene Adresse: mailto öffnet das Mailprogramm, ohne Server; lange Texte werden gekürzt, weil Mailprogramme Adressen begrenzen
+  function lernbuchMailto() {
+    let body = lernbuchText();
+    if (body.length > 6000) body = body.slice(0, 5990).replace(/\s+\S*$/, '') + ' …';
+    return 'mailto:?subject=' + encodeURIComponent(T('lernbuch') + ' · ' + plainTitle(course.title || '')) + '&body=' + encodeURIComponent(body);
+  }
+  function lernbuchText() {
+    const lines = [plainTitle(course.title || '') + ' · ' + T('lernbuch'), new Date().toLocaleDateString('de-DE'), ''];
+    let ch = null;
+    lernbuchEntries().forEach(e => { if (e.chapter !== ch) { ch = e.chapter; if (ch) lines.push('', '== ' + ch + ' =='); } lines.push('', e.label, e.text); });
+    return lines.join('\n');
+  }
+  function printLernbuch() {
+    let ch = null;
+    printWindow(T('lernbuch'), `body { font-family: ${theme.font || 'Segoe UI, sans-serif'}; color: #1d2530; max-width: 720px; margin: 30px auto; padding: 0 20px; }
+      h1 { color: ${theme.primary || '#1f3a5f'}; font-size: 24px; margin-bottom: 4px; } .sub { color: #5d6877; margin: 0 0 22px; }
+      h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: #5d6877; margin: 26px 0 6px; }
+      .q { font-weight: 700; margin: 14px 0 4px; } .a { margin: 0; padding: 8px 12px; border-left: 3px solid ${theme.accent || '#c0392b'}; background: #f5f7fa; white-space: pre-wrap; line-height: 1.5; }`,
+      `<h1>${esc(T('lernbuch'))}</h1><p class="sub">${esc(plainTitle(course.title || ''))} · ${new Date().toLocaleDateString('de-DE')}</p>` +
+      lernbuchEntries().map(e => `${e.chapter !== ch ? (ch = e.chapter, e.chapter ? `<h2>${esc(e.chapter)}</h2>` : '') : ''}<p class="q">${esc(e.label)}</p><p class="a">${esc(e.text)}</p>`).join(''));
+  }
+  // Drei Wiederholungstermine als Kalenderdatei (iCalendar): morgen, in einer Woche, in einem Monat (Cepeda u. a. 2006). Läuft offline, ohne Dienst.
+  function calendarIcs(b, now) {
+    const start = now || new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const day = d => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+    const stamp = `${day(start)}T${pad(start.getHours())}${pad(start.getMinutes())}00`;
+    const clean = t => String(t || '').replace(/[\\;,]/g, m => '\\' + m).replace(/\r?\n/g, '\\n');
+    const title = T('kalenderTitel').replace('{k}', plainTitle(course.title));
+    const plan = certPlan(b);
+    // Drei Fragen aus dem Kurs (bewertete zuerst), damit der Termin eine Abrufübung ist und kein leerer Platzhalter
+    const deckRetry = pages.flatMap(p => (p.blocks || []).filter(x => x.type === 'kartenstapel')).flatMap(x => deckResult(x).retry).map(c => plainText(c.front));
+    const fragen = [...new Set(deckRetry)].concat(items.filter(it => it.q && it.q.question).sort((a, c) => (c.graded ? 1 : 0) - (a.graded ? 1 : 0)).map(it => plainText(it.q.question))).slice(0, 3).map((t, i) => `${i + 1}. ${t}`);
+    // Wissensnuggets aus „Kurz gefragt“: Frage oben, Auflösung mit Abstand darunter, damit erst erinnert und dann nachgelesen wird
+    const nuggets = pages.flatMap(p => (p.blocks || []).filter(kfHasFact)).slice(0, 2).map(x => `${T('kalenderNugget')} ${plainText(x.question)}\n\n\n${T('kalenderAufloesung')}: ${plainText(x.fact)}`);
+    // Transferstrecke: jeder Termin ein anderer Impuls (abrufen, anwenden, weitergeben) statt dreimal derselbe Text
+    const imp = certImpulses(b);
+    const descOf = x => {
+      const kind = x.kind || (x.text ? '' : 'abruf');
+      const head = x.text || (kind === 'anwenden' ? T('impulsAnwenden') : kind === 'teilen' ? T('impulsTeilen') : T('impulsAbruf'));
+      return [head, plan ? `${T('deinVorsatz')}: ${plan}` : '', kind === 'abruf' && fragen.length ? `${T('kalenderFragen')}\n${fragen.join('\n')}` : '', kind === 'anwenden' && nuggets.length ? '\n' + nuggets.join('\n\n') : ''].filter(Boolean).join('\n');
+    };
+    const ev = (d, sum, desc, i) => `BEGIN:VEVENT\r\nUID:${course.id || 'kurs'}-${b.id}-${i}-${day(d)}@kurs\r\nDTSTAMP:${stamp}\r\nDTSTART;VALUE=DATE:${day(d)}\r\nDTEND;VALUE=DATE:${day(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1))}\r\nSUMMARY:${clean(sum)}\r\nDESCRIPTION:${clean(desc)}\r\nEND:VEVENT`;
+    const events = imp.map((x, i) => ev(new Date(start.getFullYear(), start.getMonth(), start.getDate() + (+x.days || 1)), `${x.title || title} (${i + 1}/${imp.length})`, descOf(x), i));
+    // Anwendungsanlass: Termin am Vortag mit Spickzettel (Vorsatz plus Kernaussagen)
+    const an = certAnlass(b);
+    if (an) {
+      const [y, m, dd] = an.split('-').map(Number), d = new Date(y, m - 1, dd - 1);
+      const tips = [];
+      pages.forEach(p => (p.blocks || []).forEach(x => { if (x.type === 'takeaways') (x.items || []).forEach(it => it.title && tips.push('- ' + plainText(it.title))); }));
+      events.push(ev(d, T('anlassTitel').replace('{k}', plainTitle(course.title)), [T('anlassText'), plan ? `${T('deinVorsatz')}: ${plan}` : '', tips.slice(0, 5).join('\n')].filter(Boolean).join('\n'), 'a'));
+    }
+    return `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Kurs//DE\r\nCALSCALE:GREGORIAN\r\n${events.join('\r\n')}\r\nEND:VCALENDAR\r\n`;
+  }
+  // ---------- Transfer nach dem Kurs (Transferforschung: Baldwin & Ford 1988, Blume u. a. 2010; Muster bildungsinnovator) ----------
+  const IMPULSE_STD = [{ days: 1, kind: 'abruf' }, { days: 7, kind: 'anwenden' }, { days: 30, kind: 'teilen' }];
+  const certImpulses = b => Array.isArray(b.impulses) && b.impulses.filter(x => x && +x.days > 0).length ? b.impulses.filter(x => x && +x.days > 0) : IMPULSE_STD;
+  const certAnlass = b => { const v = (state.self[b.id] || {}).anlass; return /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : ''; };
+  const fmtDay = iso => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' }); };
+  function certLeadMailto(b) {
+    const k = plainTitle(course.title || ''), plan = certPlan(b), an = certAnlass(b);
+    const body = [T('fuehrungHallo'), '', T('fuehrungText').replace('{k}', k), plan || '…', an ? '\n' + T('fuehrungAnlass').replace('{d}', fmtDay(an)) : '', '', T('fuehrungBitte'), '', learnerName() || ''].join('\n');
+    return 'mailto:?subject=' + encodeURIComponent(T('fuehrungBetreff').replace('{k}', k)) + '&body=' + encodeURIComponent(body);
+  }
+  // Umsetzungs-Check: nach transferCheck.days (Standard 14) fragt der Kurs beim Wiederkommen, ob der Vorsatz umgesetzt ist; „ja“ und „teilweise“ stehen dann auf dem Zertifikat
+  const tcDays = b => { const v = b.transferCheck && b.transferCheck.days; return v == null || v === '' ? 14 : Math.max(0, +v || 0); };
+  function certApplied(b) { const tc = (state.self[b.id] || {}).tc; return tc && (tc.v === 'ja' || tc.v === 'teils') ? tc.d : ''; }
+  function transferCheckHtml(b) {
+    if (!b.transferCheck) return '';
+    const st = state.self[b.id] || {};
+    const left = Math.ceil((st.t + tcDays(b) * 864e5 - Date.now()) / 864e5);
+    if (st.tc) {
+      const msg = st.tc.v === 'nein' ? T('checkNoch') : T('checkDanke');
+      return `<div class="kp-tc kp-tc-done" data-tc="${b.id}"><p class="kp-tc-msg" tabindex="-1">${esc(msg)}</p>${st.tc.d && st.tc.v !== 'nein' ? `<p class="kp-tc-date">${esc(T('angewendetAm').replace('{d}', fmtDay(st.tc.d)))}</p>` : ''}</div>`;
+    }
+    if (left > 0) return `<p class="kp-cert-hint kp-tc-wait" data-tc-wait>${esc(T('checkWarte').replace('{n}', left))}</p>`;
+    const opt = (v, l) => `<label class="kp-tc-opt"><input type="radio" name="tc-${b.id}" value="${v}"> <span>${esc(l)}</span></label>`;
+    return `<div class="kp-tc" data-tc="${b.id}" role="group" aria-label="${esc(T('checkTitel'))}">
+      <p class="kp-tc-q"><strong>${esc((b.transferCheck && b.transferCheck.question) || T('checkTitel'))}</strong></p>
+      <div class="kp-tc-opts">${opt('ja', T('checkJa'))}${opt('teils', T('checkTeils'))}${opt('nein', T('checkNein'))}</div>
+      <label class="kp-tc-what"><span>${esc(T('checkWas'))}</span><textarea data-tc-text rows="2"></textarea></label>
+      <button class="kp-btn" data-tc-save="${b.id}">${esc(T('checkSpeichern'))}</button></div>`;
+  }
+  function renderCertificate(b) {
+    const st = certReady(b);
+    const motif = certMotif(b);
+    if (st.ok) { const s0 = state.self[b.id] = state.self[b.id] || {}; if (!s0.t) s0.t = Date.now(); }
+    const an = certAnlass(b), imp = certImpulses(b);
+    const hint = b.impulses ? T('kalenderHinweisN').replace('{n}', imp.length).replace('{t}', imp.map(x => +x.days).join(', ')) : T('kalenderHinweis');
+    return `<div class="kp-cert ${motif ? 'kp-cert-motif' : ''}" data-cert="${b.id}">
+      ${motif ? `<div class="kp-cert-pic${/\.svg($|\?)|^data:image\/svg/i.test(motif) ? ' kp-cert-drawing' : ''}" aria-hidden="true"><img src="${esc(motif)}" alt="" loading="lazy"></div>` : ''}
+      <div class="kp-cert-body">
+      <div class="kp-cert-icon" aria-hidden="true">${icon('trophy', 'kp-ico-lg')}</div>
+      <h2 class="kp-q">${esc(b.title || 'Teilnahmezertifikat')}</h2>
+      ${st.ok ? `${learnerName() ? `<p class="kp-cert-name">${esc(learnerName())}</p>` : `<div><input type="text" data-cert-name placeholder="${esc(T('zertName'))}" aria-label="${esc(T('zertName'))}"></div>`}
+        ${planCard(b)}
+        ${b.anlass ? `<label class="kp-cert-anlass"><span>${esc(T('anlassFrage'))}</span><input type="date" data-cert-anlass="${b.id}" value="${esc(an)}"><small>${esc(T('anlassHinweis'))}</small></label>` : ''}
+        <div class="kp-quiz-actions kp-cert-actions"><button class="kp-btn" data-cert-open="${b.id}">Zertifikat anzeigen und drucken</button>
+        ${b.calendar !== false ? `<button class="kp-btn kp-sec" data-cert-ics="${b.id}">${icon('calendar')} ${T('kalenderKnopf')}</button>` : ''}
+        ${b.lead ? `<a class="kp-btn kp-sec" data-cert-lead="${b.id}" href="${esc(certLeadMailto(b))}">${icon('mail')}${esc(T('fuehrungKnopf'))}</a>` : ''}</div>
+        ${b.calendar !== false ? `<p class="kp-cert-hint">${esc(hint)}</p>` : ''}
+        ${transferCheckHtml(b)}` : `<p>${esc(st.why)}</p>`}
+      </div>
+    </div>`;
+  }
+  function printWindow(title, css, body) {
+    const w = window.open('', '_blank');
+    if (!w) { alert('Bitte erlaube Pop-up-Fenster, um drucken zu können.'); return; }
+    w.document.write(`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${css}</style></head><body>${body}</body></html>`);
+    w.document.close();
+    setTimeout(() => w.print(), 500);
+  }
+  function openCertificate(b) {
+    const s = graded().length ? score() : null;
+    const name = learnerName() || (opts.preview ? 'Max Mustermann' : '');
+    const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: 'long', year: 'numeric' });
+    const primary = theme.primary || '#1f3a5f', accent = theme.accent || '#c8781a';
+    const motif = certMotif(b);
+    const logo = chrome.logo && chrome.logo.src ? `<img class="logo" src="${esc(res(chrome.logo.src))}" alt="${esc(chrome.logo.alt || '')}">` : '';
+    const a = achievements();
+    const facts = [a.pagesTotal ? `${a.pagesTotal} Seiten` : '', a.chaptersTotal ? `${a.chaptersTotal} Kapitel` : '', a.questions ? `${a.questions} Testfragen` : '', `${estimateMinutes()} Minuten Lernzeit`].filter(Boolean).join(' · ');
+    printWindow('Zertifikat', `
+      @page { size: A4 landscape; margin: 0; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { margin: 0; font-family: ${theme.font || 'Georgia, serif'}; color: #1d2530; background: #eee; }
+      .page { width: 297mm; height: 210mm; margin: 0 auto; background: #fff; box-sizing: border-box; display: flex; overflow: hidden; }
+      .band { width: 92mm; flex: none; position: relative; background: linear-gradient(160deg, ${primary}, color-mix(in srgb, ${primary} 55%, ${accent})); color: #fff; overflow: hidden; }
+      .band img.motif { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .band .veil { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, ${primary} 35%, transparent), color-mix(in srgb, ${primary} 92%, #000) 100%); }
+      .band .deco { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); width: 46mm; height: 46mm; opacity: .28; }
+      .band .course { position: absolute; left: 12mm; right: 10mm; bottom: 14mm; font-size: 17px; font-weight: 600; line-height: 1.35; text-shadow: 0 1px 4px rgba(0,0,0,.35); }
+      .band .course small { display: block; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; opacity: .85; margin-bottom: 4mm; }
+      .main { flex: 1; position: relative; padding: 18mm 20mm 16mm 18mm; display: flex; flex-direction: column; justify-content: center; }
+      .main::before { content: ""; position: absolute; inset: 8mm 8mm 8mm 0; border: 1px solid ${accent}; border-left: 0; opacity: .5; }
+      .logo { position: absolute; top: 12mm; right: 14mm; max-height: 16mm; max-width: 50mm; }
+      h1 { font-size: 34px; letter-spacing: .12em; text-transform: uppercase; color: ${primary}; margin: 0 0 10mm; }
+      .name { font-size: 34px; font-weight: 700; margin: 5mm 0; border-bottom: 2px solid ${accent}; display: inline-block; padding: 0 8mm 3mm 0; }
+      .course-t { font-size: 22px; font-weight: 600; color: ${primary}; margin: 4mm 0; }
+      .muted { color: #5d6877; font-size: 15px; }
+      .facts { color: #5d6877; font-size: 13px; margin-top: 3mm; }
+      .text { max-width: 150mm; margin: 6mm 0 0; font-size: 15px; line-height: 1.5; }
+      .plan { border-left: 3px solid ${accent}; padding-left: 5mm; font-style: italic; } .plan small { display: block; font-style: normal; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #5d6877; margin-bottom: 1mm; }
+      .foot { display: flex; justify-content: space-between; margin-top: 14mm; font-size: 14px; gap: 10mm; }
+      .foot div { min-width: 55mm; border-top: 1px solid #999; padding-top: 2mm; }
+      @media print { body { background: #fff; } .page { margin: 0; } }`,
+      `<div class="page">
+        <div class="band">${motif ? `<img class="motif" src="${esc(motif)}" alt="">` : ''}<div class="veil"></div>
+          ${motif ? '' : `<svg class="deco" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">${ICONS.trophy}</svg>`}
+          <div class="course"><small>Zertifikat</small>${esc(plainTitle(course.title))}</div>
+        </div>
+        <div class="main">${logo}
+          <h1>${esc(b.title || 'Teilnahmezertifikat')}</h1>
+          <div class="muted">Hiermit wird bestätigt, dass</div>
+          <div><span class="name">${esc(name || ' ')}</span></div>
+          <div class="muted">den Kurs</div>
+          <div class="course-t">${esc(plainTitle(course.title))}</div>
+          <div class="muted">erfolgreich abgeschlossen hat${s && b.showScore !== false ? ` (Ergebnis: ${s.pct} %)` : ''}.</div>
+          <div class="facts">${esc(facts)}</div>
+          ${b.text ? `<div class="text">${esc(b.text)}</div>` : ''}
+          ${certPlan(b) ? `<div class="text plan"><small>${esc(T('deinVorsatz'))}</small>${esc(certPlan(b))}</div>` : ''}
+          ${certApplied(b) ? `<div class="text plan"><small>${esc(T('angewendetAm').replace('{d}', fmtDay(certApplied(b))))}</small>${esc(String(loadText(b.id + '~check') || '').trim())}</div>` : ''}
+          <div class="foot"><div>${esc(date)}</div><div>${esc(b.signer || '')}</div></div>
+        </div>
+      </div>`);
+  }
+  function printPlan(b) {
+    const v = loadText(b.id) || [];
+    printWindow(b.title || 'Umsetzungsplan', `body { font-family: ${theme.font || 'Segoe UI, sans-serif'}; color: #1d2530; max-width: 720px; margin: 30px auto; padding: 0 20px; }
+      h1 { color: ${theme.primary || '#1f3a5f'}; } h2 { font-size: 15px; margin: 22px 0 6px; color: #5d6877; text-transform: uppercase; letter-spacing: .05em; }
+      p { white-space: pre-wrap; border-left: 3px solid ${theme.accent || '#c8781a'}; padding: 6px 0 6px 12px; margin: 0; min-height: 1.4em; }`,
+      `<h1>${esc(b.title || 'Mein Umsetzungsplan')}</h1><p style="border:0;padding:0;color:#5d6877">${esc(course.title)} · ${new Date().toLocaleDateString('de-DE')}</p>
+      ${(b.fields || []).map((f, i) => `<h2>${esc(f.label)}</h2><p>${esc(v[i] || '')}</p>`).join('')}`);
+  }
+
+  // ---------- Kapitelübersicht, Kernbotschaft, Denkpause, Kernaussagen, Quellen ----------
+  // Kapitel in Reihenfolge der Seiten, mit Seiten und geschätzter Dauer
+  function chapterList(all) {
+    // Eine Schätzung für alles: kursZeit() rechnet je Kapitel (Titelbereich und Ergebnis nehmen die Summe)
+    const list = kursZeit(pages).chapters;
+    return all ? list : list.filter(c => c.name);
+  }
+
+  function renderChapters(b) {
+    const maxOk = unlockedUpTo();
+    const own = pages.findIndex(p => (p.blocks || []).some(x => x.id === b.id));
+    const liste = chapterList().filter(c => !c.pages.includes(own) || c.pages.length > 1);
+    // Zwei Darstellungen: Karten (Standard) oder eine ruhige Liste mit Trennlinien
+    const zeilen = () => liste.map((c, n) => {
+      const cfg = (b.cards || []).find(x => x.chapter === c.name) || {};
+      const seen = c.pages.filter(i => state.visited.has(i)).length;
+      const done = seen === c.pages.length;
+      const target = c.pages.find(i => !state.visited.has(i) && i !== own);
+      const goTo = done || target == null ? c.pages[0] : target;
+      const locked = set.gating && c.pages[0] > maxOk;
+      const anteil = c.pages.length ? seen / c.pages.length : 0;
+      const stand = done ? T('erledigt') : seen ? `${T('inArbeit')} · ${seen}/${c.pages.length}` : T('offen');
+      return `<button type="button" class="kp-chl-item fx-reveal ${done ? 'is-done' : ''}" data-goto="${goTo}" ${locked ? 'disabled' : ''}>
+        <span class="kp-chl-num" aria-hidden="true">${String(n + 1).padStart(2, '0')}</span>
+        <span class="kp-chl-main">
+          <span class="kp-chl-title">${accent(String(c.name).replace(/^\d+[\s.:·)-]+(?=\S)/, ''))}</span>
+          ${cfg.text ? `<span class="kp-chl-text">${esc(cfg.text)}</span>` : ''}
+        </span>
+        <span class="kp-chl-meta">${locked ? T('gesperrt') : `${T('ca')} ${c.minutes} ${T('min')}`}</span>
+        <span class="kp-sr">${esc(stand)}</span>
+        ${ring(anteil, done)}
+      </button>`;
+    }).join('');
+    const cards = liste.map((c, n) => {
+      const cfg = (b.cards || []).find(x => x.chapter === c.name) || {};
+      const seen = c.pages.filter(i => state.visited.has(i)).length;
+      const done = seen === c.pages.length;
+      const target = c.pages.find(i => !state.visited.has(i) && i !== own);
+      const goTo = done || target == null ? c.pages[0] : target;
+      const locked = set.gating && c.pages[0] > maxOk;
+      const status = done ? `<span class="kp-ch-status done">${icon('check')} ${T('erledigt')}</span>` : seen ? `<span class="kp-ch-status">${T('inArbeit')} · ${seen}/${c.pages.length}</span>` : `<span class="kp-ch-status">${T('offen')}</span>`;
+      const img = cfg.image && cfg.image.src ? `<img loading="lazy" decoding="async" src="${esc(res(cfg.image.src))}" alt="${esc(cfg.image.alt || '')}">` : '';
+      // Große Nummer (Vorbild bildungsinnovator-Kapitelbilder): Ziffer riesig hinter dem Foto statt Foto allein
+      const media = b.look === 'nummern'
+        ? `<div class="kp-ch-media kp-nc-stage"><span class="kp-nc-num" aria-hidden="true">${String(n + 1).padStart(2, '0')}</span>${img ? img.replace('<img ', '<img class="kp-nc-img" ') : ''}</div>`
+        : `<div class="kp-ch-media">${img || `<div class="kp-ch-num" aria-hidden="true">${String(n + 1).padStart(2, '0')}</div>`}</div>`;
+      return `<article class="kp-ch-card${b.look === 'nummern' ? ' kp-ch-nummer' : ''} fx-reveal ${done ? 'is-done' : ''}">
+        ${media}
+        <div class="kp-ch-body">
+          <p class="kp-eyebrow">${T('kapitel')} ${n + 1}</p>
+          <h3 class="kp-ch-title">${accent(String(c.name).replace(/^\d+[\s.:·)-]+(?=\S)/, ''))}</h3>
+          ${cfg.text ? `<p class="kp-ch-text">${esc(cfg.text)}</p>` : ''}
+          <div class="kp-ch-meta"><span>${icon('clock')} ${T('ca')} ${c.minutes} ${T('min')}</span>${status}</div>
+          <button class="kp-btn ${done ? 'kp-sec' : ''}" data-goto="${goTo}" ${locked ? 'disabled' : ''}>${locked ? 'Noch gesperrt' : done ? T('nochmal') : seen ? T('fortsetzen') : T('starten')}</button>
+        </div>
+      </article>`;
+    }).join('');
+    if (b.look === 'ueberblick') return renderUeberblick(b, liste, own, maxOk);
+    const leer = '<p class="kp-lock">Noch keine Kapitel. Kapitel vergibst du in den Seiteneinstellungen.</p>';
+    // Überblick als Startseite (Vorbild bildungsinnovator „ChatGPT Basics“, „Digitale Wissensquellen“): oben Dauer und zwei
+    // Fortschrittsringe (gelesen, geübt) mit „Weiter“, darunter die Kapitel als Fotokarten über die ganze Breite
+    if (b.look === 'start') {
+      const a = achievements();
+      const pct = (x, y) => y ? Math.round(x / y * 100) : 0;
+      const next = pages.findIndex((p, i) => i > own && !p.result && !state.visited.has(i));
+      const gauge = (v, label) => { const u = 2 * Math.PI * 34; return `<div class="kp-chs-gauge"><svg viewBox="0 0 80 80" aria-hidden="true"><circle class="kp-ring-bg" cx="40" cy="40" r="34"></circle><circle class="kp-ring-on" cx="40" cy="40" r="34" stroke-dasharray="${u.toFixed(2)}" stroke-dashoffset="${(u * (1 - v / 100)).toFixed(2)}" transform="rotate(-90 40 40)"></circle></svg><span class="kp-chs-val">${v} %</span><span class="kp-chs-lab">${esc(label)}</span></div>`; };
+      const karten = liste.map((c, n) => {
+        const cfg = (b.cards || []).find(x => x.chapter === c.name) || {};
+        const seen = c.pages.filter(i => state.visited.has(i)).length, done = seen === c.pages.length;
+        const target = c.pages.find(i => !state.visited.has(i) && i !== own), goTo = done || target == null ? c.pages[0] : target;
+        const locked = set.gating && c.pages[0] > maxOk;
+        const pic = (cfg.image && cfg.image.src) || chapterImage(c);
+        return `<button type="button" class="kp-chs-card fx-reveal${done ? ' is-done' : ''}" data-goto="${goTo}" ${locked ? 'disabled' : ''} style="--kp-i:${n}">
+          <span class="kp-chs-pic">${pic ? `<img src="${esc(res(pic))}" alt="" loading="lazy">` : ''}<span class="kp-chs-num" aria-hidden="true">${String(n + 1).padStart(2, '0')}</span></span>
+          <span class="kp-chs-body"><span class="kp-chs-title">${accent(String(c.name).replace(/^\d+[\s.:·)-]+(?=\S)/, ''))}</span>${cfg.text ? `<span class="kp-chs-text">${esc(cfg.text)}</span>` : ''}
+          <span class="kp-chs-meta">${icon('clock')} ${locked ? T('gesperrt') : `${T('ca')} ${c.minutes} ${T('min')}`}${ring(c.pages.length ? seen / c.pages.length : 0, done)}<span class="kp-sr">${esc(done ? T('erledigt') : seen ? T('inArbeit') : T('offen'))}</span></span></span>
+        </button>`;
+      }).join('');
+      return `<div class="kp-chapters kp-ch-start">
+        <div class="kp-chs-top"><div class="kp-chs-head">${eyebrow(b.eyebrow || T('ueberblick'))}${b.title || (pages[own] || {}).hideTitle ? `<h2 class="kp-sec-title">${accent(b.title || pages[own].title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+          <p class="kp-chs-facts">${icon('clock')} ${T('ca')} ${estimateMinutes()} ${T('minuten')} · ${liste.length} ${T('kapitelPl')}</p></div>
+          <div class="kp-chs-gauges">${gauge(pct(a.seen, a.pagesTotal), T('gelesen'))}${gauge(pct(a.exDone, a.ex), T('geuebt'))}${next >= 0 ? `<button type="button" class="kp-btn" data-goto="${next}">${a.seen > 1 ? T('fortsetzen') : T('starten')}</button>` : ''}</div></div>
+        <div class="kp-chs-row" style="--n:${liste.length > 10 ? Math.min(6, Math.ceil(liste.length / 2)) : Math.max(1, Math.min(5, liste.length))}">${karten || leer}</div>
+      </div>`;
+    }
+    const inhalt = b.look === 'liste'
+      ? `<div class="kp-chl">${zeilen() || leer}</div>`
+      : `<div class="kp-ch-grid${b.look === 'nummern' ? ' kp-ch-nummern' : ''}">${cards || leer}</div>`;
+    return `<div class="kp-chapters ${b.look === 'liste' ? 'kp-ch-quiet' : ''}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+      ${inhalt}
+    </div>`;
+  }
+
+  // Erstes Bild eines Kapitels: Folienfoto, Titelbild, Foto-Abschnitt, Bild eines Bausteins
+  function chapterImage(c) {
+    for (const i of c.pages) {
+      const p = pages[i] || {};
+      if (p.bgImage && p.bgImage.src) return p.bgImage.src;
+      for (const b of p.blocks || []) {
+        const d = b.design || {};
+        if (d.bgImage && d.bgImage.src) return d.bgImage.src;
+        const own = ownImage(b);
+        if (own && !/\.svg|data:image\/svg/.test(own)) return own;
+      }
+    }
+    return '';
+  }
+  // Überblick (Vorbild Rise-Kurs „ChatGPT“): Dauer und Hilfe-Tour links, zwei Halbbögen für Lesefortschritt und
+  // Lernerfolg mit je einem Knopf, darunter die Kapitel als Fotokarten mit dem Kapitelnamen als Frage
+  function renderUeberblick(b, liste, own, maxOk) {
+    const content = pages.map((p, i) => p.result || p.extra ? -1 : i).filter(i => i >= 0);
+    const lese = content.length ? Math.round(content.filter(i => state.visited.has(i)).length / content.length * 100) : 0;
+    const offenSeite = content.filter(i => !state.visited.has(i));
+    const weiter = offenSeite.length ? (offenSeite.find(i => i > own) != null ? offenSeite.find(i => i > own) : offenSeite[0]) : Math.min(own + 1, pages.length - 1);
+    const g = graded();
+    const s = score();
+    const offen = g.find(it => itemFraction(it) == null);
+    const fragenZiel = offen ? offen.pageIndex : (g.length ? g[g.length - 1].pageIndex : -1);
+    const min = estimateMinutes();
+    const bogen = (key, pct, info, label, ziel) => {
+      const id = `${b.id}-${key}`;
+      const locked = set.gating && ziel > maxOk;
+      return `<div class="kp-ov-gauge fx-reveal">
+        <svg class="kp-ov-arc" viewBox="0 0 200 104" aria-hidden="true">
+          <path class="kp-ov-arc-bg" d="M8 100 A92 92 0 0 1 192 100" pathLength="100"></path>
+          <path class="kp-ov-arc-on" d="M8 100 A92 92 0 0 1 192 100" pathLength="100" stroke-dasharray="${pct} 100"></path>
+        </svg>
+        <p class="kp-ov-pct">${pct}&nbsp;%</p>
+        <p class="kp-ov-label">${esc(T(key))} <button type="button" class="kp-ov-info" data-ov-info aria-expanded="false" aria-controls="${id}" aria-label="${esc(T('ovInfo') + ': ' + T(key))}">i</button></p>
+        <p class="kp-ov-tip" id="${id}" hidden>${esc(T(info))}</p>
+        <button type="button" class="kp-btn kp-ov-go" data-goto="${ziel}" ${locked ? 'disabled' : ''}>${esc(T(label))}</button>
+      </div>`;
+    };
+    const cards = liste.map((c, n) => {
+      const cfg = (b.cards || []).find(x => x.chapter === c.name) || {};
+      const seen = c.pages.filter(i => state.visited.has(i)).length;
+      const done = seen === c.pages.length;
+      const target = c.pages.find(i => !state.visited.has(i) && i !== own);
+      const goTo = done || target == null ? c.pages[0] : target;
+      const locked = set.gating && c.pages[0] > maxOk;
+      const img = cfg.image && cfg.image.src ? `<img loading="lazy" decoding="async" src="${esc(res(cfg.image.src))}" alt=""${focusStyle(cfg.image)}>` : `<span class="kp-ov-num" aria-hidden="true">${String(n + 1).padStart(2, '0')}</span>`;
+      const stand = done ? T('erledigt') : seen ? `${T('inArbeit')} · ${seen}/${c.pages.length}` : T('offen');
+      return `<button type="button" class="kp-ov-card fx-reveal ${done ? 'is-done' : ''}" data-goto="${goTo}" ${locked ? 'disabled' : ''}>
+        <span class="kp-ov-pic">${img}${done ? `<span class="kp-ov-done" aria-hidden="true">${icon('check')}</span>` : ''}</span>
+        <span class="kp-ov-title">${accent(String(c.name).replace(/^\d+[\s.:·)-]+(?=\S)/, ''))}</span>
+        <span class="kp-sr">${esc(T('kapitel') + ' ' + (n + 1) + ', ' + stand)}</span>
+      </button>`;
+    }).join('');
+    return `<div class="kp-ov">
+      <div class="kp-ov-top">
+        <div class="kp-ov-head">
+          <h2 class="kp-ov-h">${accent(b.title || T('ueberblick'))}</h2>
+          ${b.intro ? `<div class="kp-text kp-ov-intro">${res(b.intro)}</div>` : ''}
+          <ul class="kp-ov-facts">
+            <li>${icon('clock')}<span>${esc(min === 1 ? T('ovDauer1') : T('ovDauer').replace('{n}', min))}</span></li>
+            ${set.tour === true ? `<li><span class="kp-ov-q" aria-hidden="true">?</span><button type="button" class="kp-ov-link" data-tour>${esc(T('ovTour'))}</button></li>` : ''}
+          </ul>
+        </div>
+        ${bogen('ovLese', lese, 'ovLeseInfo', 'ovWeiterlesen', weiter)}
+        ${g.length ? bogen('ovLern', s.pct, 'ovLernInfo', 'ovFragen', fragenZiel) : ''}
+      </div>
+      <div class="kp-ov-grid" style="--n:${Math.min(5, Math.max(1, liste.length))}">${cards}</div>
+    </div>`;
+  }
+
+  // Fortschrittsring am Ende einer Kapitelzeile: leer, teilweise gefüllt oder mit Haken
+  function ring(anteil, fertig) {
+    const u = 2 * Math.PI * 9;
+    const an = Math.max(0, Math.min(1, anteil)) * u;
+    return `<svg class="kp-chl-ring ${fertig ? 'is-done' : ''}" viewBox="0 0 22 22" aria-hidden="true">
+      <circle class="kp-chl-ring-bg" cx="11" cy="11" r="9"></circle>
+      ${fertig
+        ? '<circle class="kp-chl-ring-fill" cx="11" cy="11" r="9"></circle><path class="kp-chl-ring-check" d="M7.2 11.2l2.6 2.6 5-5.2"></path>'
+        : `<circle class="kp-chl-ring-on" cx="11" cy="11" r="9" stroke-dasharray="${an.toFixed(2)} ${(u - an).toFixed(2)}" transform="rotate(-90 11 11)"></circle>`}
+    </svg>`;
+  }
+
+  function renderStatement(b) {
+    // Stimme mit Foto (Vorbild „Alicia organisiert die Daten“): Foto oben, dunkles Namensschild ragt hinein, das Zitat darunter
+    if (b.style === 'foto') return `<div class="kp-statement kp-statement-foto">
+      <figure class="kp-st-foto">${b.image && b.image.src ? `<img src="${esc(res(b.image.src))}" alt="${esc(b.image.alt || '')}" loading="lazy"${focusStyle(b.image)}>` : ''}${b.author || b.eyebrow ? `<figcaption class="kp-st-label">${esc(b.eyebrow || b.author)}</figcaption>` : ''}</figure>
+      <p class="kp-statement-text">${accent(b.text)}</p>
+      ${b.author && b.eyebrow ? `<p class="kp-author">${esc(b.author)}${b.authorRole ? `<span>${esc(b.authorRole)}</span>` : ''}</p>` : (b.authorRole ? `<p class="kp-author"><span>${esc(b.authorRole)}</span></p>` : '')}
+      ${b.sub ? `<div class="kp-text kp-statement-sub">${res(b.sub)}</div>` : ''}
+    </div>`;
+    return `<div class="kp-statement kp-statement-${b.style || 'center'}">
+      ${b.icon ? icon(b.icon, 'kp-ico-lg') : ''}
+      ${eyebrow(b.eyebrow)}
+      <p class="kp-statement-text">${accent(b.text)}</p>
+      ${b.author ? `<p class="kp-author">${esc(b.author)}${b.authorRole ? `<span>${esc(b.authorRole)}</span>` : ''}</p>` : ''}
+      ${b.sub ? `<div class="kp-text kp-statement-sub">${res(b.sub)}</div>` : ''}
+    </div>`;
+  }
+
+  // Sechs Foliendesigns nach der bildungsinnovator-Bibliothek (16.10.2026). Zeitleiste mit Fotos (Vorbild „Woher kommt der
+  // Begriff Nachhaltigkeit?“): waagerechte Linie mit nummerierten Punkten, runde Fotos abwechselnd über und unter der Linie,
+  // Jahreszahl als Titel. Unter 760 px steht sie senkrecht wie die normale Zeitleiste.
+  function renderTimelineFotos(b) {
+    const items = b.items || [];
+    return `<div class="kp-tl-fotos" style="--n:${Math.max(1, items.length)}">${itemsHtml(items, (it, i) => `<div class="kp-tlf-item fx-reveal" style="--kp-i:${i}">
+      <div class="kp-tlf-pic">${it.image && it.image.src ? `<img src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : `<span class="kp-tlf-empty" aria-hidden="true">${i + 1}</span>`}</div>
+      <span class="kp-tlf-dot" aria-hidden="true">${i + 1}</span>
+      <div class="kp-tlf-body"><h3>${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}</div>
+    </div>`)}</div>`;
+  }
+  // Kennzahlen als Ringe (Vorbild „Motivation entsteht nicht von allein“: 21 % · 50 % · 33 % · 22 % als Kreisdiagramme in einer
+  // Reihe): je Wert ein Ring in der Akzentfarbe, der sich beim Sichtbarwerden füllt (kp-ring-in), die Zahl zählt hoch (data-count)
+  function renderRinge(b) {
+    const items = (b.items || []).filter(Boolean);
+    const u = 2 * Math.PI * 50;
+    return `<div class="kp-ringe">
+      ${b.eyebrow || b.title || plainText(b.intro) ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+      <div class="kp-ringe-row" style="--n:${Math.max(1, items.length)}">${items.map((it, i) => {
+        const v = Math.max(0, Math.min(100, Number(String(it.value).replace(',', '.')) || 0)), max = Number(it.max) > 0 ? Number(it.max) : 100;
+        const share = Math.max(0, Math.min(1, v / max)), unit = it.unit == null ? '%' : it.unit;
+        const shown = `${String(it.value == null ? '' : it.value).replace('.', ',')}${unit ? ' ' + unit : ''}`.trim();
+        return `<figure class="kp-ring fx-reveal" style="--kp-i:${i}">
+          <div class="kp-ring-dial" role="img" aria-label="${esc(shown)}: ${esc(plainText(it.label))}">
+            <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="kp-ring-bg" cx="60" cy="60" r="50"></circle><circle class="kp-ring-on" cx="60" cy="60" r="50" stroke-dasharray="${u.toFixed(2)}" stroke-dashoffset="${(u * (1 - share)).toFixed(2)}" style="--kp-ring-u:${u.toFixed(2)}" transform="rotate(-90 60 60)"></circle></svg>
+            <b class="kp-ring-val" data-count data-count-to="${esc(shown)}">${esc(shown)}</b>
+          </div>
+          <figcaption><strong>${esc(plainText(it.label))}</strong>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}</figcaption>
+        </figure>`;
+      }).join('')}</div>
+      ${b.source ? `<p class="kp-bignum-source kp-ringe-source">${esc(b.source)}</p>` : ''}
+    </div>`;
+  }
+  // Pyramide (Vorbild „Recruiting: Auswahlprozess in 7 Stufen“): Stufen von oben nach unten breiter, nummeriert von der Basis
+  // (numbering 'unten') oder von der Spitze; ein Klick öffnet die Erklärung rechts daneben. Stand { open: [i], sel } in state.self.
+  function pyrLevelHtml(b, i) {
+    const lv = (b.levels || [])[i] || {};
+    return `<p class="kp-eyebrow">${esc(pyrNum(b, i))}</p><h3>${esc(lv.title || '')}</h3><div class="kp-text">${res(lv.html || '')}</div>`;
+  }
+  function pyrNum(b, i) { const n = (b.levels || []).length; return String(b.numbering === 'oben' ? i + 1 : n - i).padStart(2, '0'); }
+  function renderPyramide(b) {
+    const levels = b.levels || [], st = state.self[b.id] || {}, open = st.open || [], sel = typeof st.sel === 'number' ? st.sel : -1;
+    const infoId = 'pyr-' + b.id;
+    return `<div class="kp-pyr" data-pyr="${b.id}">
+      ${b.eyebrow || b.title || plainText(b.intro) ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+      <div class="kp-pyr-grid">
+        <div class="kp-pyr-stack" style="--n:${Math.max(1, levels.length)}" role="group" aria-label="${esc(b.hint || T('pyrHinweis'))}">${levels.map((lv, i) => `<button type="button" class="kp-pyr-level${open.includes(i) ? ' is-open' : ''}${sel === i ? ' is-sel' : ''}" data-pyr-level="${i}" style="--i:${i}" aria-expanded="${sel === i}" aria-controls="${infoId}"><span class="kp-pyr-num">${esc(pyrNum(b, i))}</span><span class="kp-pyr-title">${esc(lv.title || '')}</span></button>`).join('')}</div>
+        <div class="kp-pyr-info" id="${infoId}" role="status" aria-live="polite">${sel >= 0 ? pyrLevelHtml(b, sel) : `<p class="kp-tk-hint">${esc(b.hint || T('pyrHinweis'))}</p>`}</div>
+      </div>
+      <p class="kp-tk-hint kp-pyr-status" data-pyr-status>${esc(T('aufgedeckt').replace('{n}', open.filter(i => i < levels.length).length).replace('{z}', levels.length))}</p>
+    </div>`;
+  }
+  // Schnittmengen (Vorbild „Was sind die 3 P?“: Planet, People, Profit mit „Nachhaltigkeit“ in der Mitte): zwei oder drei
+  // überlappende Kreise als Knöpfe, Begriff in der Mitte, Klick öffnet die Erklärung darunter. Stand wie bei der Pyramide.
+  function vennInfoHtml(b, i) {
+    if (i === 'mid') return `<h3>${esc(b.center || '')}</h3><div class="kp-text">${res(b.centerHtml || '')}</div>`;
+    const c = (b.circles || [])[i] || {};
+    return `<h3>${esc(c.label || '')}</h3><div class="kp-text">${res(c.html || '')}</div>`;
+  }
+  function renderVenn(b) {
+    const circles = (b.circles || []).slice(0, 3), st = state.self[b.id] || {}, open = st.open || [], sel = st.sel;
+    const infoId = 'venn-' + b.id, n = Math.max(2, circles.length);
+    const hasMid = plainText(b.centerHtml);
+    return `<div class="kp-venn kp-venn-${n}" data-venn="${b.id}">
+      ${b.eyebrow || b.title || plainText(b.intro) ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+      <div class="kp-venn-grid">
+        <div class="kp-venn-stage" role="group" aria-label="${esc(T('vennHinweis'))}">
+          ${circles.map((c, i) => `<button type="button" class="kp-venn-c kp-venn-c${i + 1}${open.includes(i) ? ' is-open' : ''}${sel === i ? ' is-sel' : ''}" data-venn-c="${i}" aria-expanded="${sel === i}" aria-controls="${infoId}"><span>${esc(c.label || '')}</span></button>`).join('')}
+          ${b.center ? (hasMid ? `<button type="button" class="kp-venn-mid${sel === 'mid' ? ' is-sel' : ''}" data-venn-mid aria-expanded="${sel === 'mid'}" aria-controls="${infoId}">${esc(b.center)}</button>` : `<span class="kp-venn-mid">${esc(b.center)}</span>`) : ''}
+        </div>
+        <div class="kp-venn-info" id="${infoId}" role="status" aria-live="polite">${sel != null && sel !== -1 ? vennInfoHtml(b, sel) : `<p class="kp-tk-hint">${esc(T('vennHinweis'))}</p>`}</div>
+      </div>
+      <p class="kp-tk-hint kp-venn-status" data-venn-status>${esc(T('aufgedeckt').replace('{n}', open.filter(i => i < circles.length).length).replace('{z}', circles.length))}</p>
+    </div>`;
+  }
+
+  // Auswahlrad: Personen oder Punkte im Kreis, die Auswahl zeigt die Erklärung
+  function renderDial(b) {
+    const items = b.items || [];
+    const cur = Math.min((state.self[b.id] || {}).v || 0, Math.max(0, items.length - 1));
+    const it = items[cur] || {};
+    const p = personOf(it);
+    const r = 42;
+    const dots = items.map((x, i) => {
+      const a = (i / Math.max(1, items.length)) * 2 * Math.PI - Math.PI / 2;
+      const m = personOf(x);
+      const label = m.name || x.label || 'Punkt ' + (i + 1);
+      return `<button class="kp-dial-dot ${i === cur ? 'current' : ''}" data-dial="${b.id}" data-i="${i}"
+        style="left:${50 + r * Math.cos(a)}%;top:${50 + r * Math.sin(a)}%" aria-pressed="${i === cur}" title="${esc(label)}">
+        <span class="kp-dial-face">${m.image && m.image.src ? `<img src="${esc(res(m.image.src))}" alt=""${focusStyle(m.image)}>` : avatarSvg(m.look || 'a' + ((i % 12) + 1), m.pose)}</span>
+        <span class="kp-dial-label">${esc(label)}</span></button>`;
+    }).join('');
+    return `<div class="kp-dial" data-dialblock="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      <div class="kp-dial-stage">
+        <div class="kp-dial-ring" role="group" aria-label="${esc(b.hint || 'Auswahl')}">${dots}
+          <div class="kp-dial-center">${esc(b.centerLabel || b.hint || 'Wähle aus')}</div></div>
+        <div class="kp-dial-info" role="status">
+          <p class="kp-eyebrow">${esc(p.name || it.label || '')}${p.role ? ' · ' + esc(p.role) : ''}</p>
+          ${it.title ? `<h3>${esc(it.title)}</h3>` : ''}
+          <div class="kp-text">${res(it.html)}</div></div>
+      </div></div>`;
+  }
+
+  // Beschriftung auf höchstens zwei Zeilen umbrechen (SVG kann das nicht von selbst)
+  function wrapLines(text, max) {
+    const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return [''];
+    const lines = [words.shift()];
+    words.forEach(w => {
+      const cur = lines[lines.length - 1];
+      if (lines.length < 2 && (cur + ' ' + w).length > max) lines.push(w);
+      else lines[lines.length - 1] = cur + ' ' + w;
+    });
+    if (lines[1] && lines[1].length > max) lines[1] = lines[1].slice(0, max - 1).trim() + '…';
+    return lines;
+  }
+
+  // Animationsbibliothek: fertige SVG-Animationen, Beschriftung frei
+  function renderAnim(b) {
+    const items = (b.items || []).filter(x => String(x || '').trim());
+    const col = 'var(--kp-primary)', acc = 'var(--kp-accent)';
+    const preset = b.preset || 'arrow';
+    let art = '';
+    if (preset === 'arrow') {
+      art = `<svg viewBox="0 0 ${Math.max(300, items.length * 150)} 120" class="kp-anim-svg" aria-hidden="true">
+        ${items.map((t, i) => {
+          const x = 30 + i * 150;
+          return `<g class="kp-anim-step" style="--d:${i * 0.25}s">
+            <circle cx="${x + 30}" cy="46" r="26" fill="none" stroke="${col}" stroke-width="3" class="kp-draw" pathLength="1"/>
+            <text x="${x + 30}" y="53" text-anchor="middle" font-size="20" fill="${col}" font-weight="700">${i + 1}</text>
+            ${i < items.length - 1 ? `<path d="M${x + 62} 46 H${x + 132}" stroke="${acc}" stroke-width="3" fill="none" class="kp-draw" pathLength="1" marker-end="url(#kp-arrow)"/>` : ''}
+            <text x="${x + 30}" y="100" text-anchor="middle" font-size="14" fill="currentColor">${esc(t).slice(0, 22)}</text></g>`;
+        }).join('')}
+        <defs><marker id="kp-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0l8 4-8 4z" fill="${acc}"/></marker></defs></svg>`;
+    } else if (preset === 'bars') {
+      const vals = items.map((t, i) => Number(String(t).match(/(\d+)/) ? String(t).match(/(\d+)/)[1] : (i + 1) * 25));
+      const max = Math.max(1, ...vals);
+      art = `<div class="kp-anim-bars">${items.map((t, i) => `<div class="kp-anim-bar" style="--h:${Math.round(vals[i] / max * 100)}%;--d:${i * 0.15}s"><b>${esc(String(vals[i]))}</b><i></i><span>${esc(String(t).replace(/\s*\d+\s*%?/, '').trim() || 'Wert ' + (i + 1))}</span></div>`).join('')}</div>`;
+    } else if (preset === 'pulse') {
+      art = `<svg viewBox="0 0 120 120" class="kp-anim-svg kp-anim-pulse" aria-hidden="true">
+        <circle cx="60" cy="60" r="26" fill="${acc}" opacity=".9"/>
+        <circle cx="60" cy="60" r="26" fill="none" stroke="${acc}" stroke-width="3" class="kp-ring" />
+        <circle cx="60" cy="60" r="26" fill="none" stroke="${acc}" stroke-width="3" class="kp-ring kp-ring2" />
+        <path d="M60 46v22M60 76v2" stroke="#fff" stroke-width="6" stroke-linecap="round"/></svg>`;
+    } else if (preset === 'check') {
+      art = `<ul class="kp-anim-check">${items.map((t, i) => `<li style="--d:${i * 0.2}s"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5" fill="none" stroke="${col}" stroke-width="3" stroke-linecap="round" class="kp-draw" pathLength="1"/></svg><span>${esc(t)}</span></li>`).join('')}</ul>`;
+    } else if (preset === 'compare') {
+      art = `<div class="kp-anim-compare"><div class="kp-anim-side"><span>${esc(items[0] || 'Vorher')}</span></div><div class="kp-anim-morph">→</div><div class="kp-anim-side after"><span>${esc(items[1] || 'Nachher')}</span></div></div>`;
+    } else if (preset === 'matrix') {
+      const q = [0, 1, 2, 3].map(i => items[i] || `Feld ${i + 1}`);
+      const pos = [[48, 28], [240, 28], [48, 164], [240, 164]];
+      art = `<svg viewBox="0 0 440 340" class="kp-anim-svg" aria-hidden="true">
+        <line x1="34" y1="300" x2="424" y2="300" stroke="currentColor" stroke-width="2" opacity=".3"/>
+        <line x1="34" y1="300" x2="34" y2="14" stroke="currentColor" stroke-width="2" opacity=".3"/>
+        ${q.map((t, i) => {
+          const [x, y] = pos[i], ls = wrapLines(t, 20), top = i === 1;
+          return `<g class="kp-anim-step" style="--d:${i * 0.18}s">
+            <rect x="${x}" y="${y}" width="176" height="124" rx="10" fill="${top ? acc : col}" fill-opacity="${top ? '.18' : '.08'}" stroke="${top ? acc : 'none'}" stroke-width="2"/>
+            <text x="${x + 88}" y="${y + 66}" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor">${ls.map((l, k) => `<tspan x="${x + 88}" dy="${k ? 19 : (ls.length > 1 ? -9 : 0)}">${esc(l)}</tspan>`).join('')}</text></g>`;
+        }).join('')}
+        ${b.axisX ? `<text x="229" y="328" text-anchor="middle" font-size="13" fill="currentColor" opacity=".75">${esc(String(b.axisX).slice(0, 34))}</text>` : ''}
+        ${b.axisY ? `<text x="18" y="157" text-anchor="middle" font-size="13" fill="currentColor" opacity=".75" transform="rotate(-90 18 157)">${esc(String(b.axisY).slice(0, 34))}</text>` : ''}</svg>`;
+    } else if (preset === 'scale') {
+      const pan = (side, x, label) => `<g class="kp-anim-pan kp-pan-${side}">
+        <line x1="${x}" y1="104" x2="${x}" y2="142" stroke="${col}" stroke-width="2" opacity=".55"/>
+        <path d="M${x - 34} 142h68l-10 20h-48z" fill="${acc}" fill-opacity=".85"/>
+        <text x="${x}" y="186" text-anchor="middle" font-size="14" fill="currentColor">${esc(String(label).slice(0, 18))}</text></g>`;
+      art = `<svg viewBox="0 0 360 210" class="kp-anim-svg" aria-hidden="true">
+        <path d="M144 200h72l-12 -14h-48z" fill="${col}" fill-opacity=".85"/>
+        <line x1="180" y1="196" x2="180" y2="104" stroke="${col}" stroke-width="6" stroke-linecap="round"/>
+        <g class="kp-anim-beam"><line x1="62" y1="104" x2="298" y2="104" stroke="${col}" stroke-width="6" stroke-linecap="round"/></g>
+        ${pan('l', 62, items[0] || 'Links')}${pan('r', 298, items[1] || 'Rechts')}</svg>`;
+    } else if (preset === 'cycle') {
+      const list = items.slice(0, 6);
+      const n = Math.max(2, list.length);
+      const cx = 240, cy = 190, R = 100, gap = 0.36;
+      const ang = i => -Math.PI / 2 + i * 2 * Math.PI / n;
+      const pt = (a, r) => [Math.round((cx + r * Math.cos(a)) * 10) / 10, Math.round((cy + r * Math.sin(a)) * 10) / 10];
+      art = `<svg viewBox="0 0 480 400" class="kp-anim-svg" aria-hidden="true">
+        ${list.map((t, i) => {
+          const e = ang(i + 1) - gap, [ax, ay] = pt(ang(i) + gap, R), [bx, by] = pt(e, R);
+          const rot = Math.round(Math.atan2(Math.cos(e), -Math.sin(e)) * 180 / Math.PI), d = 0.2 + i * 0.28;
+          return `<path d="M${ax} ${ay} A${R} ${R} 0 0 1 ${bx} ${by}" fill="none" stroke="${acc}" stroke-width="3" class="kp-draw" pathLength="1" style="--d:${d}s"/>
+            <g class="kp-anim-step" style="--d:${d + 0.7}s"><path d="M-7 -6 L4 0 L-7 6z" fill="${acc}" transform="translate(${bx} ${by}) rotate(${rot})"/></g>`;
+        }).join('')}
+        ${list.map((t, i) => {
+          const c = Math.cos(ang(i)), side = Math.abs(c) > 0.3, anchor = side ? (c > 0 ? 'start' : 'end') : 'middle';
+          const [x, y] = pt(ang(i), R), [lx, ly] = pt(ang(i), side ? 134 : 146), ls = wrapLines(t, side ? 12 : 18);
+          return `<g class="kp-anim-step" style="--d:${i * 0.28}s">
+            <circle cx="${x}" cy="${y}" r="26" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>
+            <text x="${x}" y="${y + 6}" text-anchor="middle" font-size="17" font-weight="700" fill="currentColor">${i + 1}</text>
+            <text x="${lx}" y="${ly + 5}" text-anchor="${anchor}" font-size="13" fill="currentColor">${ls.map((l, k) => `<tspan x="${lx}" dy="${k ? 16 : (ls.length > 1 ? -8 : 0)}">${esc(l)}</tspan>`).join('')}</text></g>`;
+        }).join('')}</svg>`;
+    } else if (preset === 'stairs') {
+      const list = items.slice(0, 5);
+      const n = Math.max(2, list.length), w = 400 / n;
+      art = `<svg viewBox="0 0 440 280" class="kp-anim-svg" aria-hidden="true">
+        <line x1="20" y1="248" x2="420" y2="248" stroke="currentColor" stroke-width="2" opacity=".3"/>
+        ${list.map((t, i) => {
+          const h = Math.round((i + 1) / n * 190), x = 20 + i * w, last = i === n - 1;
+          return `<rect class="kp-anim-riser" style="--d:${i * 0.22}s" x="${x + 4}" y="${248 - h}" width="${w - 8}" height="${h}" rx="6" fill="${last ? acc : col}" fill-opacity="${last ? '.8' : '.14'}"/>
+            <text class="kp-anim-step" style="--d:${0.15 + i * 0.22}s" x="${x + w / 2}" y="${238 - h}" text-anchor="middle" font-size="13" fill="currentColor">${esc(String(t).slice(0, 18))}</text>`;
+        }).join('')}</svg>`;
+    } else if (preset === 'curve') {
+      const zones = items.slice(0, 3), zx = [110, 223, 350];
+      art = `<svg viewBox="0 0 440 280" class="kp-anim-svg" aria-hidden="true">
+        <line x1="44" y1="232" x2="420" y2="232" stroke="currentColor" stroke-width="2" opacity=".3"/>
+        <line x1="44" y1="232" x2="44" y2="24" stroke="currentColor" stroke-width="2" opacity=".3"/>
+        <path d="M70 216 C150 40 290 40 396 216" fill="none" stroke="${acc}" stroke-width="4" stroke-linecap="round" class="kp-draw" pathLength="1" style="--d:.1s"/>
+        <g class="kp-anim-step" style="--d:1.1s">
+          <line x1="223" y1="92" x2="223" y2="232" stroke="${col}" stroke-width="2" stroke-dasharray="5 5" opacity=".5"/>
+          <circle cx="223" cy="84" r="9" fill="${col}"/></g>
+        ${zones.map((t, i) => `<text class="kp-anim-step" style="--d:${1.3 + i * 0.18}s" x="${zx[i]}" y="${256}" text-anchor="middle" font-size="13" fill="currentColor">${esc(String(t).slice(0, 20))}</text>`).join('')}</svg>`;
+    } else if (preset === 'clock') {
+      const ticks = Array.from({ length: 12 }, (x, i) => { const a = i * Math.PI / 6, r1 = i % 3 ? 88 : 80; return `<line x1="${Math.round(120 + r1 * Math.sin(a))}" y1="${Math.round(120 - r1 * Math.cos(a))}" x2="${Math.round(120 + 96 * Math.sin(a))}" y2="${Math.round(120 - 96 * Math.cos(a))}" stroke="currentColor" stroke-width="${i % 3 ? 2 : 4}" opacity=".45" stroke-linecap="round"/>`; }).join('');
+      art = `<svg viewBox="0 0 240 240" class="kp-anim-svg kp-anim-clockface" aria-hidden="true">
+        <circle cx="120" cy="120" r="104" fill="${col}" fill-opacity=".06" stroke="${col}" stroke-width="4"/>${ticks}
+        <line class="kp-clock-h" x1="120" y1="120" x2="120" y2="72" stroke="${col}" stroke-width="8" stroke-linecap="round"/>
+        <line class="kp-clock-m" x1="120" y1="120" x2="120" y2="38" stroke="${acc}" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="120" cy="120" r="8" fill="${col}"/></svg>
+        ${items[0] ? `<p class="kp-anim-scene-label kp-anim-step" style="--d:2.3s">${esc(items[0])}</p>` : ''}`;
+    } else if (preset === 'calendar') {
+      const list = (items.length ? items : ['Januar', 'April', 'Dezember']).slice(0, 6);
+      art = `<div class="kp-anim-cal">${list.map((t, i) => `<div class="kp-cal-sheet" style="--d:${0.4 + i * 0.75}s;z-index:${list.length - i}"><span class="kp-cal-rings" aria-hidden="true"><i></i><i></i></span><b>${esc(String(t).slice(0, 24))}</b></div>`).join('')}</div>`;
+    } else if (preset === 'message') {
+      const list = (items.length ? items : ['Lea: Hast Du kurz Zeit?']).slice(0, 5);
+      let first = null;
+      art = `<div class="kp-anim-msg"><div class="kp-msg-phone">${list.map((t, i) => {
+        const m = String(t).match(/^([^:]{1,24}):\s*([\s\S]+)$/), who = m ? m[1].trim() : '', txt = m ? m[2] : String(t);
+        if (who && first == null) first = who;
+        const mine = who && who !== first;
+        return `<div class="kp-msg${mine ? ' kp-msg-me' : ''}" style="--d:${i * 1.2}s">${who ? `<small>${esc(who)}</small>` : ''}<div class="kp-msg-bubble"><span class="kp-msg-typing" aria-hidden="true"><i></i><i></i><i></i></span><p>${esc(txt)}</p></div></div>`;
+      }).join('')}</div></div>`;
+    } else {
+      art = `<div class="kp-anim-count" data-count-to="${esc(String(items[0] || '100').replace(/\D/g, '') || '100')}"><b>0</b><span>${esc(b.unit || '')}</span></div>`;
+    }
+    return `<figure class="kp-anim kp-anim-${preset}" data-anim>
+      ${b.title ? `<figcaption class="kp-anim-title">${accent(b.title)}</figcaption>` : ''}
+      ${art}
+      ${b.caption ? `<p class="kp-caption">${esc(b.caption)}</p>` : ''}</figure>`;
+  }
+
+  // Motion-Zeitleiste: zeitgesteuerte Einblendungen mit Abspielen und Pause
+  function renderMotion(b) {
+    const steps = b.steps || [];
+    const total = steps.reduce((n, s) => n + (Number(s.dur) || 3), 0);
+    return `<div class="kp-motion" data-motion="${b.id}" data-total="${total}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      <div class="kp-motion-stage">${steps.map((s, i) => `
+        <div class="kp-motion-step" data-step="${i}" data-at="${steps.slice(0, i).reduce((n, x) => n + (Number(x.dur) || 3), 0)}">
+          <span class="kp-motion-year">${esc(s.label || '')}</span>
+          <div><h4>${esc(s.title || '')}</h4><div class="kp-text">${res(s.html)}</div></div>
+        </div>`).join('')}</div>
+      <div class="kp-motion-bar"><i></i></div>
+      <div class="kp-quiz-actions">
+        <button class="kp-btn" data-motion-play="${b.id}">▶ ${T('abspielen')}</button>
+        <button class="kp-btn kp-sec" data-motion-all="${b.id}">${T('allesZeigen')}</button>
+      </div></div>`;
+  }
+
+  function renderPredict(b) {
+    const st = state.self[b.id] || {};
+    let input = '';
+    if (b.mode === 'choice') {
+      input = `<div class="kp-answers">${(b.options || []).map((o, i) => `<label class="kp-answer ${st.done && st.v === i ? 'kp-chosen' : ''}"><input type="radio" name="pr-${b.id}" value="${i}" ${st.v === i ? 'checked' : ''} ${st.done ? 'disabled' : ''}><span>${esc(o)}</span></label>`).join('')}</div>`;
+    } else if (b.mode === 'range') {
+      // Sicherheits-Schätzung: ein Bereich, in dem der Wert mit der genannten Sicherheit liegt
+      const min = Number(b.min) || 0, max = Number(b.max) || 100, step = Number(b.step) || 1;
+      const lo = Array.isArray(st.v) ? st.v[0] : min + Math.round((max - min) * 0.3 / step) * step;
+      const hi = Array.isArray(st.v) ? st.v[1] : min + Math.round((max - min) * 0.7 / step) * step;
+      const u = b.unit ? ' ' + esc(b.unit) : '';
+      input = `<p class="kp-range-lead">${T('bereichSicher').replace('{p}', esc(b.confidence || 90))}</p>
+        <div class="kp-estimate"><span class="kp-range-end">${T('bereichVon')}</span><input type="range" min="${min}" max="${max}" step="${step}" value="${lo}" data-pr-range data-end="lo" ${st.done ? 'disabled' : ''} aria-label="${T('bereichVon')}"><output class="kp-estimate-val">${lo}${u}</output></div>
+        <div class="kp-estimate"><span class="kp-range-end">${T('bereichBis')}</span><input type="range" min="${min}" max="${max}" step="${step}" value="${hi}" data-pr-range data-end="hi" ${st.done ? 'disabled' : ''} aria-label="${T('bereichBis')}"><output class="kp-estimate-val">${hi}${u}</output></div>`;
+    } else if (b.mode === 'slider') {
+      const min = Number(b.min) || 0, max = Number(b.max) || 100;
+      const v = st.v != null ? st.v : Math.round((min + max) / 2);
+      input = `<div class="kp-estimate"><input type="range" min="${min}" max="${max}" step="${Number(b.step) || 1}" value="${v}" data-pr-range ${st.done ? 'disabled' : ''} aria-label="Deine Schätzung"><output class="kp-estimate-val">${v}${b.unit ? ' ' + esc(b.unit) : ''}</output></div>`;
+    } else {
+      input = `<textarea class="kp-notes kp-predict-text" rows="3" placeholder="${esc(b.placeholder || 'Deine Vermutung …')}" ${st.done ? 'disabled' : ''}>${esc(st.v || '')}</textarea>`;
+    }
+    // Bereichsschätzung: lag der wahre Wert drin? Dazu die Trefferquote über alle Bereichsschätzungen des Kurses (Kalibrierung)
+    if (st.done && b.mode === 'range' && Array.isArray(st.v) && b.actual !== '' && b.actual != null) {
+      const min = Number(b.min) || 0, max = Number(b.max) || 100, span = max - min || 1;
+      const a = Number(b.actual), hit = a >= st.v[0] && a <= st.v[1];
+      const pos = v => Math.max(0, Math.min(100, (v - min) / span * 100));
+      const all = pages.flatMap(pg => pg.blocks || []).filter(x => x.type === 'predict' && x.mode === 'range' && x.actual !== '' && x.actual != null && (state.self[x.id] || {}).done && Array.isArray(state.self[x.id].v));
+      const hits = all.filter(x => Number(x.actual) >= state.self[x.id].v[0] && Number(x.actual) <= state.self[x.id].v[1]).length;
+      const u = b.unit ? ' ' + esc(b.unit) : '';
+      return `<div class="kp-predict" data-predict="${b.id}">
+        <p class="kp-eyebrow">${icon('bulb')} ${esc(b.eyebrow || 'Denkpause')}</p>
+        <p class="kp-q">${accent(b.prompt)}</p>
+        <div class="kp-predict-reveal" role="status">
+          <p class="kp-range-verdict ${hit ? 'ok' : 'no'}">${hit ? T('bereichDrin') : T('bereichDaneben')}</p>
+          <div class="kp-range-scale" aria-hidden="true"><span class="kp-range-band" style="left:${pos(st.v[0])}%;width:${Math.max(1, pos(st.v[1]) - pos(st.v[0]))}%"></span><span class="kp-range-true" style="left:${pos(a)}%"></span></div>
+          <p class="kp-range-nums"><span>${T('deinBereich')}: <b>${esc(st.v[0])}–${esc(st.v[1])}${u}</b></span><span>${esc(b.actualLabel || T('tatsaechlich'))}: <b>${esc(b.actual)}${u}</b></span></p>
+          ${all.length >= 2 ? `<p class="kp-range-calib">${T('bereichKalib').replace('{h}', hits).replace('{n}', all.length).replace('{p}', esc(b.confidence || 90))}</p>` : ''}
+          <div class="kp-text">${res(b.reveal)}</div></div>
+      </div>`;
+    }
+    const mine = st.done ? (b.mode === 'choice' ? esc((b.options || [])[st.v] || '') : b.mode === 'slider' ? esc(st.v + (b.unit ? ' ' + b.unit : '')) : esc(st.v || '')) : '';
+    // Schätzung und Wirklichkeit nebeneinander: die Lücke ist der eigentliche Haken
+    let gap = '';
+    // Vorher-nachher: dieselbe Einschätzung weiter vorn im Kurs (compareRef) neben der heutigen, ohne richtig oder falsch
+    const first = b.compareRef && b.mode === 'slider' ? (state.self[b.compareRef] || {}) : {};
+    if (st.done && first.done && first.v != null) {
+      const max = Math.max(Number(b.max) || 100, Number(first.v) || 0, Number(st.v) || 0);
+      const w = v => Math.max(2, Math.round((Number(v) || 0) / max * 100));
+      const u = b.unit ? ' ' + esc(b.unit) : '';
+      gap = `<div class="kp-gap kp-gap-then">
+        <div class="kp-gap-row"><span>${T('amAnfang')}</span><i style="--w:${w(first.v)}%"><b>${esc(first.v)}${u}</b></i></div>
+        <div class="kp-gap-row real"><span>${T('heute')}</span><i style="--w:${w(st.v)}%"><b>${esc(st.v)}${u}</b></i></div>
+      </div>`;
+    } else if (st.done && b.mode === 'slider' && b.actual !== '' && b.actual != null) {
+      const max = Math.max(Number(b.max) || 100, Number(b.actual) || 0, Number(st.v) || 0);
+      const w = v => Math.max(2, Math.round((Number(v) || 0) / max * 100));
+      gap = `<div class="kp-gap">
+        <div class="kp-gap-row"><span>${T('deineSchaetzung')}</span><i style="--w:${w(st.v)}%"><b>${esc(st.v)}${b.unit ? ' ' + esc(b.unit) : ''}</b></i></div>
+        <div class="kp-gap-row real"><span>${esc(b.actualLabel || T('tatsaechlich'))}</span><i style="--w:${w(b.actual)}%"><b>${esc(b.actual)}${b.unit ? ' ' + esc(b.unit) : ''}</b></i></div>
+      </div>`;
+    }
+    return `<div class="kp-predict" data-predict="${b.id}">
+      <p class="kp-eyebrow">${icon('bulb')} ${esc(b.eyebrow || 'Denkpause')}</p>
+      <p class="kp-q">${accent(b.prompt)}</p>
+      ${input}
+      ${st.done ? `<div class="kp-predict-reveal" role="status">
+          ${gap || (mine ? `<p class="kp-predict-mine"><span>${T('deineVermutung')}</span>${mine}</p>` : '')}
+          <div class="kp-text">${res(b.reveal)}</div></div>`
+        : `<div class="kp-quiz-actions"><button class="kp-btn" data-predict-go="${b.id}">${esc(b.revealLabel || 'Auflösung zeigen')}</button></div>`}
+    </div>`;
+  }
+
+  function renderTakeaways(b) {
+    // recall: erst überlegen, dann aufdecken (Abrufen statt Lesen, Roediger & Karpicke 2006); Stand in state.self[id].open
+    const items = b.items || [];
+    // Zeilen (Vorbild Rise „Kurz zusammengefasst“): je Kernaussage eine getönte Zeile mit Pfeil im Kreis, ohne Aufdecken
+    if (b.look === 'zeilen') return `<div class="kp-takeaways kp-tk-zeilen" data-takeaways="${b.id}">${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}<ul class="kp-tk-rows">${items.map((it, i) => `<li class="fx-reveal" style="--kp-i:${i}"><span class="kp-tk-arrow" aria-hidden="true">${icon('arrow')}</span><div>${it.title ? `<strong>${esc(it.title)}</strong>` : ''}${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}</div></li>`).join('')}</ul>${b.print === true ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tk-print="${b.id}">${icon('book')} Als Merkkarte drucken oder speichern</button></div>` : ''}</div>`;
+    const open = b.recall ? ((state.self[b.id] || {}).open || []) : null;
+    const body = it => (plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : '');
+    return `<div class="kp-takeaways ${b.recall ? 'kp-tk-recall' : ''}" data-takeaways="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      ${b.recall ? `<p class="kp-tk-hint" data-tk-status>${esc(T('aufdeckenHinweis'))} <b>${esc(T('aufgedeckt').replace('{n}', open.length).replace('{z}', items.length))}</b></p>` : ''}
+      <ol class="kp-tk-list">${items.map((it, i) => `<li class="fx-reveal ${open && !open.includes(i) ? 'kp-tk-closed' : ''}"><span class="kp-tk-num" aria-hidden="true">${i + 1}</span><div><h3>${esc(it.title)}</h3>${open && !open.includes(i) ? (plainText(it.html) ? `<button class="kp-btn kp-sec kp-tk-open" data-tk-open="${i}" aria-expanded="false">${T('aufdecken')}</button>` : '') : body(it)}</div></li>`).join('')}</ol>
+      ${b.print !== false ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tk-print="${b.id}">${icon('book')} Als Merkkarte drucken oder speichern</button></div>` : ''}
+    </div>`;
+  }
+
+  function printTakeaways(b) {
+    printWindow(plainText(b.title).replace(/\*/g, '') || 'Kernaussagen', `body { font-family: ${theme.font || 'Segoe UI, sans-serif'}; color: #1d2530; max-width: 720px; margin: 30px auto; padding: 0 20px; }
+      h1 { color: ${theme.primary || '#1f3a5f'}; font-size: 24px; margin-bottom: 4px; } .sub { color: #5d6877; margin: 0 0 22px; }
+      ol { padding: 0; list-style: none; counter-reset: n; } li { counter-increment: n; display: grid; grid-template-columns: 36px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid #e4e9ef; }
+      li::before { content: counter(n); width: 30px; height: 30px; border-radius: 50%; background: ${theme.primary || '#1f3a5f'}; color: #fff; display: grid; place-items: center; font-weight: 700; }
+      h2 { font-size: 16px; margin: 4px 0; } p { margin: 4px 0; line-height: 1.5; }`,
+      `<h1>${esc(plainText(b.title).replace(/\*/g, '') || 'Kernaussagen')}</h1><p class="sub">${esc(course.title)} · ${new Date().toLocaleDateString('de-DE')}</p>
+      <ol>${(b.items || []).map(it => `<li><div><h2>${esc(it.title)}</h2>${res(it.html)}</div></li>`).join('')}</ol>`);
+  }
+
+  function renderSources(b) {
+    // Eingeklappt: Quellen werden selten gelesen und machen sonst jede Seite laenger; eine Fussnote klappt sie auf
+    const list = (b.items || []).filter(s => String(s).trim());
+    return `<details class="kp-sources">
+      <summary class="kp-sources-title">${esc(b.title || 'Quellen')} (${list.length})</summary>
+      <ol>${list.map((s, i) => `<li id="kp-src-${i + 1}" tabindex="-1">${esc(s).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')}</li>`).join('')}</ol>
+    </details>`;
+  }
+
+  // Fußnoten [^1] im Text verweisen auf den Quellen-Block der Seite
+  // Fußnoten nur im Text ersetzen, nie in Attributen (ein [^1] im Prompt einer Reflexion steht auch im aria-label des Textfelds)
+  const footnotes = html => String(echoHtml(html)).split(/(<[^>]*>)/).map((part, i) => i % 2 ? part : part.replace(/\[\^(\d{1,2})\]/g, (m, n) => `<sup class="kp-fn"><button type="button" data-fn="${n}" aria-label="Quelle ${n}">${n}</button></sup>`)).join('');
+
+  // Bild mit Nachweis und Vergrößerung
+  function openLightbox(src, alt, caption) {
+    const box = document.createElement('div');
+    box.className = 'kp-lightbox';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-label', 'Bild vergrößert');
+    box.innerHTML = `<button class="kp-lightbox-close" aria-label="Schließen">✕</button><figure><img src="${esc(src)}" alt="${esc(alt)}">${caption ? `<figcaption>${esc(caption)}</figcaption>` : ''}</figure>`;
+    const back = document.activeElement;
+    const close = () => { box.remove(); document.removeEventListener('keydown', onKey); if (back && back.focus) back.focus(); };
+    const onKey = e => { if (e.key === 'Escape') close(); };
+    box.addEventListener('click', e => { if (e.target === box || e.target.closest('.kp-lightbox-close')) close(); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(box);
+    box.querySelector('.kp-lightbox-close').focus();
+  }
+
+  // Rückmeldung, wenn ein Kapitel vollständig bearbeitet ist
+  function chapterToast(prevIndex) {
+    const prev = pages[prevIndex], cur = pages[state.current];
+    if (!prev || !prev.chapter || !cur || cur.chapter === prev.chapter) return;
+    const all = pages.map((p, i) => i).filter(i => pages[i].chapter === prev.chapter);
+    if (!all.every(i => state.visited.has(i))) return;
+    state.toasted = state.toasted || {};
+    if (state.toasted[prev.chapter]) return;
+    state.toasted[prev.chapter] = true;
+    uiSound('kapitel');
+    if (set.milestone !== 'kurz') return milestoneCard(prev.chapter);
+    const t = document.createElement('div');
+    t.className = 'kp-toast';
+    t.setAttribute('role', 'status');
+    t.innerHTML = `${icon('check-circle')}<span>${T('kapitel')} „${esc(prev.chapter)}“ ${T('abgeschlossen')}</span>`;
+    document.body.appendChild(t);
+    setTimeout(() => t.classList.add('out'), 3200);
+    setTimeout(() => t.remove(), 3800);
+  }
+
+  // Meilenstein-Moment am Kapitelende: Karte mit Fortschrittsring, Kapitelstand und dem nächsten Kapitel.
+  // Erscheint einmal je Kapitel (state.toasted), schließt per Knopf, Escape oder Klick daneben.
+  function milestoneCard(chapter) {
+    const chapters = chapterList(true).filter(c => c.name);
+    const idx = chapters.findIndex(c => c.name === chapter);
+    const m = chapters.length, done = chapters.filter(c => c.pages.every(i => state.visited.has(i))).length;
+    const next = chapters[idx + 1];
+    const r = 34, u = 2 * Math.PI * r, share = m ? done / m : 1;
+    const box = document.createElement('div');
+    box.className = 'kp-milestone';
+    box.innerHTML = `<div class="kp-ms-box" role="dialog" aria-modal="true" aria-labelledby="kp-ms-title">
+      <div class="kp-ms-ring" aria-hidden="true"><svg viewBox="0 0 80 80"><circle class="kp-ring-bg" cx="40" cy="40" r="${r}"></circle>
+        <circle class="kp-ring-on" cx="40" cy="40" r="${r}" stroke-dasharray="${u.toFixed(2)}" stroke-dashoffset="${(u * (1 - share)).toFixed(2)}" style="--kp-ring-u:${u.toFixed(2)}" transform="rotate(-90 40 40)"></circle></svg>
+        <span>${icon('check-circle', 'kp-ico-lg')}</span></div>
+      <p class="kp-label">${T('kapitel')} ${idx + 1} ${T('von')} ${m} ${T('abgeschlossen')}</p>
+      <h2 id="kp-ms-title">${esc(chapter)}</h2>
+      <p class="kp-ms-next">${next ? `${T('alsNaechstes')}: <strong>${esc(next.name)}</strong>` : T('msAlleKapitel')}</p>
+      ${goalCard('kp-goal-ms') ? goalCard('kp-goal-ms') + `<p class="kp-ms-goalq">${T('msZielFrage')}</p>` : ''}
+      <button class="kp-btn" data-ms-close>${T('weiter')}</button></div>`;
+    const close = () => { box.classList.add('out'); document.removeEventListener('keydown', onKey); setTimeout(() => box.remove(), reducedMotion() ? 0 : 250); };
+    const onKey = e => { if (e.key === 'Escape') close(); };
+    box.addEventListener('click', e => { if (e.target === box || e.target.closest('[data-ms-close]')) close(); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(box);
+    box.querySelector('[data-ms-close]').focus({ preventScroll: true });
+  }
+
+  // ---------- Foto- und Video-Bausteine ----------
+  // Ein Video kommt entweder als Datei im Paket oder als Adresse (YouTube, Vimeo, eigener Server)
+  function videoHtml(o, cls) {
+    const url = o.source === 'url' ? o.url : '';
+    if (url && /youtu|vimeo/.test(url)) return `<div class="kp-embed ${cls || ''}"><iframe src="${esc(embedUrl(url))}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen title="${esc(o.alt || 'Video')}"></iframe></div>`;
+    const src = url || res(o.src || '');
+    if (!src) return videoDummy(o.text || o.transcript, o.poster && o.poster.src, cls);
+    return `<video class="${cls || ''}" controls playsinline preload="metadata" ${o.poster && o.poster.src ? `poster="${esc(res(o.poster.src))}"` : ''} src="${esc(src)}">${trackHtml(o.captions, o.captionsText)}</video>`;
+  }
+  // Untertitel als Datei (captions) oder direkt als Text im Kurs (captionsText, SRT oder WebVTT)
+  function vttOf(text) {
+    let t = String(text || '').replace(/\r/g, '').trim();
+    if (!t) return '';
+    if (!/^WEBVTT/.test(t)) t = 'WEBVTT\n\n' + t.replace(/^\d+\s*\n(?=\d{1,2}:\d{2})/gm, '').replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+    return 'data:text/vtt;charset=utf-8,' + encodeURIComponent(t);
+  }
+  function trackHtml(file, text) {
+    const src = file ? res(file) : vttOf(text);
+    return src ? `<track kind="captions" srclang="${esc(course.lang || 'de')}" label="Untertitel" src="${esc(src)}" default>` : '';
+  }
+  // Fehlt die Videodatei, steht der Sprechtext da; in der Vorschau mit dem Hinweis „Video folgt“
+  function videoDummy(say, poster, cls) {
+    if (!plainText(say)) return `<div class="kp-photo-empty ${cls || ''}">${icon('play')}<span>Noch kein Video</span></div>`;
+    return `<div class="kp-video-dummy ${cls || ''}">${poster ? `<img src="${esc(res(poster))}" alt="">` : ''}<div class="kp-vd-in"><span class="kp-vd-lb">${icon('play')} ${T(opts.preview ? 'videoFolgt' : 'sprechtext')}</span>
+      <blockquote>„${esc(plainText(say))}“</blockquote>${opts.preview ? `<small>${T('videoFolgtHinweis')}</small>` : ''}</div></div>`;
+  }
+  const transcriptHtml = t => (plainText(t) ? `<details class="kp-acc kp-transcript"><summary>${T('transkript')}</summary><div class="kp-text">${res(t)}</div></details>` : '');
+  const personOf = x => Object.assign({}, x, castOf(x));
+
+  // Team: Fotokarten mit Name und Rolle, Rückseite mit Hintergrund
+  function renderTeam(b) {
+    // Aufklappen (Vorbild „4 Generationen, 4 Bedürfnisse“): Foto ohne Karte, darunter Name und Rolle mit rundem „+“,
+    // der Text klappt unter dem Foto auf statt die Karte umzudrehen
+    // Stimme (Vorbild „Alex und Justina stellen sich vor“): Bild auf einer weichen Fläche, darunter die Aufnahme mit
+    // Wellenform und „Zum Nachlesen +“ mit dem Sprechtext; ohne Aufnahme bleibt nur der Text zum Aufklappen
+    if (b.look === 'stimme') {
+      const cards = (b.members || []).map((m, i) => {
+        const p = personOf(m), name = plainText(p.name) || T('person');
+        const media = p.image && p.image.src ? `<img loading="lazy" decoding="async" src="${esc(res(p.image.src))}" alt="${esc(p.image.alt || p.name || '')}"${focusStyle(p.image)}>${p.image.ai ? `<span class="kp-ai-badge">${T('kiBild')}</span>` : ''}` : avatarSvg(p.look || 'a1', p.pose, true);
+        const who = `${esc(p.name || '')}${p.role ? ', ' + esc(p.role) : ''}`;
+        return `<div class="kp-voice fx-reveal" style="--kp-i:${i}"><div class="kp-voice-media kp-voice-b${i % 3}">${media}</div>
+          <div class="kp-voice-box">${m.audio ? guideAudio({ id: b.id + '-' + i, audio: m.audio }, T('anhoerenName') + ': ' + name, true) : `<p class="kp-voice-who">${who}</p>`}
+            ${plainText(p.html) ? `<details class="kp-person-more kp-voice-read"><summary><span>${esc(T('zumNachlesen'))}${m.audio && p.name ? `<span class="kp-sr">: ${esc(name)}</span>` : ''}</span><span class="kp-person-plus" aria-hidden="true"></span></summary><div class="kp-text">${res(p.html)}</div></details>` : ''}</div></div>`;
+      }).join('');
+      return `<div class="kp-team kp-team-voice">
+        ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+        <div class="kp-voice-grid" style="--n:${Math.min(3, (b.members || []).length || 1)}">${cards}</div></div>`;
+    }
+    // Karussell (Vorbild Rise „Schau dir an, was Karims und Sarahs Herausforderungen sind“): eine große Fotokarte in der Mitte,
+    // die Nachbarn angeschnitten und abgedunkelt, runde Pfeile links und rechts; gesehen = einmal in der Mitte gewesen
+    if (b.look === 'karussell') {
+      const ms = b.members || [], N = ms.length;
+      const st = state.self[b.id] = state.self[b.id] || {};
+      const at = Math.max(0, Math.min(N - 1, Number(st.at) || 0));
+      st.seen = st.seen || []; if (N && !st.seen.includes(at)) st.seen.push(at);
+      const cards = ms.map((m, i) => {
+        const p = personOf(m);
+        const media = p.image && p.image.src ? `<img loading="lazy" decoding="async" src="${esc(res(p.image.src))}" alt="${esc(p.image.alt || p.name || '')}"${focusStyle(p.image)}>${p.image.ai ? `<span class="kp-ai-badge">${T('kiBild')}</span>` : ''}` : avatarSvg(p.look || 'a1', p.pose);
+        const txt = plainText(p.html), nm = String(p.name || '').trim();
+        // Beginnt der Text schon mit dem Namen („Ich bin Karim, …“), entfällt die Namenszeile
+        const who = nm && txt.slice(0, 40).includes(nm) ? '' : `<p class="kp-tc-who">${esc(nm)}${p.role ? ', ' + esc(p.role) : ''}</p>`;
+        return `<div class="kp-tc-card${i === at ? ' on' : ''}" data-tc-go="${i}" data-team="${esc(b.id)}" role="group" aria-roledescription="${esc(T('karteVon').replace('{n}', i + 1).replace('{m}', N))}"${i === at ? '' : ' aria-hidden="true"'}><div class="kp-tc-media">${media}</div><div class="kp-tc-body">${who}${txt ? `<div class="kp-text">${res(p.html)}</div>` : ''}</div></div>`;
+      }).join('');
+      const dots = ms.map((m, i) => `<button type="button" class="kp-tc-dot" data-tc-go="${i}" data-team="${esc(b.id)}" aria-label="${esc(personOf(m).name || (i + 1))}"${i === at ? ' aria-current="true"' : ''}></button>`).join('');
+      return `<div class="kp-team kp-team-car" data-team-car="${esc(b.id)}">
+        ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+        <div class="kp-tc-view">
+          <button type="button" class="kp-tc-btn kp-tc-prev" data-tc-step="${esc(b.id)}" data-dir="-1" aria-label="${T('zurueck')}"${at === 0 ? ' disabled' : ''}>${icon('chev')}</button>
+          <div class="kp-tc-track" style="--at:${at}">${cards}</div>
+          <button type="button" class="kp-tc-btn kp-tc-next" data-tc-step="${esc(b.id)}" data-dir="1" aria-label="${T('weiter')}"${at >= N - 1 ? ' disabled' : ''}>${icon('chev')}</button>
+        </div>
+        <div class="kp-tc-dots">${dots}</div>
+        <p class="kp-sr" aria-live="polite" data-tc-pos>${at + 1} ${T('von')} ${N}</p></div>`;
+    }
+    if (b.look === 'aufklappen') {
+      const cards = (b.members || []).map((m, i) => {
+        const p = personOf(m);
+        const media = p.image && p.image.src ? `<img loading="lazy" decoding="async" src="${esc(res(p.image.src))}" alt="${esc(p.image.alt || p.name || '')}"${focusStyle(p.image)}>${p.image.ai ? `<span class="kp-ai-badge">${T('kiBild')}</span>` : ''}` : avatarSvg(p.look || 'a1', p.pose);
+        const who = `${esc(p.name || '')}${p.role ? ', ' + esc(p.role) : ''}`;
+        return `<div class="kp-person kp-person-open fx-reveal" style="--kp-i:${i}"><div class="kp-person-media">${media}</div>
+          ${plainText(p.html) ? `<details class="kp-person-more" data-person-open="${i}" data-team="${esc(b.id)}"${((state.self[b.id] || {}).open || []).includes(i) ? ' open' : ''}><summary><span>${who}</span><span class="kp-person-plus" aria-hidden="true"></span></summary><div class="kp-text">${res(p.html)}</div></details>` : `<p class="kp-person-cap">${who}</p>`}</div>`;
+      }).join('');
+      return `<div class="kp-team kp-team-open">
+        ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+        <div class="kp-person-grid" style="--n:${Math.max(1, (b.members || []).length)}">${cards}</div></div>`;
+    }
+    const cards = (b.members || []).map((m, i) => {
+      const p = personOf(m);
+      const back = plainText(p.html);
+      const media = p.image && p.image.src ? `<img loading="lazy" decoding="async" src="${esc(res(p.image.src))}" alt="${esc(p.image.alt || p.name || '')}"${focusStyle(p.image)}>${p.image.ai ? `<span class="kp-ai-badge">${T('kiBild')}</span>` : ''}` : avatarSvg(p.look || 'a1', p.pose);
+      return `<div class="kp-person ${back ? 'kp-person-flip' : ''}" ${back ? `tabindex="0" role="button" aria-label="${esc(p.name)}: mehr erfahren"` : ''}>
+        <div class="kp-person-inner">
+          <div class="kp-person-front"><div class="kp-person-media">${media}</div>
+            <div class="kp-person-name"><span>${esc(p.name || '')}${p.role ? ', ' + esc(p.role) : ''}</span>${back ? '<span class="kp-person-flipicon" aria-hidden="true">⇄</span>' : ''}</div></div>
+          ${back ? `<div class="kp-person-back"><div class="kp-text">${res(p.html)}</div><span class="kp-person-flipicon" aria-hidden="true">⇄</span></div>` : ''}
+        </div></div>`;
+    }).join('');
+    return `<div class="kp-team">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+      <div class="kp-person-grid">${cards}</div></div>`;
+  }
+
+  // Video-Statements: mehrere Sprechervideos nebeneinander
+  function renderStatements(b) {
+    // Kreis (Vorbild Rise „Strukturiertes Arbeitstier oder charismatischer Chaot?“): Frage über dem runden Video, Name und
+    // Rolle als Leiste darunter, die den Sprechtext aufklappt. Spielen wie bei der Person an der Frage über [data-qp-play].
+    if (b.look === 'kreis') {
+      const cards = (b.items || []).map((it, i) => {
+        const p = personOf(it), vid = it.source === 'url' ? it.url : it.src, key = b.id + '-' + i;
+        const name = [p.name, p.role].map(x => plainText(x)).filter(Boolean).join(', ');
+        const pic = (it.poster && it.poster.src ? it.poster : null) || (p.image && p.image.src ? p.image : null);
+        const media = vid && /youtu|vimeo/.test(vid) ? videoHtml(it)
+          : vid ? `<video class="kp-qp-video" playsinline preload="metadata" data-qp-video="${key}" src="${esc(it.source === 'url' ? vid : res(vid))}"${pic ? ` poster="${esc(res(pic.src))}"` : ''}>${trackHtml(it.captions, it.captionsText)}</video><button type="button" class="kp-qp-play" data-qp-play="${key}" aria-pressed="false" aria-label="${esc(T('videoVon').replace('{name}', plainText(p.name) || T('person')))}">${icon('play')}</button>`
+          : pic ? `<img src="${esc(res(pic.src))}" alt="${esc(pic.alt || plainText(p.name))}" loading="lazy"${focusStyle(pic)}>` : avatarSvg(p.look || 'a1', p.pose || 'neutral');
+        const who = plainText(it.transcript)
+          ? `<details class="kp-vround-who"><summary><span class="kp-vround-chev" aria-hidden="true"></span><span>${esc(name)}</span></summary><div class="kp-text">${res(it.transcript)}</div></details>`
+          : `<p class="kp-vround-who kp-vround-plain">${esc(name)}</p>`;
+        return `<figure class="kp-vround fx-reveal" style="--kp-i:${i}">${plainText(it.text) ? `<p class="kp-vround-ask">${esc(plainText(it.text))}</p>` : ''}${it.backdrop && it.backdrop.src ? `<div class="kp-vround-stage" style="--kp-vbg:url('${esc(res(it.backdrop.src))}')${it.backdrop.focus ? `;--kp-vbg-pos:${esc(it.backdrop.focus)}` : ''}">` : ''}<div class="kp-qp-media kp-vround-media${vid ? ' kp-qp-hasvideo' : ''}">${media}</div>${it.backdrop && it.backdrop.src ? '</div>' : ''}${who}</figure>`;
+      }).join('');
+      return `<div class="kp-statements kp-vrounds">${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}<div class="kp-vround-grid" style="--n:${Math.min(4, Math.max(1, (b.items || []).length))}">${cards}</div></div>`;
+    }
+    // Clip (Vorbild Rise „Petra (47), Head of HR, spricht über …“): das Video ohne Kopf, darunter eine Zeile mit Name, Rolle und
+    // Thema, der Sprechtext klappt über „Zum Nachlesen +“ auf
+    if (b.look === 'clip') {
+      const cards = (b.items || []).map(it => {
+        const p = personOf(it);
+        const top = b.namePos === 'oben';
+        const line = [p.name ? `<strong>${esc(p.name)}</strong>` : '', p.role ? esc(p.role) : '', plainText(it.text) ? esc(plainText(it.text)) : ''].filter(Boolean).join(', ');
+        const head = top ? `<div class="kp-clip-head">${p.name ? `<strong>${esc(p.name)}</strong>` : ''}${p.role ? `<span>${esc(p.role)}</span>` : ''}</div>` : '';
+        const who = top ? (plainText(it.text) ? `<span class="kp-clip-who">${esc(plainText(it.text))}</span>` : '') : `<span class="kp-clip-who">${line}</span>`;
+        return `<figure class="kp-clip">${head}${videoHtml(Object.assign({}, it, { text: it.transcript || it.text }))}<figcaption class="kp-clip-cap">${who}${plainText(it.transcript) ? `<details class="kp-clip-read"><summary><span>${T('zumNachlesen')}</span><span class="kp-clip-plus" aria-hidden="true"></span></summary><div class="kp-text">${res(it.transcript)}</div></details>` : ''}</figcaption></figure>`;
+      }).join('');
+      return `<div class="kp-statements kp-clips">${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}<div class="kp-vgrid kp-clip-grid kp-vgrid-${Math.min(3, Math.max(1, (b.items || []).length))}">${cards}</div></div>`;
+    }
+    const cards = (b.items || []).map(it => {
+      const p = personOf(it);
+      return `<figure class="kp-vcard">
+        <figcaption class="kp-vcard-head"><strong>${esc(p.name || '')}</strong>${p.role ? `<span>${esc(p.role)}</span>` : ''}</figcaption>
+        ${videoHtml(it)}
+        ${it.text ? `<div class="kp-text kp-vcard-text">${res(it.text)}</div>` : ''}
+        ${transcriptHtml(it.transcript)}</figure>`;
+    }).join('');
+    return `<div class="kp-statements">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      <div class="kp-vgrid kp-vgrid-${Math.min(3, Math.max(1, (b.items || []).length))}">${cards}</div></div>`;
+  }
+
+  // Videoszene: Clips nacheinander, am Ende auf Wunsch eine Entscheidung
+  function renderVscene(b) {
+    const steps = b.steps || [];
+    const n = Math.min(state.dlg[b.id] || 0, Math.max(0, steps.length - 1));
+    const cur = steps[n] || {};
+    const p = personOf(cur);
+    const last = n >= steps.length - 1;
+    const decisionReady = last && b.decision && (b.decision.options || []).length;
+    return `<div class="kp-vscene" data-vscene="${b.id}">
+      ${b.title ? `<p class="kp-label">${esc(b.title)}</p>` : ''}
+      <div class="kp-vscene-stage">${videoHtml(cur, 'kp-vscene-video')}</div>
+      <div class="kp-vscene-meta">
+        <span class="kp-vscene-step">${T('szene')} ${n + 1} / ${steps.length}</span>
+        ${p.name ? `<strong>${esc(p.name)}${p.role ? ', ' + esc(p.role) : ''}</strong>` : ''}
+      </div>
+      ${cur.text ? `<div class="kp-text kp-vscene-text">${res(cur.text)}</div>` : ''}
+      ${transcriptHtml(cur.transcript)}
+      ${decisionReady ? `<div class="kp-dlg-decision">${renderBranch(b.decision)}</div>` : `<div class="kp-quiz-actions">
+        ${n > 0 ? `<button class="kp-btn kp-sec" data-vscene-back="${b.id}">← ${T('zurueck')}</button>` : ''}
+        ${last ? '' : `<button class="kp-btn" data-vscene-next="${b.id}">${T('weiter')} →</button>`}</div>`}
+    </div>`;
+  }
+
+  // Große Zahl: eine Kennzahl, die hängen bleibt
+  // Meinung zur Zahl (Vorbild „94 % … Teilst du diese Meinung?“): unter der Zahl eine Frage mit Ja/Nein und „OK“,
+  // danach die Reaktion zur gewählten Antwort. Stand in state.self[id].v, erledigt mit der Antwort.
+  const bnAsk = b => b.ask && plainText(b.ask.question) ? b.ask : null;
+  // options als Liste oder (aus dem Editor) als Objekt mit Indizes; ohne eigene Texte gelten „Ja“ und „Nein“ mit den Reaktionen 0 und 1
+  const bnOpts = a => {
+    const raw = Array.isArray(a.options) ? a.options : Object.keys(a.options || {}).sort().map(k => a.options[k]);
+    const named = raw.filter(o => o && plainText(o.text));
+    return named.length >= 2 ? named : [{ text: T('ja'), reply: (raw[0] || {}).reply }, { text: T('nein'), reply: (raw[1] || {}).reply }];
+  };
+  function bnAskHtml(b) {
+    const a = bnAsk(b); if (!a) return '';
+    const st = state.self[b.id] || {}, v = typeof st.v === 'number' ? st.v : null, opts = bnOpts(a), qid = 'bnq-' + b.id;
+    const reply = v != null && opts[v] ? plainText(opts[v].reply) : '';
+    return `<div class="kp-bn-ask" data-bn-ask="${b.id}">
+      <p class="kp-bn-q" id="${qid}">${esc(plainText(a.question))}</p>
+      <div class="kp-bn-opts" role="radiogroup" aria-labelledby="${qid}">${opts.map((o, i) => `<label class="kp-bn-opt"><input type="radio" name="bn-${b.id}" value="${i}"${v === i ? ' checked' : ''}${v != null ? ' disabled' : ''}><span>${esc(plainText(o.text))}</span></label>`).join('')}</div>
+      ${v == null ? `<div class="kp-bn-act"><button type="button" class="kp-btn kp-bn-ok" data-bn-ok="${b.id}" disabled>${esc(a.button || 'OK')} <span aria-hidden="true">›</span></button></div>`
+        : `<p class="kp-bn-reply" data-bn-reply role="status">${esc(reply || T('danke'))}</p>`}
+    </div>`;
+  }
+  function renderBignumber(b) {
+    const style = b.image && b.image.src ? ` style="background-image:linear-gradient(rgba(12,18,28,.72),rgba(12,18,28,.72)),url('${esc(res(b.image.src))}')"` : '';
+    return `<div class="kp-bignum ${b.image && b.image.src ? 'kp-bignum-photo' : ''}${b.look === 'leuchten' ? ' kp-bignum-glow' : ''}${bnAsk(b) ? ' kp-bignum-hasask' : ''}"${style}>
+      ${eyebrow(b.eyebrow)}
+      <p class="kp-bignum-value"><span>${esc(b.value || '')}</span>${b.unit ? `<em>${esc(b.unit)}</em>` : ''}</p>
+      ${b.html ? `<div class="kp-text kp-bignum-text">${res(b.html)}</div>` : ''}
+      ${bnAskHtml(b)}
+      ${b.source ? `<p class="kp-bignum-source">${esc(b.source)}</p>` : ''}</div>`;
+  }
+
+  // Punkte im Bild: Stellen zum Erkunden (ohne Bewertung)
+  // Suchbild-Runden: gleiches Format, je Runde ein neues Bild mit neuen Stellen (Kernschleife). Stand je Runde in st.rs[r], die Runde in st.r.
+  function hsRound(b, st) {
+    const rounds = (b.rounds || []).filter(x => x && x.image && x.image.src);
+    if (!rounds.length) return { R: 0, r: -1, list: b.points || [], img: b.image && b.image.src, seen: st.seen || {}, hint: b.hint };
+    const r = Math.min(Math.max(0, Number(st.r) || 0), rounds.length - 1);
+    return { R: rounds.length, r, list: rounds[r].points || [], img: rounds[r].image.src, seen: ((st.rs || {})[r]) || {}, hint: rounds[r].hint || b.hint };
+  }
+  function hsMarkSeen(b, st, i, v) {
+    const rd = hsRound(b, st);
+    if (!rd.R) return { v, seen: Object.assign({}, st.seen, { [i]: true }), r: st.r, rs: st.rs };
+    const rs = Object.assign({}, st.rs); rs[rd.r] = Object.assign({}, rs[rd.r], { [i]: true });
+    return { v, r: rd.r, rs };
+  }
+  function renderHotspots(b) {
+    const st = state.self[b.id] || {};
+    const rd = hsRound(b, st);
+    const img = rd.img;
+    const open = st.v;
+    const seen = rd.seen;
+    const list = rd.list;
+    const mode = b.mode || 'karte';
+    const marker = b.marker || 'punkt';
+    const cur = open != null ? list[open] : null;
+    const pos = pt => ({ x: Number(pt.x) || 50, y: Number(pt.y) || 50, w: Number(pt.w) || 24, h: Number(pt.h) || 24 });
+    // Ein Punkt mit `target` ist eine Tür: Der Klick führt auf die Seite, statt eine Erklärung zu öffnen.
+    // „Besucht“ steht dann nicht in `seen`, sondern ergibt sich daraus, ob die Seite schon gesehen wurde.
+    const doorTo = pt => (pt.target ? pageIndexById(pt.target) : -1);
+    // Lernkarte (b.map, Vorbild Inselwelt „Hauptmenü“): ein Ort gilt als erkundet, wenn alle Seiten seines Kapitels
+    // besucht sind; mit b.mapOrder öffnen sich die Orte nacheinander, gesperrte tragen ein Schloss
+    const mapDone = pt => { const d = doorTo(pt); if (d < 0) return false; const ch = pages[d].chapter; const all = ch ? pages.map((x, k) => k).filter(k => pages[k].chapter === ch && !pages[k].result) : [d]; return all.every(k => state.visited.has(k)); };
+    const doneAt = (pt, i) => { const d = doorTo(pt); return d >= 0 ? (b.map ? mapDone(pt) : state.visited.has(d)) : !!seen[i]; };
+    const mapLocked = i => { if (!b.map) return false; const pt = list[i]; if (pt.after) { const k = list.findIndex(x => x.target === pt.after); return k >= 0 && !mapDone(list[k]); } if (!b.mapOrder) return false; const prev = list.slice(0, i).filter(x => doorTo(x) >= 0); return prev.some(x => !mapDone(x)); };
+    const mapNext = b.map ? list.findIndex((pt, i) => doorTo(pt) >= 0 && !mapDone(pt) && !mapLocked(i)) : -1;
+    // Vor und zurück zwischen den Punkten, wie beim Durchblättern: ‹ 2 von 6 ›.
+    // doorTo() liefert einen Seitenindex oder -1, deshalb der Vergleich mit < 0 statt einer Wahrheitsprüfung.
+    const stops = list.map((pt, i) => i).filter(i => doorTo(list[i]) < 0);
+    const navBar = () => {
+      if (open == null || stops.length < 2) return '';
+      const at = stops.indexOf(open);
+      return `<div class="kp-hs-nav">
+        <button class="kp-hs-step" data-hs-step="${b.id}" data-dir="-1" aria-label="${T('zurueck')}">‹</button>
+        <span>${at + 1} ${T('von')} ${stops.length}</span>
+        <button class="kp-hs-step" data-hs-step="${b.id}" data-dir="1" aria-label="${T('naechsterPunkt')}">›</button>
+      </div>`;
+    };
+    const points = list.map((pt, i) => {
+      const p = pos(pt);
+      const door = doorTo(pt) >= 0;
+      const isOpen = !door && open === i;
+      const done = doneAt(pt, i);
+      // Zeichen im Punkt: Tür zeigt Pfeil oder Haken, sonst Nummer oder Plus
+      if (b.map && door && b.mapLook === 'themen') {
+        // Themenbild (Vorbild Storyline-Kapitelmenü in einer gezeichneten Szene): runde Nummer im Bild, daneben ein weißes
+        // Schild mit dem Thema; die Nummer ist die Reihenfolge der Orte, nicht der Punkte. Der nächste Ort trägt die
+        // Signalfarbe, erkundete einen Haken, gesperrte ein Schloss. Schild und Nummer sind ein Knopf.
+        const locked = mapLocked(i), next = mapNext === i;
+        const num = list.slice(0, i + 1).filter(x => doorTo(x) >= 0).length;
+        const stateTxt = locked ? T('ortGesperrt') : done ? T('ortErkundet') : next ? T('ortNaechster') : T('oeffnen');
+        const side = Number(pt.labelSide === 'links' || (pt.labelSide !== 'rechts' && p.x > 62));
+        return `<button class="kp-map-pin kp-tm-pin${side ? ' kp-tm-left' : ''}${locked ? ' kp-map-locked' : ''}${done ? ' kp-map-done' : ''}${next ? ' kp-map-next' : ''}" data-hs="${b.id}" data-i="${i}" style="left:${p.x}%;top:${p.y}%" aria-label="${num}. ${esc(pt.title || 'Thema ' + num)}, ${esc(stateTxt)}"${locked ? ' aria-disabled="true"' : ''}>
+          <span class="kp-tm-num" aria-hidden="true">${locked ? icon('lock') : done ? icon('check') : num}</span>${pt.title ? `<span class="kp-tm-label" aria-hidden="true">${esc(pt.title)}</span>` : ''}
+        </button>`;
+      }
+      if (b.map && door) {
+        // Pin mit Fahne: Banner mit Ortsnamen über einem Tropfen-Pin; Zustände offen, nächster (pulsiert), erkundet (Haken), gesperrt (Schloss)
+        const locked = mapLocked(i), next = mapNext === i;
+        const inner = locked ? icon('lock') : done ? icon('check') : '<i class="kp-map-dot"></i>';
+        const stateTxt = locked ? T('ortGesperrt') : done ? T('ortErkundet') : next ? T('ortNaechster') : T('oeffnen');
+        return `<button class="kp-map-pin${locked ? ' kp-map-locked' : ''}${done ? ' kp-map-done' : ''}${next ? ' kp-map-next' : ''}" data-hs="${b.id}" data-i="${i}" style="left:${p.x}%;top:${p.y}%" aria-label="${esc(pt.title || 'Ort ' + (i + 1))}, ${esc(stateTxt)}"${locked ? ' aria-disabled="true"' : ''}>
+          ${pt.title ? `<span class="kp-map-flag">${esc(pt.title)}</span>` : ''}
+          <span class="kp-map-marker" aria-hidden="true"><svg viewBox="0 0 40 52"><path d="M20 50C20 50 4 31 4 19a16 16 0 0 1 32 0c0 12-16 31-16 31z"/></svg><span class="kp-map-ico">${inner}</span></span>
+        </button>`;
+      }
+      const sign = door ? (done ? '✓' : '→') : marker === 'nummer' ? String(i + 1) : (isOpen ? '×' : '+');
+      const flag = marker === 'fahne' && pt.title
+        ? `<span class="kp-hs-label ${p.x > 60 ? 'left' : ''}" style="left:${p.x}%;top:${p.y}%" aria-hidden="true">${esc(pt.title)}</span>` : '';
+      return `<button class="kp-hs-dot kp-hs-m-${marker} ${isOpen ? 'open' : ''} ${done ? 'seen' : ''} ${door ? 'kp-hs-door' : ''}" data-hs="${b.id}" data-i="${i}"
+        style="left:${p.x}%;top:${p.y}%" ${door ? '' : `aria-expanded="${isOpen}"`} aria-label="${esc(pt.title || 'Punkt ' + (i + 1))}${door ? ', ' + T('oeffnen') + (done ? ', ' + T('besucht') : '') : ''}">${sign}</button>${flag}
+        ${isOpen && mode === 'popover' ? `<div class="kp-hs-pop ${p.x > 60 ? 'left' : ''} ${p.y > 60 ? 'up' : ''}" style="left:${p.x}%;top:${p.y}%" role="status">
+          ${pt.image && pt.image.src ? `<img loading="lazy" decoding="async" src="${esc(res(pt.image.src))}" alt="${esc(pt.image.alt || '')}">` : ''}
+          ${pt.title ? `<h3>${esc(pt.title)}</h3>` : ''}<div class="kp-text">${res(pt.html)}</div>${navBar()}</div>` : ''}`;
+    }).join('');
+    // Spotlight legt einen Schleier über das Bild und lässt nur die gewählte Stelle frei
+    const p = cur ? pos(cur) : null;
+    const spot = cur && mode === 'spotlight'
+      ? `<div class="kp-hs-veil" style="--x:${p.x}%;--y:${p.y}%;--w:${p.w}%;--h:${p.h}%"></div><div class="kp-hs-frame" style="left:${p.x}%;top:${p.y}%;width:${p.w}%;height:${p.h}%"></div>` : '';
+    // Zoom fährt auf die gewählte Stelle
+    const zoomStyle = cur && mode === 'zoom'
+      ? ` style="transform:scale(${(b.zoom || 2)});transform-origin:${p.x}% ${p.y}%"` : '';
+    // Verbindungslinien (Vorbilder youknow): „pfad“ führt gestrichelt von Punkt zu Punkt (U-Boot zur Oberfläche),
+    // „netz“ verbindet den ersten Punkt mit allen anderen (Was die Angreiferin über Martin weiß). Eine Linie zu einem
+    // entdeckten Punkt wird farbig. Linien liegen in der Zoom-Ebene, damit sie beim Zoomen mitwandern.
+    const seg = (a, z, on) => { const A = pos(a), Z = pos(z); return `<line x1="${A.x}" y1="${A.y}" x2="${Z.x}" y2="${Z.y}"${on ? ' class="on"' : ''}/>`; };
+    const lines = (b.connect === 'pfad' || b.connect === 'netz') && list.length > 1
+      ? `<svg class="kp-hs-lines kp-hs-lines-${b.connect}" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${b.connect === 'netz'
+        ? list.slice(1).map((pt, i) => seg(list[0], pt, doneAt(pt, i + 1))).join('')
+        : list.slice(1).map((pt, i) => seg(list[i], pt, doneAt(pt, i + 1))).join('')}</svg>` : '';
+    const count = list.length ? `<span class="kp-hs-count">${list.filter(doneAt).length} ${T('von')} ${list.length} ${b.map ? T('orteErkundet') : T('entdeckt')}</span>` : '';
+    const frame = b.cover ? deviceFrame('') : deviceFrame((b.image || {}).frame);
+    return `<div class="kp-hotspots kp-hs-${mode} kp-hs-mk-${marker} ${b.cover ? 'kp-hs-cover' : ''}${frame.open ? ' kp-framed' : ''}${b.map ? ' kp-map' : ''}${!b.map && /\.svg(\?|$)|^data:image\/svg/i.test(String(img || '')) ? ' kp-hs-drawing' : ''}${b.map && b.mapLook === 'themen' ? ' kp-tm' + (b.mapLabels === 'fokus' ? ' kp-tm-quiet' : '') : ''}" data-hotspots="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      ${frame.open}<div class="kp-hs-stage">
+        <div class="kp-hs-zoom"${zoomStyle}>${img ? `<img src="${esc(res(img))}" alt="${esc((rd.R ? (b.rounds.filter(x => x && x.image && x.image.src)[rd.r].image.alt) : b.image.alt) || '')}">` : `<div class="kp-photo-empty">${icon('eye')}<span>Noch kein Bild</span></div>`}</div>
+        ${lines}${spot}${points}</div>${frame.close}
+      ${b.map && b.mapLook === 'themen' ? `<ol class="kp-tm-legend" aria-hidden="true">${list.map((pt, i) => doorTo(pt) < 0 ? '' : `<li${mapDone(pt) ? ' class="done"' : mapNext === i ? ' class="next"' : ''}>${esc(pt.title || '')}</li>`).join('')}</ol>` : ''}
+      <div class="kp-hs-bar">
+        ${rd.R ? `<span class="kp-hs-rounds" data-hs-round>${T('runde')} ${rd.r + 1} ${T('von')} ${rd.R}</span>` : ''}
+        <p class="kp-hs-hint">${esc(rd.hint || 'Klick auf die Punkte im Bild.')}</p>
+        ${count}${rd.R && list.length && list.every(doneAt) ? (rd.r < rd.R - 1 ? `<button class="kp-btn" data-hs-next-round="${b.id}">${T('naechsteRunde')} →</button>` : `<span class="kp-feedback ok" role="status">${T('alleRunden')}</span>`) : list.length > 1 && !(b.map && list.every(pt => doorTo(pt) >= 0)) ? `<button class="kp-btn kp-sec kp-hs-tour" data-hs-tour="${b.id}">${open == null ? T('fuehrungStarten') : T('naechsterPunkt')}</button>` : ''}
+      </div>
+      ${cur && mode !== 'popover' ? `<div class="kp-hs-info" role="status">
+        ${cur.image && cur.image.src ? `<img class="kp-hs-detail" src="${esc(res(cur.image.src))}" alt="${esc(cur.image.alt || '')}">` : ''}
+        ${cur.title ? `<h3>${esc(cur.title)}</h3>` : ''}<div class="kp-text">${res(cur.html)}</div>${navBar()}</div>` : ''}</div>`;
+  }
+
+  // Regler zum Aufdecken (Vorbild „Eisberg der Eigenheiten“): je Reglerstellung ein Bildausschnitt (focus) oder eigenes Bild
+  // und ein Text; gesehene Stufen in state.self[id].seen, erledigt mit allen Stufen. Der input-Handler tauscht nur Bild,
+  // Text und Marken (rvApply), damit der Regler den Fokus behält.
+  function rvStage(b, at) {
+    const stop = (b.stops || [])[at] || {};
+    const own = stop.image && stop.image.src;
+    const im = own ? stop.image : b.image;
+    const foc = own ? (stop.image.focus || '50% 50%') : (stop.focus || (b.image || {}).focus || '50% 50%');
+    return im && im.src ? `<img src="${esc(res(im.src))}" alt="${esc(im.alt || '')}" style="object-position:${esc(foc)}">` : `<div class="kp-photo-empty">${icon('layers')}<span>Noch kein Bild</span></div>`;
+  }
+  function rvPanel(b, at) {
+    const stop = (b.stops || [])[at] || {};
+    return `<p class="kp-rv-step">${at + 1} ${T('von')} ${(b.stops || []).length}</p><h3 class="kp-rv-label">${esc(stop.label || '')}</h3><div class="kp-text">${res(stop.html || '')}</div>`;
+  }
+  function renderAufdecken(b) {
+    const st = state.self[b.id] || {};
+    const stops = b.stops || [], n = stops.length;
+    const at = Math.min(Math.max(0, Number(st.at) || 0), Math.max(0, n - 1));
+    // die beim Öffnen sichtbare Stufe gilt als gesehen (sonst fehlte Stufe 1 immer)
+    st.seen = Object.assign({}, st.seen || {}, { [at]: true }); st.at = at; if (n) state.self[b.id] = st;
+    const seen = st.seen;
+    const vert = b.orient === 'senkrecht';
+    return `<div class="kp-reveal${vert ? ' kp-rv-vert' : ''}" data-reveal="${b.id}" style="--n:${n}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      ${b.hint ? `<p class="kp-hs-hint kp-rv-hint">${esc(b.hint)}</p>` : ''}
+      <div class="kp-rv-grid">
+        <div class="kp-rv-stage" data-rv-stage>${rvStage(b, at)}</div>
+        <div class="kp-rv-ctrl">
+          <input type="range" class="kp-rv-range" data-rv="${b.id}" min="0" max="${Math.max(0, n - 1)}" step="1" value="${at}" aria-label="${esc(plainTitle(b.title || '') || T('aufdecken'))}" aria-valuetext="${esc(stops[at] ? stops[at].label : '')}">
+          <ol class="kp-rv-ticks" data-rv-ticks>${stops.map((x, i) => `<li><button type="button" class="kp-rv-tick${i === at ? ' on' : ''}${seen[i] ? ' seen' : ''}" data-rv-to="${i}" data-block="${b.id}" aria-pressed="${i === at}"><i></i><span>${esc(x.label || (i + 1))}</span></button></li>`).join('')}</ol>
+        </div>
+        <div class="kp-rv-panel" data-rv-panel aria-live="polite">${rvPanel(b, at)}</div>
+      </div>
+    </div>`;
+  }
+  function rvApply(b, box, at) {
+    if (!b || !box) return;
+    const n = (b.stops || []).length;
+    at = Math.min(Math.max(0, Number(at) || 0), Math.max(0, n - 1));
+    const st = state.self[b.id] || { seen: {} };
+    st.at = at; st.seen = st.seen || {}; st.seen[at] = true; state.self[b.id] = st;
+    const stage = box.querySelector('[data-rv-stage]'), panel = box.querySelector('[data-rv-panel]'), range = box.querySelector('[data-rv]');
+    if (stage) { stage.innerHTML = rvStage(b, at); }
+    if (panel) { panel.innerHTML = rvPanel(b, at); panel.classList.remove('kp-rv-flash'); void panel.offsetWidth; panel.classList.add('kp-rv-flash'); }
+    if (range) { range.value = at; range.setAttribute('aria-valuetext', (b.stops[at] || {}).label || ''); }
+    box.querySelectorAll('[data-rv-to]').forEach(t => { const i = Number(t.dataset.rvTo); t.classList.toggle('on', i === at); t.classList.toggle('seen', !!st.seen[i]); t.setAttribute('aria-pressed', String(i === at)); });
+    updateConditions(); renderFooter(); report();
+  }
+
+  // Schichten: Ebenen über einem Bild ein- und ausblenden
+  function renderLayers(b) {
+    const st = state.self[b.id] || { on: {} };
+    const on = st.on || {};
+    const layers = (b.layers || []);
+    return `<div class="kp-layers" data-layers="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      <div class="kp-ly-stage">
+        ${b.image && b.image.src ? `<img src="${esc(res(b.image.src))}" alt="${esc(b.image.alt || '')}">` : `<div class="kp-photo-empty">${icon('layers')}<span>Noch kein Bild</span></div>`}
+        ${layers.map((l, i) => l.image && l.image.src
+          ? `<img class="kp-ly-over ${on[i] ? 'on' : ''}" src="${esc(res(l.image.src))}" alt="${on[i] ? esc(l.image.alt || l.title || '') : ''}">`
+          : `<div class="kp-ly-tint ${on[i] ? 'on' : ''}" style="--c:${esc(l.color || 'var(--kp-accent)')}"></div>`).join('')}
+      </div>
+      <div class="kp-ly-buttons">${layers.map((l, i) => `<button class="kp-btn ${on[i] ? '' : 'kp-sec'}" data-layer="${b.id}" data-i="${i}" aria-pressed="${!!on[i]}">${esc(l.title || 'Ebene ' + (i + 1))}</button>`).join('')}</div>
+      ${layers.some((l, i) => on[i] && plainText(l.html)) ? `<div class="kp-hs-info" role="status">${layers.map((l, i) => (on[i] && plainText(l.html) ? `<div class="kp-text">${res(l.html)}</div>` : '')).join('')}</div>` : ''}
+    </div>`;
+  }
+
+  // Comic-Strip: mehrere Panels nebeneinander
+  function renderStrip(b) {
+    const panels = (b.panels || []).map(pa => {
+      const p = personOf(pa);
+      // Haltung je Feld: Haltungsbild aus der Besetzung, sonst das Hauptbild
+      const pic = p.image && p.image.src ? poseImage(p, pa.pose) : '';
+      const media = pic ? `<img loading="lazy" decoding="async" src="${esc(res(pic))}" alt="${esc(p.image.alt || '')}">` : avatarSvg(p.look || 'a1', pa.pose);
+      const illu = pic && (/\.svg(\?|$)|^data:image\/svg/i.test(pic) || /illustration|storyset|undraw/i.test(p.image.credit || ''));
+      const lead = pa.castId && ((course.cast || [])[0] || {}).id === pa.castId;
+      return `<figure class="kp-panel fx-reveal${lead ? ' kp-panel-lead' : ''}">
+        <div class="kp-panel-art${illu ? ' kp-panel-illu' : ''}"${p.color ? ` style="--c:${esc(p.color)}"` : ''}>${media}${pa.text ? `<div class="kp-panel-bubble ${pa.think ? 'think' : ''}">${esc(pa.text)}</div>` : ''}</div>
+        ${pa.caption || p.name ? `<figcaption>${p.name ? `<b>${esc(p.name)}</b> ` : ''}${esc(pa.caption || '')}</figcaption>` : ''}</figure>`;
+    }).join('');
+    return `<div class="kp-strip">
+      ${b.title ? `<p class="kp-label">${esc(b.title)}</p>` : ''}
+      <div class="kp-strip-grid" style="--cols:${Math.min(4, Math.max(1, Number(b.columns) || 3))}">${panels}</div></div>`;
+  }
+
+  // ---------- Klickpfad: Software-Simulation in drei Stufen ----------
+  // zeigen: Mauszeiger fährt zur Stelle; ueben: selbst klicken mit Hilfe; pruefen: ohne Hilfe, Ergebnis am Ende
+  const SIM_MODES = ['zeigen', 'ueben', 'pruefen'];
+  function simState(b) {
+    const modes = (b.modes || []).filter(m => SIM_MODES.includes(m));
+    const list = modes.length ? modes : SIM_MODES;
+    if (!state.self[b.id]) state.self[b.id] = { mode: list.includes(b.start) ? b.start : list[0], step: 0, wrong: 0, miss: [], done: false, msg: '' };
+    return { st: state.self[b.id], modes: list };
+  }
+  function renderSimulation(b) {
+    const steps = b.steps || [];
+    const { st, modes } = simState(b);
+    const n = steps.length;
+    const label = { zeigen: T('simZeigen'), ueben: T('simUeben'), pruefen: T('simPruefen') };
+    const bar = modes.length > 1 ? `<div class="kp-sim-modes" role="group" aria-label="${esc(T('simArt'))}">${modes.map(m => `<button data-sim-mode="${m}" data-block="${b.id}" aria-pressed="${st.mode === m}">${label[m]}</button>`).join('')}</div>` : '';
+    const head = `${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text" style="margin-bottom:12px">${res(b.intro)}</div>` : ''}${bar}`;
+    if (!n) return `<div class="kp-sim" data-sim="${b.id}">${head}<p class="kp-label">Noch keine Schritte.</p></div>`;
+    if (st.done) {
+      const right = n - st.miss.length;
+      const body = st.mode === 'pruefen'
+        ? `<div class="kp-feedback ${st.miss.length ? 'neutral' : 'ok'}" role="status">${right} ${T('von')} ${n} ${T('simErgebnis')}</div>${st.miss.length ? `<p class="kp-label" style="margin-top:12px">${esc(T('simNochmalUeben'))}</p><ul class="kp-sim-miss">${st.miss.map(i => `<li>${T('simSchritt')} ${i + 1}: ${esc((steps[i] || {}).text || '')}</li>`).join('')}</ul>` : ''}`
+        : `<div class="kp-feedback ok" role="status">${esc(st.mode === 'zeigen' ? T('simGesehen') : T('simGeschafft'))}</div>`;
+      return `<div class="kp-sim" data-sim="${b.id}">${head}${body}<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-sim-reset="${b.id}">↺ ${T('simNochmal')}</button></div></div>`;
+    }
+    const i = Math.min(st.step, n - 1), s = steps[i] || {};
+    const show = st.mode === 'zeigen' || (st.mode === 'ueben' && st.wrong >= 2) || (st.mode === 'pruefen' && st.wrong >= 3);
+    const box = `left:${+s.x || 0}%;top:${+s.y || 0}%;width:${+s.w || 10}%;height:${+s.h || 8}%`;
+    const cursor = st.mode === 'zeigen' ? `<span class="kp-sim-cursor" aria-hidden="true" style="--tx:${(+s.x || 0) + (+s.w || 10) / 2}%;--ty:${(+s.y || 0) + (+s.h || 8) / 2}%"><svg viewBox="0 0 24 24"><path d="M4 2l15 11-7 1 4 8-3 1-4-8-5 5z" fill="#fff" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/></svg></span>` : '';
+    const img = s.image && s.image.src ? `<img src="${esc(res(s.image.src))}" alt="${esc(s.image.alt || '')}" draggable="false">` : `<div class="kp-sim-noimg">${T('simKeinBild')}</div>`;
+    const controls = st.mode === 'zeigen'
+      ? `${i > 0 ? `<button class="kp-btn kp-sec" data-sim-go="${b.id}" data-i="${i - 1}">← ${T('zurueck')}</button>` : ''}<button class="kp-btn" data-sim-hit="${b.id}">${i < n - 1 ? T('weiter') + ' →' : T('simFertig')}</button>`
+      : (st.mode === 'ueben' && !show ? `<button class="kp-btn kp-sec" data-sim-show="${b.id}">${T('simStelle')}</button>` : '');
+    return `<div class="kp-sim kp-sim-${st.mode}" data-sim="${b.id}">${head}
+      <p class="kp-sim-task"><span>${T('simSchritt')} ${i + 1} ${T('von')} ${n}</span>${esc(s.text || '')}</p>
+      <div class="kp-sim-stage" data-sim-stage="${b.id}">${img}
+        <button class="kp-sim-target${show ? ' show' : ''}" data-sim-hit="${b.id}" style="${box}" aria-label="${esc(s.text || T('simZiel'))}"${st.mode === 'zeigen' ? ' tabindex="-1"' : ''}></button>${cursor}</div>
+      <div class="kp-sim-msg" role="status" aria-live="polite">${st.msg ? `<div class="kp-feedback ${st.msgOk ? 'ok' : 'neutral'}">${esc(st.msg)}</div>` : ''}</div>
+      ${controls ? `<div class="kp-quiz-actions">${controls}</div>` : ''}
+      <div class="kp-sim-prog" aria-hidden="true"><b style="width:${Math.round(i / n * 100)}%"></b></div>
+    </div>`;
+  }
+  function simAct(b, act, arg) {
+    const steps = b.steps || [];
+    const { st } = simState(b);
+    if (act === 'mode') Object.assign(st, { mode: arg, step: 0, wrong: 0, miss: [], done: false, msg: '' });
+    else if (act === 'reset') Object.assign(st, { step: 0, wrong: 0, miss: [], done: false, msg: '' });
+    else if (act === 'go') Object.assign(st, { step: Math.max(0, Math.min(steps.length - 1, arg)), wrong: 0, msg: '' });
+    else if (act === 'show') st.wrong = Math.max(st.wrong, 2);
+    else if (act === 'hit') {
+      const s = steps[st.step] || {};
+      st.msg = st.mode === 'zeigen' ? '' : (s.done || '');
+      st.msgOk = true;
+      st.wrong = 0;
+      if (st.step >= steps.length - 1) {
+        st.done = true;
+        st.fin = true; // einmal ganz durchlaufen, bleibt auch nach „Nochmal“ oder Stufenwechsel
+        // Bestes Prüfergebnis bleibt, auch wenn danach wieder geübt wird (zählt bei b.graded fürs LMS)
+        if (st.mode === 'pruefen' && steps.length) st.exam = Math.max(st.exam || 0, (steps.length - st.miss.length) / steps.length);
+      } else st.step++;
+    } else if (act === 'miss') {
+      if (st.mode === 'zeigen') return false;
+      const s = steps[st.step] || {};
+      st.wrong++;
+      st.msgOk = false;
+      if (st.mode === 'pruefen') {
+        if (!st.miss.includes(st.step)) st.miss.push(st.step);
+        st.msg = st.wrong >= 3 ? T('simGezeigt') : T('simPruefDaneben');
+      } else st.msg = st.wrong >= 2 ? (s.hint ? s.hint + ' ' : '') + T('simGezeigt') : (s.hint || T('simDaneben'));
+    }
+    return true;
+  }
+
+  // ---------- Sortieren, Prozess, Weiter-Sperre, Anhang ----------
+  // Sortieren in Kategorien: mit Maus ziehen oder mit der Tastatur zuordnen
+  function renderSort(b) {
+    const st = state.self[b.id] || { place: {}, done: false };
+    const cats = b.categories || [];
+    const items = (b.items || []);
+    const order = state.pools['sort-' + b.id] || items.map((x, i) => i);
+    // Spalten sind { title }; die Karte nennt ihre Spalte per Titel
+    const catAt = n => { const c = cats[n]; return c && typeof c === 'object' ? c.title : c; };
+    const open = order.filter(i => st.place[i] == null);
+    const ablage = b.look === 'ablage';
+    // Bilder (Vorbild „Scenario choice drag and drop“): Kategorien als Pillen oben mit Ablagestreifen, darunter die Bilder;
+    // jedes Kärtchen zeigt sein Bild (items[].image), der Text steht als Bildunterschrift
+    const bilder = b.look === 'bilder';
+    const chip = (i, inCat) => {
+      const it = items[i];
+      const pic = it.image && it.image.src ? `<img class="kp-sort-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy" draggable="false"${focusStyle(it.image)}>` : '';
+      const right = st.done && st.place[i] != null && it.cat === catAt(st.place[i]);
+      return `<li class="kp-sort-item ${st.done ? (right ? 'kp-right' : 'kp-wrong') : ''}" draggable="${st.done ? 'false' : 'true'}" data-sort-item="${i}" data-block="${b.id}" tabindex="0">
+        ${ablage ? `<span class="kp-sort-grip" aria-hidden="true">${icon('move')}</span>` : ''}${pic}<span class="kp-sort-text">${esc(it.text)}</span>
+        ${st.done ? (right ? '<b aria-label="richtig">✔</b>' : `<b aria-label="falsch">✘ <span class="kp-sort-fix">${esc(it.cat)}</span></b>`) : `<span class="kp-sort-move">${cats.map((c, ci) => `<button data-sort-to="${ci}" data-item="${i}" data-block="${b.id}" title="Nach „${esc(c.title)}“" ${inCat === ci ? 'disabled' : ''}>${ci + 1}</button>`).join('')}</span>`}
+      </li>`;
+    };
+    const boxes = cats.map((c, ci) => `<div class="kp-sort-cat" data-sort-cat="${ci}" data-block="${b.id}">
+      <p class="kp-sort-cat-title"><span class="kp-num" aria-hidden="true">${ci + 1}</span>${esc(c.title)}</p>
+      <ul>${order.filter(i => st.place[i] === ci).map(i => chip(i, ci)).join('') || `<li class="kp-sort-empty">${ablage ? '' : 'Noch nichts zugeordnet'}</li>`}</ul></div>`).join('');
+    const score = st.done ? items.filter((it, i) => st.place[i] != null && it.cat === catAt(st.place[i])).length : 0;
+    return `<div class="kp-sortcats${ablage ? ' kp-sort-ablage' : ''}${bilder ? ' kp-sort-bilder' : ''}" data-sortcats="${b.id}" style="--n:${Math.max(1, cats.length)}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      ${b.intro ? `<div class="kp-text" style="margin-bottom:12px">${res(b.intro)}</div>` : ''}
+      <p class="kp-sort-hint">${esc(b.hint || 'Zieh die Karten in die passende Spalte. Mit der Tastatur: Karte anwählen und die Nummer der Spalte drücken.')}</p>
+      <div class="kp-sort-pool"><ul>${open.map(i => chip(i, null)).join('') || `<li class="kp-sort-empty">${ablage ? '' : 'Alles zugeordnet'}</li>`}</ul></div>
+      <div class="kp-sort-cats">${boxes}</div>
+      ${st.done
+        ? `<div class="kp-feedback ${score === items.length ? 'ok' : 'neutral'}" role="status">${score} von ${items.length} richtig zugeordnet.${score === items.length ? '' : ' Die richtige Spalte steht jetzt hinter den falschen Karten.'}</div>
+           <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-sort-reset="${b.id}">Noch einmal</button></div>`
+        : `<div class="kp-quiz-actions"><button class="kp-btn" data-sort-check="${b.id}" ${open.length ? 'disabled' : ''}>${esc(b.checkLabel || (ablage ? 'OK' : 'Zuordnung prüfen'))}</button></div>`}
+    </div>`;
+  }
+
+  // Stellen im Text finden: die gesuchten Textstellen werden im Fließtext anklickbar gemacht
+  // Markieren im Text: Sätze anklicken, die auf die Person zutreffen (aktives Lesen ohne Wertung)
+  const mkItems = b => (b.items || []).map(x => String(x || '')).filter(x => x.trim());
+  const mkMarked = b => ((state.self[b.id] || {}).m || []).filter(i => i < mkItems(b).length);
+  const mkCount = b => T('mkMarkiert').replace('{n}', mkMarked(b).length).replace('{m}', mkItems(b).length);
+  function renderMarkieren(b) {
+    const st = state.self[b.id] || {};
+    const items = mkItems(b), m = mkMarked(b);
+    const sents = items.map((t, i) => `<button type="button" class="kp-mk-s${m.includes(i) ? ' is-on' : ''}" data-mk-s="${i}" data-block="${b.id}" aria-pressed="${m.includes(i) ? 'true' : 'false'}">${esc(t)}</button>`).join(' ');
+    return `<div class="kp-mk" data-markieren="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      ${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      <p class="kp-text kp-mk-text">${sents}</p>
+      <div class="kp-mk-foot"><span class="kp-mk-count" data-mk-count role="status">${mkCount(b)}</span>
+        ${st.done ? '' : `<button type="button" class="kp-btn" data-mk-done="${b.id}">${esc(b.button || T('mkFertig'))}</button>`}</div>
+      ${st.done ? `<div class="kp-mk-after" role="status"><p class="kp-saved">${m.length ? esc(b.thanks || T('mkDanke')) : esc(b.none || T('mkKeins'))}</p>${plainText(b.after) ? `<div class="kp-text">${res(b.after)}</div>` : ''}</div>` : `<p class="kp-label kp-mk-hint">${esc(b.hint || T('mkHinweis'))}</p>`}
+    </div>`;
+  }
+  // Sammelkarten (Vorbild Storyline „Smart Flips“): die Merkkarte wird auf der Seite umgedreht und landet im Stapel,
+  // der Kartenstapel fragt am Ende alle Merkkarten davor ab; was nicht saß, kommt am Ende der Runde noch einmal
+  const pageIdxOf = id => pages.findIndex(p => (p.blocks || []).some(x => x.id === id));
+  const allMerkkarten = () => pages.flatMap(p => (p.blocks || []).filter(x => x.type === 'merkkarte' && plainText(x.front)));
+  // ---------- Aufgabe am Bildschirm (17.10.2026, Vorbild Storyline-Szene „Passwort anlegen“): Szene mit Mentor-Porträt im Sechseck
+  // und Sprechfeld, ein pulsierender Punkt am Gerät, der Klick zoomt auf den Bildschirm mit Eingabe; falsch = Fehlerzeile und Rat
+  // des Mentors, richtig = Bestätigung. Die Eingabe bleibt nur im Arbeitsspeicher (bsDraft), nie im Lernstand oder im LMS.
+  const bsDraft = {};
+  let bsZoom = '';
+  const PW_RULES = [
+    ['laenge', (v, b) => v.length >= bsMin(b)], ['klein', v => /[a-zäöüß]/.test(v)], ['gross', v => /[A-ZÄÖÜ]/.test(v)],
+    ['zahl', v => /\d/.test(v)], ['zeichen', v => /[^A-Za-z0-9ÄÖÜäöüß\s]/.test(v)],
+    ['einfach', v => !/(0123|1234|2345|3456|4567|5678|6789|abcd|qwert|passw|kennwort)/i.test(v)]];
+  const bsMin = b => Math.max(4, Number(b.minLength) || 12);
+  const bsRuleText = (k, b) => k === 'laenge' ? T('pwLaenge').replace('{n}', bsMin(b)) : T('pw' + k[0].toUpperCase() + k.slice(1));
+  const bsAnswers = b => (Array.isArray(b.answers) ? b.answers : String(b.answers || '').split('\n')).map(x => String(x).trim().toLowerCase()).filter(Boolean);
+  function bsOk(b, v) {
+    if (b.check === 'antwort') return bsAnswers(b).includes(String(v).trim().toLowerCase().replace(/\s+/g, ' '));
+    return PW_RULES.every(([, f]) => f(v, b));
+  }
+  const bsSpeaks = b => b.voice !== false;
+  // Linienbündel in den Ecken des Bildschirms (wie im Original): viele feine Kurven, die nebeneinander laufen
+  const BS_WAVE = (() => {
+    let d = '';
+    for (let i = 0; i < 16; i++) d += `<path d="M0 ${330 - i * 9} C ${70 + i * 2} ${250 - i * 12}, ${110 + i * 3} ${60 + i * 4}, ${250 + i * 4} ${48 - i * 2} S ${420 + i * 3} ${-6 + i * 5}, ${600} ${-20 + i * 6}"/>`;
+    return `<svg viewBox="0 0 600 400" preserveAspectRatio="none" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1" vector-effect="non-scaling-stroke" opacity=".75">${d}</g></svg>`;
+  })();
+  const BS_ERR = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 6.5v7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.2" fill="currentColor"/></svg>';
+  // Was der Mentor gerade sagt: Auftrag in der Szene, Rat nach einem Fehlversuch, Lob am Ende
+  function bsMentorText(b) {
+    const st = state.self[b.id] || {};
+    return st.done ? b.right || '' : st.v ? (st.tries ? b.wrong || '' : '') : b.intro || '';
+  }
+  function bsRules(b, v) {
+    return `<ul class="kp-bs-rules" data-bs-rules>${PW_RULES.map(([k, f]) => { const ok = f(v || '', b); return `<li class="${ok ? 'ok' : ''}"><span aria-hidden="true">${ok ? '✓' : '✕'}</span>${esc(bsRuleText(k, b))}<span class="kp-sr"> ${ok ? T('richtig') : ''}</span></li>`; }).join('')}</ul>`;
+  }
+  function renderBildschirm(b) {
+    const st = state.self[b.id] || {};
+    const m = castOf({ castId: b.castId, name: b.name, image: b.image, look: b.image ? 'image' : '' }) || {};
+    const pic = m.image && m.image.src ? `<img src="${esc(res(m.image.src))}" alt="">` : m.look && m.look !== 'image' ? avatarSvg(m.look, 'happy', true) : icon('user');
+    const say = bsMentorText(b);
+    const fx = b.faceX != null && b.faceX !== '' ? b.faceX : m.face;
+    const faceVar = fx != null && fx !== '' ? ` style="--kp-bs-face:${Number(fx) || 50}%"` : '';
+    const mentor = say ? `<div class="kp-bs-mentor kp-bs-mentor-${st.v ? 'unten' : 'oben'}"><div class="kp-bs-hex" aria-hidden="true"${faceVar}><div>${pic}</div></div>
+      <div class="kp-bs-say" aria-live="polite">${m.name ? `<span class="kp-sr">${esc(m.name)}: </span>` : ''}${dlgText(say)}</div></div>` : '';
+    const ai = bsSpeaks(b) ? `<span class="kp-ai-voice" title="${esc(T('kiStimme'))}">${esc(T('kiStimmeKurz'))}<span class="kp-sr"> · ${esc(T('kiStimme'))}</span></span>` : '';
+    const bar = bsSpeaks(b) ? `<div class="kp-gross-bar kp-bs-bar" role="group" aria-label="${esc(b.title || T('szene'))}">
+        <button data-bs-voice="${b.id}" aria-pressed="false" aria-label="${esc(T('vorlesen'))}" title="${esc(T('vorlesen'))}">▶</button><span class="kp-bs-fill"></span>${ai}
+        <button data-gs-mute="${b.id}" aria-pressed="${!(audioPrefs.vol > 0)}" aria-label="${esc(T(audioPrefs.vol > 0 ? 'tonAus' : 'tonAn'))}" title="${esc(T(audioPrefs.vol > 0 ? 'tonAus' : 'tonAn'))}">${GROSS_SOUND(audioPrefs.vol > 0)}</button></div>` : '';
+    const spot = b.spot || {};
+    const x = Math.min(97, Math.max(3, Number(spot.x) || 50)), y = Math.min(95, Math.max(5, Number(spot.y) || 50));
+    if (!st.v) {
+      const raum = b.sceneLook ? b.sceneLook === 'raum' : !!(b.scene && /\.svg(\?|$)|^data:image\/svg/i.test(b.scene.src || ''));
+      const bg = b.scene && b.scene.src ? `<img class="kp-bs-bg" src="${esc(res(b.scene.src))}" alt="${esc(b.scene.alt || '')}" style="${focusStyle(b.scene)}">` : '';
+      return `<div class="kp-bs" data-bs="${b.id}">${b.title ? `<h2 class="kp-q kp-sr">${esc(b.title)}</h2>` : ''}<div class="kp-bs-frame">
+        <div class="kp-bs-stage kp-bs-scene${raum ? ' kp-bs-raum' : ''}">${bg}<button class="kp-bs-spot" data-bs-open="${b.id}" style="left:${x}%;top:${y}%" aria-label="${esc((b.spotLabel || T('bsAnklicken')) + ' – ' + T('bsAnklicken'))}"><span></span></button>
+        ${b.scene && b.scene.credit ? `<span class="kp-bs-credit">${esc(b.scene.credit)}</span>` : ''}</div>${mentor}</div>${bar}</div>`;
+    }
+    const pw = b.check !== 'antwort';
+    const name = firstName();
+    const draft = bsDraft[b.id] || '';
+    const inId = 'bs-in-' + b.id;
+    const form = st.done
+      ? `<p class="kp-bs-ok" data-bs-ok tabindex="-1">${icon('check')}<span>${esc(b.success || T('richtig'))}</span></p>`
+      : `<form class="kp-bs-form" data-bs-form="${b.id}" novalidate><label class="kp-sr" for="${inId}">${esc(b.prompt || '')}${pw ? ' ' + esc(T('bsKeinEcht')) : ''}</label>
+          <input id="${inId}" type="text" data-bs-input="${b.id}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(b.placeholder || '')}" value="${esc(draft)}">
+          <button type="submit" class="kp-bs-go" aria-label="${esc(T('bsBestaetigen'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button></form>
+        ${st.tries ? `<p class="kp-bs-err" role="alert">${BS_ERR}<span>${esc(b.error || '')}</span></p>` : ''}
+        ${pw && st.tries && b.showRules ? bsRules(b, draft) : ''}`;
+    return `<div class="kp-bs" data-bs="${b.id}">${b.title ? `<h2 class="kp-q kp-sr">${esc(b.title)}</h2>` : ''}<div class="kp-bs-frame">
+      <div class="kp-bs-stage kp-bs-at${bsZoom === b.id ? ' kp-bs-zoom' : ''}" style="--x:${x}%;--y:${y}%"><div class="kp-bs-device"><span class="kp-bs-wave kp-bs-wave-a">${BS_WAVE}</span><span class="kp-bs-wave kp-bs-wave-b">${BS_WAVE}</span><div class="kp-bs-screen">
+        <div class="kp-bs-avatar" aria-hidden="true">${icon('user')}</div>
+        <h3 class="kp-bs-heading">${esc(b.heading || T('bsWillkommen'))}${name ? ', ' + esc(name) : ''}!</h3>
+        ${b.prompt ? `<p class="kp-bs-prompt">${esc(b.prompt)}</p>` : ''}${form}
+      </div></div><span class="kp-bs-power" aria-hidden="true"></span></div>${mentor}</div>${bar}</div>`;
+  }
+  function bsVoice(b, on) {
+    const btn = root.querySelector(`[data-bs="${b.id}"] [data-bs-voice]`);
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', String(on));
+    btn.setAttribute('aria-label', T(on ? 'vorlesenStopp' : 'vorlesen'));
+    btn.title = T(on ? 'vorlesenStopp' : 'vorlesen');
+    btn.textContent = on ? '❚❚' : '▶';
+  }
+  function bsSay(b) {
+    stopSound();
+    const text = bsMentorText(b);
+    if (!bsSpeaks(b) || !text) return;
+    const ctl = playSound('', text, () => bsVoice(b, false), 0);
+    if (ctl) bsVoice(b, true);
+  }
+  function bsRefresh(b, focusSel) {
+    const box = root.querySelector(`[data-bs="${b.id}"]`);
+    if (!box) return;
+    refreshBlock(box, renderBildschirm(b));
+    bsZoom = '';
+    const f = focusSel && root.querySelector(`[data-bs="${b.id}"] ${focusSel}`);
+    if (f) { f.focus({ preventScroll: true }); if (f.setSelectionRange && f.value) f.setSelectionRange(f.value.length, f.value.length); }
+  }
+  function bsSubmit(b, value) {
+    const st = state.self[b.id] = state.self[b.id] || {};
+    bsDraft[b.id] = value;
+    if (bsOk(b, value)) { st.done = true; delete bsDraft[b.id]; bsRefresh(b, '[data-bs-ok]'); updateConditions(); renderFooter(); }
+    else { st.tries = (st.tries || 0) + 1; bsRefresh(b, '[data-bs-input]'); }
+    report();
+    bsSay(b);
+  }
+
+  // Mappe zum Öffnen (Vorbild Storyline „Company Culture“): eine Unterlage, die man vor der Entscheidung lesen muss.
+  // Zu sieht man die Mappe mit Aufschrift, offen das Blatt darunter; geöffnet ist geöffnet (state.self[id].r), auch wenn sie wieder zu ist.
+  function renderMappe(b) {
+    const st = state.self[b.id] || {}, o = !!st.o, label = plainText(b.label) || T('mappeStd'), docId = 'mp-' + b.id;
+    return `<div class="kp-mappe${o ? ' is-open' : ''}${st.r ? ' is-read' : ''}" data-mappe="${b.id}">
+      ${eyebrow(b.eyebrow)}${plainText(b.title) ? `<h2 class="kp-q">${esc(plainText(b.title))}</h2>` : ''}${plainText(b.intro) ? `<div class="kp-text kp-mappe-intro">${res(b.intro)}</div>` : ''}
+      <div class="kp-mappe-row">
+        <button type="button" class="kp-mappe-folder" data-mappe-open="${b.id}" aria-expanded="${o}" aria-controls="${docId}">
+          <span class="kp-mappe-tab" aria-hidden="true"></span><span class="kp-mappe-label">${esc(label)}</span><span class="kp-sr">: ${o ? T('mappeZu') : T('mappeAuf')}</span></button>
+        <p class="kp-mappe-hint">${st.r ? `<span class="kp-mappe-ok">${icon('check')}</span> ` : ''}${esc(st.r ? (o ? T('mappeOffen') : T('mappeGelesen')) : (plainText(b.hint) || T('mappeHinweis')))}</p>
+      </div>
+      <div class="kp-mappe-doc" id="${docId}" role="region" aria-label="${esc(plainText(b.docTitle) || label)}" tabindex="-1"${o ? '' : ' hidden'}>
+        ${plainText(b.docTitle) ? `<p class="kp-mappe-doctitle">${esc(plainText(b.docTitle))}</p>` : ''}<div class="kp-text">${res(b.html || '')}</div>
+        <button type="button" class="kp-btn kp-sec kp-mappe-close" data-mappe-open="${b.id}">${T('mappeZu')}</button>
+      </div>
+    </div>`;
+  }
+  // Videopaar (Vorbild Storyline „Active Listening“ mit Haken und Kreuz): zwei Clips derselben Lage, erst einschätzen
+  // („Welche Szene wirkt aufmerksamer?“), dann Haken, Kreuz, Rückmeldung mit dem Merkmal und Tun/Lassen darunter.
+  function renderVideopaar(b) {
+    const st = state.self[b.id] || {}, picked = typeof st.v === 'number', items = (b.items || []).slice(0, 2);
+    const goodIdx = items.findIndex(x => x && x.good);
+    const right = picked && (items[st.v] || {}).good;
+    const clip = (it, i) => {
+      const say = plainText(it.desc) || plainText(it.transcript);
+      const vid = it.source === 'url' ? it.url : it.src;
+      // Ohne Video (Kerstin liefert die Clips später): Standbild mit der Beschreibung, damit die Wahl auch so möglich ist
+      const media = vid ? videoHtml({ source: it.source, url: it.url, src: it.src, poster: it.poster, captions: it.captions, captionsText: it.captionsText, text: say }, 'kp-vp-video')
+        : `<div class="kp-video-dummy kp-vp-video">${it.poster && it.poster.src ? `<img src="${esc(res(it.poster.src))}" alt="">` : ''}<div class="kp-vd-in"><span class="kp-vd-lb">${icon('play')} ${T(opts.preview ? 'videoFolgt' : 'vpBeschreibung')}</span><p class="kp-vp-say">${esc(say)}</p></div></div>`;
+      const hasVid = /<video/.test(media);
+      const mark = picked ? `<span class="kp-vp-mark ${it.good ? 'kp-vp-ok' : 'kp-vp-no'}" role="img" aria-label="${esc(it.good ? T('vpSoGeht') : T('vpSoNicht'))}">${it.good ? icon('check') : '✕'}</span>` : '';
+      return `<figure class="kp-vp-clip${picked ? (it.good ? ' is-good' : ' is-bad') : ''}${st.v === i ? ' is-picked' : ''}">
+        <div class="kp-vp-media">${media}${hasVid ? `<button type="button" class="kp-vp-play" data-vp-play aria-label="${esc(T('vpAbspielen').replace('{n}', i + 1))}">${icon('play')}<span>${T('vpPlay')}</span></button>` : ''}${mark}</div>
+        <figcaption><b class="kp-vp-name">${esc(plainText(it.label) || T('szeneN').replace('{n}', i + 1))}</b>
+          ${plainText(it.desc) && hasVid ? `<details class="kp-vp-desc"><summary>${T('vpBeschreibung')}</summary><p>${esc(plainText(it.desc))}</p></details>` : ''}
+          ${picked ? (st.v === i ? `<span class="kp-vp-chosen">${T('deineWahl')}</span>` : '') : `<button type="button" class="kp-btn kp-sec kp-vp-pick" data-vp-pick="${i}">${esc(plainText(b.pickLabel) || T('vpWaehlen'))}</button>`}</figcaption>
+      </figure>`;
+    };
+    const why = goodIdx >= 0 ? plainText(items[goodIdx].why) : '';
+    return `<div class="kp-vp${picked ? ' is-done' : ''}" data-vp="${b.id}">
+      ${eyebrow(b.eyebrow)}${plainText(b.question) ? `<h2 class="kp-q">${esc(plainText(b.question))}</h2>` : ''}
+      ${picked ? '' : `<p class="kp-label">${esc(plainText(b.hint) || T('vpHinweis'))}</p>`}
+      <div class="kp-vp-grid">${items.map(clip).join('')}</div>
+      ${picked ? `<div class="kp-feedback ${right ? 'ok' : 'no'}" role="status" tabindex="-1" data-vp-fb>${esc(right ? (plainText(b.right) || T('vpRichtig')) : (plainText(b.wrong) || T('vpFalsch')))}${why ? ' ' + esc(why) : ''}</div>
+        ${b.doHtml || b.dontHtml ? `<div class="kp-vp-dd">${b.doHtml ? `<div class="kp-vp-do"><p class="kp-vp-ddh"><span class="kp-vp-ok" aria-hidden="true">${icon('check')}</span>${esc(plainText(b.doLabel) || T('vpTun'))}</p><div class="kp-text">${res(b.doHtml)}</div></div>` : ''}${b.dontHtml ? `<div class="kp-vp-dont"><p class="kp-vp-ddh"><span class="kp-vp-no" aria-hidden="true">✕</span>${esc(plainText(b.dontLabel) || T('vpLassen'))}</p><div class="kp-text">${res(b.dontHtml)}</div></div>` : ''}</div>` : ''}` : ''}
+    </div>`;
+  }
+  function renderMerkkarte(b) {
+    const o = !!(state.self[b.id] || {}).o;
+    const all = allMerkkarten(), k = all.filter(x => (state.self[x.id] || {}).o).length;
+    // Merkkarte als Vollbildfolie (allein auf einer Bildschirmseite, Vorbild bildungsinnovator-Zitatbänder): links die Frage
+    // groß auf der Hauptfarbe, rechts die Karte zum Umdrehen mit angedeutetem Stapel dahinter
+    if (fillOf(b)) {
+      const stand = `<p class="kp-mkc-stack" role="status">${icon('flip')}<span>${T('mkcImStapel').replace('{n}', k).replace('{m}', all.length)}</span></p>`;
+      return `<div class="kp-mkc kp-mkc-gross${o ? ' is-open' : ''}" data-mkc="${b.id}">
+        <div class="kp-mkc-side kp-on-dark">${eyebrow(b.eyebrow || T('mkcNeu'))}<span class="kp-mkc-tag">${T('mkcFrage')}</span><p class="kp-mkc-q">${esc(plainText(b.front))}</p>${o ? stand : ''}</div>
+        <div class="kp-mkc-main"><div class="kp-mkc-card">${o
+          ? `<div class="kp-mkc-face kp-mkc-back" tabindex="-1"><span class="kp-mkc-tag">${T('mkcAntwort')}</span><div class="kp-text">${res(b.back || '')}</div></div>`
+          : `<div class="kp-mkc-face kp-mkc-cover"><span class="kp-mkc-cover-ico" aria-hidden="true">${icon('flip')}</span><p class="kp-mkc-small">${esc(b.hint || T('mkcHinweis'))}</p><button type="button" class="kp-btn" data-mkc-flip="${b.id}">${T('mkcUmdrehen')}</button></div>`}</div></div>
+      </div>`;
+    }
+    return `<div class="kp-mkc${o ? ' is-open' : ''}" data-mkc="${b.id}">
+      ${eyebrow(b.eyebrow || T('mkcNeu'))}
+      <div class="kp-mkc-card">
+        ${o ? `<div class="kp-mkc-face kp-mkc-back" tabindex="-1"><span class="kp-mkc-tag">${T('mkcAntwort')}</span><p class="kp-mkc-small">${esc(plainText(b.front))}</p><div class="kp-text">${res(b.back || '')}</div></div>`
+        : `<div class="kp-mkc-face kp-mkc-front"><span class="kp-mkc-tag">${T('mkcFrage')}</span><p class="kp-mkc-q">${esc(plainText(b.front))}</p></div>`}
+      </div>
+      ${o ? `<p class="kp-saved kp-mkc-stack" role="status">${icon('flip')}<span>${T('mkcImStapel').replace('{n}', k).replace('{m}', all.length)}</span></p>`
+        : `<div class="kp-mkc-foot"><span class="kp-label">${esc(b.hint || T('mkcHinweis'))}</span><button type="button" class="kp-btn" data-mkc-flip="${b.id}">${T('mkcUmdrehen')}</button></div>`}
+    </div>`;
+  }
+  function deckCards(b) {
+    const pi = pageIdxOf(b.id), ch = (pages[pi] || {}).chapter;
+    return pages.flatMap((p, i) => i > pi || (b.scope === 'kapitel' && p.chapter !== ch) ? [] : (p.blocks || []).filter(x => x.type === 'merkkarte' && plainText(x.front)));
+  }
+  function deckResult(b) {
+    const r = (state.self[b.id] || {}).r || {}, cards = deckCards(b);
+    return { cards, known: cards.filter(c => r[c.id] === 1), retry: cards.filter(c => r[c.id] === 0) };
+  }
+  // Schon aufgedeckte Karten bleiben sichtbar (Wunsch Kerstin 15.10.2026), die zuletzt bewertete oben
+  function deckSeenHtml(ids, r, skip) {
+    const list = ids.filter(id => id !== skip).map(id => findBlock(id)).filter(Boolean);
+    if (!list.length) return '';
+    return `<div class="kp-deck-seen" data-deck-seen><p class="kp-label">${T('deckAufgedeckt')} (${list.length})</p><ul class="kp-deck-retry kp-deck-seen-list">${list.map(c => `<li class="${r[c.id] === 1 ? 'is-known' : 'is-again'}"><span class="kp-deck-mark">${r[c.id] === 1 ? T('deckGewusst') : T('deckNochNicht')}</span><strong>${esc(plainText(c.front))}</strong><div class="kp-text">${res(c.back || '')}</div></li>`).join('')}</ul></div>`;
+  }
+  function renderKartenstapel(b) {
+    const st = state.self[b.id] || {}, cards = deckCards(b), n = cards.length;
+    const head = b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : '';
+    const gross = fillOf(b);
+    const wrap = inner => `<div class="kp-deck${gross ? ' kp-deck-gross' : ''}" data-deck="${b.id}">${head}${inner}</div>`;
+    if (!n) return wrap(`<p class="kp-label">${T('deckLeer')}</p>`);
+    if (st.done) {
+      const d = deckResult(b);
+      return wrap(`<div class="kp-deck-done" tabindex="-1" role="status"><p class="kp-deck-score"><strong>${d.known.length}</strong> / ${n}</p><p class="kp-saved">${T('deckErgebnis').replace('{k}', d.known.length).replace('{n}', n)}</p></div>
+        ${d.retry.length ? `<p class="kp-label">${T('deckWiederholen')}</p><ul class="kp-deck-retry">${d.retry.map(c => `<li><strong>${esc(plainText(c.front))}</strong><div class="kp-text">${res(c.back || '')}</div></li>`).join('')}</ul>` : `<p>${T('deckAlle')}</p>`}
+        ${d.known.length && d.retry.length ? `<p class="kp-label">${T('deckGewusstAlle')}</p><ul class="kp-deck-retry kp-deck-seen-list" data-deck-seen>${d.known.map(c => `<li class="is-known"><strong>${esc(plainText(c.front))}</strong><div class="kp-text">${res(c.back || '')}</div></li>`).join('')}</ul>` : ''}
+        ${d.known.length && !d.retry.length ? `<ul class="kp-deck-retry kp-deck-seen-list" data-deck-seen>${d.known.map(c => `<li class="is-known"><strong>${esc(plainText(c.front))}</strong><div class="kp-text">${res(c.back || '')}</div></li>`).join('')}</ul>` : ''}
+        ${plainText(b.after) ? `<div class="kp-text">${res(b.after)}</div>` : ''}
+        <div class="kp-quiz-actions"><button type="button" class="kp-btn kp-sec" data-deck-restart="${b.id}">${T('deckNeu')}</button></div>`);
+    }
+    if (!Array.isArray(st.q)) {
+      const g = cards.filter(c => (state.self[c.id] || {}).o).length;
+      const fan = cards.slice(0, 5).map((c, i) => `<span class="kp-deck-fan-card" style="--i:${i};--n:${Math.min(5, n)}"></span>`).join('');
+      return wrap(`${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+        <div class="kp-deck-start"><div class="kp-deck-fan" aria-hidden="true">${fan}</div>
+          <div><p class="kp-deck-count">${T('deckAnzahl').replace('{n}', n).replace('{g}', g)}</p><button type="button" class="kp-btn" data-deck-start="${b.id}">${T('deckStart')}</button></div></div>`);
+    }
+    const c = findBlock(st.q[0]) || cards[0];
+    const r = st.r || {}, seen = Object.keys(r).length, k = Object.values(r).filter(v => v === 1).length;
+    const again = r[c.id] === 0;
+    return wrap(`<p class="kp-deck-stand" data-deck-stand>${T('deckStand').replace('{i}', Math.min(n, seen + (again ? 0 : 1))).replace('{n}', n).replace('{k}', k)}</p>
+      <div class="kp-deck-bar" aria-hidden="true"><i style="--w:${Math.round(seen / n * 100)}%"></i></div>
+      <div class="kp-mkc kp-deck-card${st.flip ? ' is-open' : ''}">
+        <div class="kp-mkc-card">${st.flip
+          ? `<div class="kp-mkc-face kp-mkc-back" tabindex="-1"><span class="kp-mkc-tag">${T('mkcAntwort')}</span><p class="kp-mkc-small">${esc(plainText(c.front))}</p><div class="kp-text">${res(c.back || '')}</div></div>`
+          : `<div class="kp-mkc-face kp-mkc-front" tabindex="-1"><span class="kp-mkc-tag">${T('mkcFrage')}${again ? ` · ${T('deckKommtNochmal').replace(/\.$/, '')}` : ''}</span><p class="kp-mkc-q">${esc(plainText(c.front))}</p></div>`}</div>
+        <div class="kp-mkc-foot kp-deck-actions">${st.flip
+          ? `<button type="button" class="kp-btn" data-deck-rate="1" data-block="${b.id}">${T('deckGewusst')}</button><button type="button" class="kp-btn kp-sec" data-deck-rate="0" data-block="${b.id}">${T('deckNochNicht')}</button>`
+          : `<span class="kp-label">${T('mkcHinweis')}</span><button type="button" class="kp-btn" data-deck-flip="${b.id}">${T('deckUmdrehen')}</button>`}</div>
+      </div>
+      ${deckSeenHtml(st.seen || Object.keys(r).reverse(), r, c.id)}`);
+  }
+  // Formular, das sich füllt: Klick auf die Kopfzeile füllt die Zeile mit dem Fall und erklärt sie (Vorbild Verarbeitungsverzeichnis)
+  const formRows = b => (b.rows || []).filter(r => r && plainText(r.label));
+  const formFilled = b => { const f = (state.self[b.id] || {}).f || []; return formRows(b).map((r, i) => !!r.ready || f.includes(i)); };
+  function formTable(b, all) {
+    const rows = formRows(b), fill = all ? rows.map(() => true) : formFilled(b), last = (state.self[b.id] || {}).last;
+    return `<table class="kp-form-doc"><caption><span class="kp-form-title">${esc(plainText(b.docTitle) || plainText(b.title) || '')}</span>${plainText(b.docMeta) ? `<span class="kp-form-meta">${esc(plainText(b.docMeta))}</span>` : ''}</caption>
+      <tbody>${rows.map((r, i) => `<tr class="${fill[i] ? 'is-filled' : ''}${last === i && !all ? ' is-last' : ''}"><th scope="row">${all ? esc(plainText(r.label))
+        : `<button type="button" class="kp-form-key" data-form-row="${i}" data-block="${b.id}" aria-pressed="${fill[i] ? 'true' : 'false'}">${esc(plainText(r.label))}${fill[i] ? '' : '<span class="kp-form-plus" aria-hidden="true">+</span>'}</button>`}</th>
+        <td>${fill[i] ? `<div class="kp-text">${res(r.value || '')}</div>` : `<span class="kp-form-empty">${T('formLeer')}</span>`}</td></tr>`).join('')}</tbody></table>`;
+  }
+  function renderFormular(b) {
+    const st = state.self[b.id] || {}, rows = formRows(b), fill = formFilled(b), n = fill.filter(Boolean).length, done = rows.length > 0 && n === rows.length;
+    const last = typeof st.last === 'number' ? rows[st.last] : null, who = b.castId ? castOf({ castId: b.castId }) : null;
+    return `<div class="kp-form${done ? ' is-done' : ''}" data-form="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      ${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      <div class="kp-form-sheet">${formTable(b)}${done ? `<span class="kp-form-stamp" aria-hidden="true">${T('formVollstaendig')}</span>` : ''}</div>
+      <p class="kp-form-status" role="status">${T('formStand').replace('{n}', n).replace('{m}', rows.length)}</p>
+      ${last && plainText(last.why) ? `<div class="kp-form-why" aria-live="polite">${who ? `<span class="kp-form-face">${castFace(who)}</span>` : ''}<div><span class="kp-label">${esc(plainText(last.label))}</span><div class="kp-text">${res(last.why)}</div></div></div>` : ''}
+      ${done ? `${plainText(b.after) ? `<div class="kp-text kp-form-after">${res(b.after)}</div>` : ''}${b.print !== false ? `<div class="kp-quiz-actions"><button type="button" class="kp-btn kp-sec" data-form-print="${b.id}">${T('formDrucken')}</button></div>` : ''}` : ''}
+    </div>`;
+  }
+  function renderFindText(b) {
+    const spots = b.spots || [];
+    const st = state.self[b.id] || { hit: [] };
+    const hit = st.hit || [];
+    const gesucht = spots.map((x, i) => i).filter(i => spots[i].wrong !== false);
+    const gefunden = gesucht.filter(i => hit.includes(i));
+    const fertig = gesucht.length > 0 && gefunden.length === gesucht.length;
+    // Jede gesuchte Stelle einmal im Text durch einen Knopf ersetzen
+    let body = res(b.body || '');
+    spots.forEach((sp, i) => {
+      const t = String(sp.text || '');
+      if (!t) return;
+      const at = body.indexOf(t);
+      if (at < 0) return;
+      const offen = hit.includes(i);
+      const kl = ['kp-ft-spot', offen ? (sp.wrong === false ? 'is-ok' : 'is-found') : ''].filter(Boolean).join(' ');
+      const mark = `<button type="button" class="${kl}" data-ft-spot="${i}" data-block="${b.id}" ${offen ? 'disabled' : ''}>${esc(t)}</button>`;
+      body = body.slice(0, at) + mark + body.slice(at + t.length);
+    });
+    const zuletzt = hit.length ? spots[hit[hit.length - 1]] : null;
+    const panel = fertig
+      ? `<p class="kp-ft-ptitle">${esc(b.revealTitle || T('ftFertig'))}</p><div class="kp-text">${res(b.reveal || '')}</div>`
+      : zuletzt
+        ? `<p class="kp-ft-ptitle ${zuletzt.wrong === false ? 'is-ok' : ''}">${zuletzt.wrong === false ? T('ftBelegt') : T('ftGefunden')}</p><div class="kp-text"><p>${esc(zuletzt.why || '')}</p></div>`
+        : `<p class="kp-ft-ptitle is-quiet">${T('ftLos')}</p><div class="kp-text"><p>${esc(b.hint || T('ftHinweis'))}</p></div>`;
+    return `<div class="kp-ft" data-findtext="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+      <div class="kp-ft-split">
+        <div class="kp-ft-doc">
+          ${(b.meta || []).length ? `<dl class="kp-ft-meta">${(b.meta || []).map(m => `<dt>${esc(m.label || '')}</dt><dd>${esc(m.value || '')}</dd>`).join('')}</dl>` : ''}
+          <div class="kp-text kp-ft-body">${body}</div>
+        </div>
+        <aside class="kp-ft-panel ${fertig ? 'is-done' : ''}" role="status">
+          ${panel}
+          <p class="kp-ft-count">${gefunden.length} ${T('von')} ${gesucht.length} ${T('ftGefundenZahl')}</p>
+          ${fertig ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-ft-reset="${b.id}">${T('nochEinmal')}</button></div>` : ''}
+        </aside>
+      </div>
+    </div>`;
+  }
+
+  // Anfrage aufbauen: links die Bausteine, rechts der Entwurf, der sich mit jedem Klick ändert
+  function renderPromptBuild(b) {
+    const steps = b.steps || [];
+    const st = state.self[b.id] || { taken: [] };
+    const taken = (st.taken || []).filter(i => steps[i]);
+    const last = taken.length ? steps[taken[taken.length - 1]] : null;
+    const quality = last ? last.quality : b.quality0;
+    const draft = last ? last.draft : b.draft0;
+    const note = last ? last.note : b.note0;
+    const anteil = steps.length ? taken.length / steps.length : 0;
+    const knoepfe = steps.map((x, i) => `<button type="button" class="kp-pb-btn ${taken.includes(i) ? 'is-on' : ''}" data-pb-add="${i}" data-block="${b.id}" ${taken.includes(i) ? 'disabled' : ''}>${esc(x.button || '+')}</button>`).join('');
+    const zeilen = taken.map((i, n) => `<p class="kp-pb-line ${n === taken.length - 1 ? 'is-new' : ''}">${esc(steps[i].line || '')}</p>`).join('');
+    return `<div class="kp-pb" data-promptbuild="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+      <div class="kp-pb-split">
+        <div class="kp-pb-card">
+          <p class="kp-pb-label">${esc(b.startLabel || T('pbStart'))}</p>
+          <p class="kp-pb-ask">„${esc(b.ask || '')}“</p>
+          <div class="kp-pb-btns">${knoepfe}</div>
+          ${taken.length ? `<div class="kp-pb-lines">${zeilen}</div>` : `<p class="kp-pb-empty">${esc(b.emptyHint || T('pbLeer'))}</p>`}
+          ${taken.length === steps.length && steps.length ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-pb-reset="${b.id}">${T('nochEinmal')}</button></div>` : ''}
+        </div>
+        <div class="kp-pb-card kp-pb-draft" role="status">
+          <p class="kp-pb-label">${esc(b.draftLabel || T('pbEntwurf'))}<span class="kp-pb-quality">${esc(b.qualityLabel || T('pbGuete'))} · <b>${esc(quality || '')}</b></span></p>
+          <div class="kp-text kp-pb-body">${res(draft || '')}</div>
+          <div class="kp-pb-bar" role="img" aria-label="${esc((b.qualityLabel || T('pbGuete')) + ': ' + (quality || ''))}"><i style="width:${Math.round(Math.max(anteil, 0.12) * 100)}%"></i></div>
+          ${note ? `<p class="kp-pb-note">${esc(note)}</p>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Stück für Stück entscheiden: links die Karten, rechts die offene Frage zur aktiven Karte
+  function renderTriage(b) {
+    const items = b.items || [];
+    const st = state.self[b.id] || { d: {}, cur: 0 };
+    const ja = b.labelTrue || T('triJa');
+    const nein = b.labelFalse || T('triNein');
+    const offen = items.map((x, i) => i).filter(i => st.d[i] == null);
+    const fertig = !offen.length && items.length > 0;
+    // Aktiv ist die zuletzt angetippte Karte, sonst die erste offene
+    const aktiv = st.cur != null && items[st.cur] ? st.cur : (offen.length ? offen[0] : null);
+    // Mehr als zwei Möglichkeiten (choices[], items[].answer als Index), z. B. im Postfach: selbst, delegieren, eskalieren, später
+    const wahl = (b.choices || []).filter(x => String(x || '').trim());
+    const multi = wahl.length >= 2;
+    const ticket = b.look === 'ticket';
+    const mail = b.look === 'postfach' || ticket;
+    const nameOf = w => (multi ? wahl[Number(w)] || '' : w === 'j' ? ja : nein);
+    const richtig = i => multi ? Number(st.d[i]) === (Number(items[i].answer) || 0) : (st.d[i] === 'j') === (items[i].keep !== false);
+    const karten = items.map((it, i) => {
+      const w = st.d[i];
+      const falsch = fertig && w != null && !richtig(i);
+      const cls = ['kp-tri-card', multi ? (w != null ? 'kp-tri-set' : '') : w === 'j' ? 'kp-tri-in' : w === 'n' ? 'kp-tri-out' : '', i === aktiv && w == null ? 'is-active' : '', falsch ? 'kp-tri-wrong' : ''].filter(Boolean).join(' ');
+      const soll = multi ? wahl[Number(it.answer) || 0] : (it.keep !== false ? ja : nein);
+      const icon2 = ticket
+        ? '<svg class="kp-tri-doc" viewBox="0 0 28 20" aria-hidden="true"><path d="M2 6a2 2 0 0 1 2-2h20a2 2 0 0 1 2 2v2a2.5 2.5 0 0 0 0 5v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-2a2.5 2.5 0 0 0 0-5z"/><path d="M11 4v13" stroke-dasharray="2 2"/></svg>'
+        : mail
+        ? '<svg class="kp-tri-doc" viewBox="0 0 28 20" aria-hidden="true"><rect x="1.5" y="1.5" width="25" height="17" rx="2"/><path d="M2 3l12 9 12-9"/></svg>'
+        : '<svg class="kp-tri-doc" viewBox="0 0 24 28" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="25" rx="2"/><path d="M6 9h12M6 14h12M6 19h8"/></svg>';
+      return `<button type="button" class="${cls}" data-tri-pick="${i}" data-block="${b.id}" ${w != null ? 'disabled' : ''} aria-pressed="${i === aktiv}">
+        ${w != null ? `<span class="kp-tri-badge">${esc(nameOf(w))}</span>` : ''}
+        ${icon2}
+        ${mail && it.sub ? `<span class="kp-tri-from">${esc(it.sub)}</span>` : ''}
+        <span class="kp-tri-name">${esc(it.title || '')}</span>
+        ${!mail && it.sub ? `<span class="kp-tri-sub">${esc(it.sub)}</span>` : ''}
+        ${mail && it.preview ? `<span class="kp-tri-prev">${esc(it.preview)}</span>` : ''}
+        ${falsch ? `<span class="kp-tri-fix">${T('triRichtigWaere')} ${esc(soll)}</span>` : ''}
+      </button>`;
+    }).join('');
+    let panel;
+    if (!items.length) {
+      panel = `<p class="kp-lock">${T('triLeer')}</p>`;
+    } else if (fertig) {
+      const score = items.filter((x, i) => richtig(i)).length;
+      panel = `<p class="kp-tri-eyebrow">${T('triFertig')}</p>
+        <p class="kp-tri-title">${score} ${T('von')} ${items.length} ${T('triRichtig')}</p>
+        ${score < items.length ? `<p class="kp-tri-sub2">${T('triNachlesen')}</p>` : ''}
+        <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tri-reset="${b.id}">${T('nochEinmal')}</button></div>`;
+    } else if (st.d[aktiv] != null) {
+      const it = items[aktiv];
+      panel = `<p class="kp-tri-eyebrow">${richtig(aktiv) ? T('triPasst') : T('triSchauNochmal')}</p>
+        <p class="kp-tri-title">${esc(it.title || '')}</p>
+        ${it.feedback ? `<div class="kp-text kp-tri-fb">${res(it.feedback)}</div>` : ''}
+        ${ticket && Number(it.stars) >= 1 ? `<p class="kp-tri-stars" role="img" aria-label="${esc(T('triBewertung'))}: ${Math.min(5, Number(it.stars))} ${T('von')} 5"><small>${T('triBewertung')}</small>${'★'.repeat(Math.min(5, Number(it.stars)))}${'☆'.repeat(5 - Math.min(5, Number(it.stars)))}</p>` : ''}
+        <div class="kp-quiz-actions"><button class="kp-btn" data-tri-next="${b.id}">${T('weiter')} →</button></div>`;
+    } else {
+      const it = items[aktiv];
+      panel = `<p class="kp-tri-eyebrow">${T('triGewaehlt')}</p>
+        <p class="kp-tri-title">${esc(it.title || '')}</p>
+        ${it.sub ? `<p class="kp-tri-sub2">${esc(it.sub)}</p>` : ''}
+        ${mail && it.preview ? `<p class="kp-tri-fb">${esc(it.preview)}</p>` : ''}
+        <p class="kp-tri-frage">${esc(b.question || T('triFrage'))}</p>
+        <div class="kp-tri-buttons${multi ? ' kp-tri-multi' : ''}">
+          ${multi ? wahl.map((c, k) => `<button type="button" data-tri-go="${k}" data-i="${aktiv}" data-block="${b.id}">${esc(c)}</button>`).join('') : `
+          <button type="button" class="kp-tri-yes" data-tri-go="j" data-i="${aktiv}" data-block="${b.id}">${esc(ja)}</button>
+          <button type="button" class="kp-tri-no" data-tri-go="n" data-i="${aktiv}" data-block="${b.id}">${esc(nein)}</button>`}
+        </div>`;
+    }
+    return `<div class="kp-tri${mail ? ' kp-tri-mail' : ''}${ticket ? ' kp-tri-ticket' : ''}" data-triage="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+      <div class="kp-tri-split">
+        <div class="kp-tri-board">${karten}</div>
+        <div class="kp-tri-panel" role="status">${panel}</div>
+      </div>
+      <p class="kp-sr" role="status">${items.length - offen.length} ${T('von')} ${items.length}</p>
+    </div>`;
+  }
+
+  // ---------- Folgen-Regler: mehrere Regler, das Ergebnis ändert sich sofort ----------
+  // Ergebnis = base + Summe(weight * Reglerwert), begrenzt auf min..max; das Band (bands[].max aufsteigend) liefert Einordnung und Text
+  function leverVal(b, st, i) {
+    const s = (b.sliders || [])[i] || {};
+    const v = (st.v || {})[i];
+    return v != null ? Number(v) : (s.value !== '' && s.value != null ? Number(s.value) : Number(s.min) || 0);
+  }
+  function leversResult(b, st) {
+    let v = Number(b.base) || 0;
+    (b.sliders || []).forEach((s, i) => { v += (Number(s.weight) || 0) * leverVal(b, st, i); });
+    const lo = b.min !== '' && b.min != null ? Number(b.min) : 0;
+    const hi = b.max !== '' && b.max != null ? Number(b.max) : 100;
+    v = Math.max(lo, Math.min(hi, v));
+    const bands = (b.bands || []).filter(x => x && x.max !== '' && x.max != null).slice().sort((a, c) => Number(a.max) - Number(c.max));
+    const band = bands.find(x => v <= Number(x.max)) || bands[bands.length - 1] || null;
+    const bi = band ? bands.indexOf(band) : -1;
+    return { v: Math.round(v * 10) / 10, pct: hi > lo ? (v - lo) / (hi - lo) * 100 : 0, band, tone: bands.length < 2 ? 1 : bi / (bands.length - 1) };
+  }
+  function leversResultHtml(b, st) {
+    const r = leversResult(b, st);
+    return `<p class="kp-lev-label">${esc(b.resultLabel || T('levErgebnis'))}</p>
+      <p class="kp-lev-num"><b>${esc(String(r.v).replace('.', ','))}</b>${b.unit ? ` <span>${esc(b.unit)}</span>` : ''}</p>
+      <div class="kp-lev-bar" role="meter" aria-valuenow="${r.v}" aria-valuemin="${esc(b.min || 0)}" aria-valuemax="${esc(b.max || 100)}" aria-label="${esc(b.resultLabel || T('levErgebnis'))}"><i style="width:${Math.max(2, r.pct)}%;--kp-lev-t:${r.tone}"></i></div>
+      ${r.band ? `<p class="kp-lev-band">${esc(r.band.label || '')}</p>${r.band.html ? `<div class="kp-text kp-lev-text">${res(r.band.html)}</div>` : ''}` : ''}`;
+  }
+  function renderLevers(b) {
+    const st = state.self[b.id] || {};
+    const sl = b.sliders || [];
+    const offen = sl.length - (st.t || []).length;
+    return `<div class="kp-lev" data-levers="${b.id}">
+      ${b.eyebrow || b.title || b.intro ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+      <div class="kp-lev-split">
+        <div class="kp-lev-ctrl">${sl.map((s, i) => {
+          const v = leverVal(b, st, i);
+          return `<label class="kp-lev-row"><span class="kp-lev-name">${esc(s.label || '')}</span>
+            <span class="kp-estimate"><input type="range" min="${Number(s.min) || 0}" max="${s.max !== '' && s.max != null ? Number(s.max) : 10}" step="${Number(s.step) || 1}" value="${v}" data-lev="${i}" aria-label="${esc(s.label || '')}">
+            <output class="kp-estimate-val" data-lev-out="${i}">${esc(v)}${s.unit ? ' ' + esc(s.unit) : ''}</output></span></label>`;
+        }).join('')}</div>
+        <div class="kp-lev-out" role="status" aria-live="polite" data-lev-result>${leversResultHtml(b, st)}</div>
+      </div>
+      ${offen > 0 ? `<p class="kp-lev-hint" data-lev-hint>${T('levHinweis')}</p>` : ''}
+    </div>`;
+  }
+
+  // ---------- Chat: Nachrichtenverlauf, Antwort wählen, das Gegenüber reagiert ----------
+  // Zustand state.self[id] = { n: aktuelle Runde, pick: { Runde: Möglichkeit }, tried: { Runde: [Fehlversuche] } }
+  // Bot-Fenster: nach einer Wahl „tippt“ der Bot erst (Punkte), dann erscheinen seine Zeilen nacheinander.
+  // chatFresh merkt sich den Block, in dem gerade gewaehlt wurde; nur dort laeuft die Animation.
+  let chatFresh = null;
+  // Fragen an die Figur: die Lernenden fragen, die Figur antwortet. Umgekehrt zum Quiz, die Person steuert das Gespräch.
+  // Zustand state.self[id] = { asked: [i] } in der Reihenfolge der Fragen; erledigt ab b.min Fragen (Standard 1)
+  const askMin = b => Math.max(1, Math.min(Number(b.min) || 1, (b.items || []).length || 1));
+  function renderFragen(b) {
+    const st = state.self[b.id] || {};
+    const items = b.items || [];
+    const asked = (st.asked || []).filter(i => items[i]);
+    const p = castOf(b);
+    const last = asked.length ? items[asked[asked.length - 1]] : null;
+    const pose = (last && last.pose) || p.pose || 'neutral';
+    const photo = p.look === 'image' || (!p.look && p.image && p.image.src);
+    const face = photo && poseImage(p, pose) ? `<img src="${esc(res(poseImage(p, pose)))}" alt=""${focusStyle(p.image)}>` : avatarSvg(p.look && p.look !== 'image' ? p.look : 'a1', pose);
+    const open = items.map((x, i) => i).filter(i => !asked.includes(i));
+    const all = !open.length;
+    const log = [
+      plainText(b.intro) ? `<div class="kp-ask-msg kp-ask-them"><div class="kp-text">${res(b.intro)}</div></div>` : '',
+      ...asked.map((i, k) => `<div class="kp-ask-msg kp-ask-me">${esc(plainText(items[i].q))}</div>
+        <div class="kp-ask-msg kp-ask-them${k === asked.length - 1 ? ' kp-ask-new' : ''}" ${k === asked.length - 1 ? 'data-ask-last' : ''}><div class="kp-text">${res(items[i].a)}</div></div>`),
+      all && plainText(b.end) ? `<div class="kp-ask-msg kp-ask-them kp-ask-end"><div class="kp-text">${res(b.end)}</div></div>` : ''
+    ].join('');
+    const need = askMin(b);
+    return `<div class="kp-ask" data-fragen="${b.id}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      <div class="kp-ask-grid">
+        <div class="kp-ask-who"><span class="kp-ask-face" data-mood="${esc(pose)}"${p.color ? ` style="--kp-shirt:${esc(p.color)}"` : ''}>${face}</span>
+          <span class="kp-ask-name">${esc(p.name || '')}</span>${p.role ? `<span class="kp-ask-role">${esc(p.role)}</span>` : ''}</div>
+        <div class="kp-ask-main">
+          <div class="kp-ask-log" aria-live="polite">${log}</div>
+          ${all ? '' : `<div class="kp-ask-menu" role="group" aria-label="${esc(T('fragWas'))}">
+            <span class="kp-label">${asked.length ? T('fragWeiter') : T('fragWas')}</span>
+            ${open.map(i => `<button type="button" class="kp-ask-q fx-reveal" data-ask-q="${i}" data-block="${b.id}">${esc(plainText(items[i].q))}</button>`).join('')}
+          </div>`}
+          <p class="kp-ask-status">${T('fragStand').replace('{n}', asked.length).replace('{m}', items.length)}${asked.length < need ? ' · ' + T('fragNoch').replace('{n}', need - asked.length) : ''}</p>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Chat im Handy (look: 'handy', Vorbild „The Distress Message“ aus einem Storyline-Training): links ein Smartphone, rechts Lage,
+  // Text und Antwort. Beim ersten Zeichnen laufen die Nachrichten der ersten Runde mit Tipp-Punkten ein (chatSeen), nach einer Wahl
+  // die eigene Nachricht und die Reaktion. Geräusche (Vibration, Eingang, Senden) erzeugt chatSfx() per Web Audio ohne Datei;
+  // renderChatHandy legt den Zeitplan in chatSfxPlan ab, chatSfxRun() startet ihn, sobald der Block im Dokument steht.
+  const chatSeen = new Set();
+  const chatSfxPlan = {};
+  let sfxCtx = null;
+  function chatSfx(kind) {
+    // Folgt dem Schalter „Klänge“ der Lernenden (soundsOn) und der Lautstärke
+    if (!audioPrefs.vol || !soundsOn()) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      sfxCtx = sfxCtx || new AC();
+      if (sfxCtx.state === 'suspended') sfxCtx.resume().catch(() => {});
+      const c = sfxCtx, t0 = c.currentTime + .01;
+      const out = c.createGain(); out.gain.value = audioPrefs.vol; out.connect(c.destination);
+      const tone = (f, a, d, f2) => {
+        const o = c.createOscillator(), g = c.createGain();
+        o.frequency.setValueAtTime(f, t0 + a);
+        if (f2) o.frequency.exponentialRampToValueAtTime(f2, t0 + a + d);
+        g.gain.setValueAtTime(0, t0 + a); g.gain.linearRampToValueAtTime(.2, t0 + a + .012); g.gain.exponentialRampToValueAtTime(.001, t0 + a + d);
+        o.connect(g).connect(out); o.start(t0 + a); o.stop(t0 + a + d + .05);
+      };
+      if (kind === 'in') { tone(1046, 0, .16); tone(1568, .09, .3); }
+      else if (kind === 'out') {
+        // Luftzug: Rauschen durch einen steigenden Bandpass, dazu ein kurzer heller Ton
+        const n = Math.floor(c.sampleRate * .3), buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+        const src = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+        src.buffer = buf; f.type = 'bandpass'; f.Q.value = 1.4;
+        f.frequency.setValueAtTime(700, t0); f.frequency.exponentialRampToValueAtTime(3800, t0 + .25);
+        g.gain.setValueAtTime(.45, t0); g.gain.exponentialRampToValueAtTime(.001, t0 + .3);
+        src.connect(f).connect(g).connect(out); src.start(t0);
+        tone(880, .03, .12, 1320);
+      } else if (kind === 'buzz') {
+        // Vibration: zwei kurze, tiefe Brummer
+        [0, .42].forEach(a => {
+          const o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain();
+          o.type = 'sawtooth'; o.frequency.value = 150; lp.type = 'lowpass'; lp.frequency.value = 420;
+          g.gain.setValueAtTime(0, t0 + a); g.gain.linearRampToValueAtTime(.35, t0 + a + .03);
+          g.gain.setValueAtTime(.35, t0 + a + .28); g.gain.linearRampToValueAtTime(0, t0 + a + .32);
+          o.connect(lp).connect(g).connect(out); o.start(t0 + a); o.stop(t0 + a + .4);
+        });
+      }
+    } catch (e) { /* ohne Ton weiter */ }
+  }
+  function chatSfxRun(scope) {
+    Object.keys(chatSfxPlan).forEach(id => {
+      const box = scope.querySelector(`[data-chat="${id}"]`);
+      if (!box) return;
+      const plan = chatSfxPlan[id];
+      delete chatSfxPlan[id];
+      const log = box.querySelector('.kp-chat-log');
+      plan.forEach(([t, kind]) => mediaTimers.push(setTimeout(() => {
+        chatSfx(kind);
+        if (log) log.scrollTop = log.scrollHeight;
+      }, t * 1000)));
+    });
+  }
+  function renderChatHandy(b) {
+    const st = state.self[b.id] || {};
+    const turns = b.turns || [];
+    const n = Math.min(Number(st.n) || 0, turns.length);
+    const who = b.persona || {};
+    const face = who.castId ? castOf({ castId: who.castId }) : who;
+    const name = face.name || who.name || '';
+    const role = face.role || who.role || '';
+    const cur = n < turns.length ? turns[n] : null;
+    const tried = ((st.tried || {})[n]) || [];
+    const fresh = chatFresh === b.id;
+    const retryFresh = fresh && tried.length > 0;
+    const pickFresh = fresh && !retryFresh && n > 0;
+    const first = !fresh && n === 0 && !tried.length && !chatSeen.has(b.id);
+    chatSeen.add(b.id);
+    const sfx = [];
+    let tm = first ? .8 : .15; // Zeitpunkt der nächsten Zeile in Sekunden
+    if (first && b.sounds !== false) sfx.push([.2, 'buzz']);
+    const lines = txt => String(txt || '').split(/\n+/).map(x => x.trim()).filter(Boolean);
+    const them = (t, anim) => {
+      if (!anim) return `<div class="kp-chat-msg kp-chat-them">${esc(t)}</div>`;
+      const d = tm; tm += 1.6; sfx.push([d + .9, 'in']);
+      return `<div class="kp-chat-msg kp-chat-them kp-chat-dots" style="--d:${d.toFixed(2)}s" aria-hidden="true"><i></i><i></i><i></i></div><div class="kp-chat-msg kp-chat-them kp-chat-new" style="--d:${(d + .9).toFixed(2)}s">${esc(t)}</div>`;
+    };
+    const me = (t, anim, cls) => {
+      if (!anim) return `<div class="kp-chat-msg kp-chat-me${cls || ''}">${esc(t)}</div>`;
+      const d = tm; tm += .7; sfx.push([d, 'out']);
+      return `<div class="kp-chat-msg kp-chat-me kp-chat-new${cls || ''}" style="--d:${d.toFixed(2)}s">${esc(t)}</div>`;
+    };
+    const log = [];
+    turns.forEach((turn, k) => {
+      if (k > n) return;
+      lines(turn.them).forEach(t => log.push(them(t, (first && k === 0) || (pickFresh && k === n))));
+      if (k < n) {
+        const o = (turn.options || [])[(st.pick || {})[k]] || {};
+        const anim = pickFresh && k === n - 1;
+        log.push(me(o.text || '', anim));
+        lines(o.reply).forEach(t => log.push(them(t, anim)));
+      }
+    });
+    const opts = cur ? (cur.options || []) : [];
+    const lastTry = tried.length ? opts[tried[tried.length - 1]] || {} : null;
+    if (lastTry) {
+      log.push(me(lastTry.text || '', retryFresh, ' kp-chat-undo'));
+      lines(lastTry.reply).forEach(t => log.push(them(t, retryFresh)));
+    }
+    if (b.sounds === false || reducedMotion()) sfx.splice(0, sfx.length, ...(sfx.length && b.sounds !== false ? [[0, sfx[sfx.length - 1][1]]] : []));
+    if (sfx.length) chatSfxPlan[b.id] = sfx; else delete chatSfxPlan[b.id];
+    const late = (first || fresh) ? ` kp-chat-new" style="--d:${tm.toFixed(2)}s` : '';
+    // Rückmeldung zur letzten Antwort steht neben dem Handy, nicht im Verlauf
+    const fbOpt = lastTry || (n > 0 ? ((turns[n - 1].options || [])[(st.pick || {})[n - 1]] || {}) : null);
+    const fb = fbOpt && (fbOpt.feedback || lastTry) ? `<div class="kp-hy-fb${lastTry ? ' kp-hy-retry' : ''}${late}" role="status">${fbOpt.feedback ? res(fbOpt.feedback) : ''}${lastTry ? `<p>${T('chatNochmal')}</p>` : ''}</div>` : '';
+    const single = opts.length === 1 && b.replyLabel;
+    const choices = cur ? (single
+      ? `<div class="kp-hy-act${late}"><button type="button" class="kp-btn kp-hy-reply" data-chat-pick="0" data-block="${b.id}">${esc(b.replyLabel)} ${icon('arrow')}</button></div>`
+      : `<div class="kp-chat-choices kp-hy-choices${late}" role="group" aria-label="${T('chatWaehle')}">
+          <p class="kp-chat-ask">${T('chatWaehle')}</p>
+          ${opts.map((o, i) => `<button type="button" class="kp-chat-opt" data-chat-pick="${i}" data-block="${b.id}" ${tried.includes(i) ? 'disabled' : ''}>${esc(o.text || '')}</button>`).join('')}
+        </div>`)
+      : `<div class="kp-hy-end${late}" role="status"><p class="kp-hy-sent">${icon('check')} ${esc(b.endStatus || T('hyGesendet'))}</p>
+          ${b.end ? `<div class="kp-text">${res(b.end)}</div>` : ''}
+          <button class="kp-btn kp-sec" data-chat-reset="${b.id}">${T('nochEinmal')}</button></div>`;
+    const initials = String(name || '?').split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
+    const avatar = face.look && face.look !== 'image' ? `<span class="kp-chat-av kp-chat-face" aria-hidden="true">${avatarSvg(face.look, 'neutral', true)}</span>`
+      : face.image && face.image.src ? `<span class="kp-chat-av kp-chat-face" aria-hidden="true"><img src="${esc(res(face.image.src))}" alt=""></span>`
+      : `<span class="kp-chat-av" aria-hidden="true">${esc(initials)}</span>`;
+    const clock = b.clock || '9:41';
+    return `<div class="kp-chat kp-hy" data-chat="${b.id}">
+      <div class="kp-hy-device"><div class="kp-hy-screen">
+        <div class="kp-hy-status" aria-hidden="true"><span>${esc(clock)}</span><i class="kp-hy-notch"></i><span class="kp-hy-bat"><i></i><i></i><i></i> 87%</span></div>
+        <div class="kp-chat-head">${avatar}<span><b>${esc(name)}</b>${role ? `<small>${esc(role)}</small>` : ''}</span></div>
+        <div class="kp-chat-log" aria-live="polite"><p class="kp-hy-stamp">${T('heute')} · ${esc(clock)}</p>${log.join('')}</div>
+        <div class="kp-hy-input" aria-hidden="true"><span>${T('hyNachricht')}</span><i>${icon('arrow')}</i></div>
+      </div></div>
+      <div class="kp-hy-side">
+        ${b.eyebrow ? `<p class="kp-hy-eyebrow">${esc(b.eyebrow)}</p>` : ''}
+        ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+        ${b.intro ? `<div class="kp-text kp-chat-intro">${res(b.intro)}</div>` : ''}
+        ${fb}${choices}
+      </div>
+    </div>`;
+  }
+
+  function renderChat(b) {
+    if (b.look === 'handy') return renderChatHandy(b);
+    const st = state.self[b.id] || {};
+    const turns = b.turns || [];
+    const n = Math.min(Number(st.n) || 0, turns.length);
+    const who = b.persona || {};
+    const bot = b.look === 'bot';
+    const initials = String(who.name || '?').split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
+    const fresh = bot && chatFresh === b.id;
+    let typed = 0; // Zaehler fuer die gestaffelte Einblendung der neuen Zeilen
+    const them = (t, anim) => anim
+      ? `<div class="kp-chat-msg kp-chat-them kp-chat-dots" style="--d:${(typed * 1.1).toFixed(1)}s" aria-hidden="true"><i></i><i></i><i></i></div><div class="kp-chat-msg kp-chat-them kp-chat-new" style="--d:${(typed++ * 1.1 + .9).toFixed(1)}s">${esc(t)}</div>`
+      : `<div class="kp-chat-msg kp-chat-them">${esc(t)}</div>`;
+    const lines = txt => String(txt || '').split(/\n+/).map(x => x.trim()).filter(Boolean);
+    const log = [];
+    turns.forEach((turn, k) => {
+      if (k > n) return;
+      // Frisch: die Zeilen der letzten Runde (Reaktion und die naechste Nachricht) laufen mit Tipp-Punkten ein
+      const anim = fresh && n > 0 && k >= n - 1;
+      lines(turn.them).forEach(t => log.push(them(t, anim && k === n)));
+      if (k < n) {
+        const o = (turn.options || [])[(st.pick || {})[k]] || {};
+        log.push(`<div class="kp-chat-msg kp-chat-me">${esc(o.text || '')}</div>`);
+        lines(o.reply).forEach(t => log.push(them(t, anim)));
+        if (o.feedback) log.push(`<div class="kp-chat-note${anim ? ' kp-chat-new' : ''}"${anim ? ` style="--d:${(typed * 1.1).toFixed(1)}s"` : ''}>${res(o.feedback)}</div>`);
+      }
+    });
+    const cur = n < turns.length ? turns[n] : null;
+    const tried = ((st.tried || {})[n]) || [];
+    // Laune in der Handlung: die Figur oben zeigt die Haltung zur letzten Antwort (Fehlversuch dieser Runde, sonst die gewählte der vorigen)
+    const face = who.castId ? castOf({ castId: who.castId }) : who;
+    const lastOpt = tried.length ? ((cur.options || [])[tried[tried.length - 1]] || {}) : n > 0 ? (((turns[n - 1] || {}).options || [])[(st.pick || {})[n - 1]] || {}) : {};
+    const mood = lastOpt.mood || 'neutral';
+    const avatar = face.look && face.look !== 'image' ? `<span class="kp-chat-av kp-chat-face" data-mood="${esc(mood)}" aria-hidden="true">${avatarSvg(face.look, mood, true)}</span>`
+      : face.image && face.image.src ? `<span class="kp-chat-av kp-chat-face" data-mood="${esc(mood)}" aria-hidden="true"><img src="${esc(res(face.image.src))}" alt=""></span>`
+      : `<span class="kp-chat-av" aria-hidden="true">${esc(initials)}</span>`;
+    if (cur && tried.length) {
+      const last = (cur.options || [])[tried[tried.length - 1]] || {};
+      log.push(`<div class="kp-chat-msg kp-chat-me kp-chat-undo">${esc(last.text || '')}</div>`);
+      lines(last.reply).forEach(t => log.push(them(t, fresh)));
+      log.push(`<div class="kp-chat-note kp-chat-retry" role="status">${last.feedback ? res(last.feedback) : ''}<p>${T('chatNochmal')}</p></div>`);
+    }
+    const choices = cur ? `<div class="kp-chat-choices" role="group" aria-label="${T('chatWaehle')}">
+        <p class="kp-chat-ask">${T('chatWaehle')}</p>
+        ${(cur.options || []).map((o, i) => `<button type="button" class="kp-chat-opt" data-chat-pick="${i}" data-block="${b.id}" ${tried.includes(i) ? 'disabled' : ''}>${esc(o.text || '')}</button>`).join('')}
+      </div>`
+      : `<div class="kp-chat-end" role="status">${b.end ? `<div class="kp-text">${res(b.end)}</div>` : `<p>${T('chatEnde')}</p>`}
+          <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-chat-reset="${b.id}">${T('nochEinmal')}</button></div></div>`;
+    // Bot-Fenster: Kopfzeile in der Hauptfarbe, die Antworten als Prompt-Vorschlaege ueber einer Eingabezeile mit Senden-Pfeil
+    const input = bot ? `<div class="kp-chat-input" aria-hidden="true"><span>${esc(cur ? T('promptWaehlen') : T('chatEnde'))}</span><i>${icon('arrow')}</i></div>` : '';
+    return `<div class="kp-chat${bot ? ' kp-chat-botwrap' : ''}" data-chat="${b.id}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      ${b.intro ? `<div class="kp-text kp-chat-intro">${res(b.intro)}</div>` : ''}
+      <div class="kp-chat-phone${bot ? ' kp-chat-bot' : ''}">
+        <div class="kp-chat-head">${bot ? icon('zap', 'kp-chat-boticon') : avatar}<span><b>${esc(face.name || who.name || '')}</b>${face.role || who.role ? `<small>${esc(face.role || who.role)}</small>` : ''}</span></div>
+        <div class="kp-chat-log" aria-live="polite">${log.join('')}</div>
+        ${choices}${input}
+      </div>
+    </div>`;
+  }
+
+  // ---------- Matrix: Begriffe frei in eine Vier-Felder-Fläche legen, dann mit der Einschätzung vergleichen ----------
+  // Positionen x/y in Prozent (y = 100 oben). Zustand state.self[id] = { p: { i: [x, y] }, sel, cmp }
+  const MX_Q = [[25, 75], [75, 75], [25, 25], [75, 25]]; // links oben, rechts oben, links unten, rechts unten
+  function mxQuad(x, y) { return (y >= 50 ? 0 : 2) + (x >= 50 ? 1 : 0); }
+  function renderMatrix(b) {
+    const st = state.self[b.id] || {};
+    const items = b.items || [];
+    const p = st.p || {};
+    const placed = items.filter((x, i) => p[i]).length;
+    const sel = st.cmp ? null : (st.sel != null && items[st.sel] ? st.sel : items.findIndex((x, i) => !p[i]));
+    const q = b.quadrants || [];
+    const dot = (i, xy, cls) => `<span class="kp-mx-dot ${cls}" style="left:${xy[0]}%;top:${100 - xy[1]}%">${i + 1}</span>`;
+    const expert = i => [Number(items[i].x) || 0, Number(items[i].y) || 0];
+    const lines = st.cmp ? `<svg class="kp-mx-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${items.map((x, i) => p[i] ? `<line x1="${p[i][0]}" y1="${100 - p[i][1]}" x2="${expert(i)[0]}" y2="${100 - expert(i)[1]}"/>` : '').join('')}</svg>` : '';
+    const drop = sel >= 0 && sel != null && !st.cmp ? MX_Q.map((c, k) => `<button type="button" class="kp-mx-drop kp-mx-drop-${k}" data-mx-q="${k}" data-block="${b.id}">${T('mxHierAblegen')}${q[k] ? ': ' + esc(q[k]) : ''}</button>`).join('') : '';
+    const field = `<div class="kp-mx-wrap">
+        ${b.yHigh ? `<span class="kp-mx-ax kp-mx-yh">${esc(b.yHigh)}</span>` : ''}${b.yLow ? `<span class="kp-mx-ax kp-mx-yl">${esc(b.yLow)}</span>` : ''}
+        <div class="kp-mx-field${sel >= 0 && sel != null && !st.cmp ? ' is-armed' : ''}" data-mx-field="${b.id}">
+          ${MX_Q.map((c, k) => `<span class="kp-mx-quad kp-mx-quad-${k}">${esc(q[k] || '')}</span>`).join('')}
+          ${lines}
+          ${items.map((x, i) => !p[i] ? '' : st.cmp ? dot(i, p[i], 'kp-mx-mine') : `<button type="button" class="kp-mx-dot kp-mx-mine kp-mx-move${i === sel ? ' is-sel' : ''}" style="left:${p[i][0]}%;top:${100 - p[i][1]}%" data-mx-dot="${i}" data-block="${b.id}" aria-label="${esc(T('mxVerschieben').replace('{n}', i + 1).replace('{t}', x.text || ''))}">${i + 1}</button>`).join('')}
+          ${st.cmp ? items.map((x, i) => dot(i, expert(i), 'kp-mx-exp')).join('') : ''}
+          ${drop}
+        </div>
+        <span class="kp-mx-ax kp-mx-xl">${esc(b.xLow || '')}</span><span class="kp-mx-ax kp-mx-xh">${esc(b.xHigh || '')}</span>
+      </div>`;
+    let side;
+    if (st.cmp) {
+      side = `<p class="kp-mx-eyebrow">${T('mxVergleich')}</p>
+        <p class="kp-mx-legend"><span class="kp-mx-dot kp-mx-mine">1</span> ${T('mxDeine')} <span class="kp-mx-dot kp-mx-exp">1</span> ${esc(b.expertLabel || T('mxExperte'))}</p>
+        <ol class="kp-mx-list">${items.map((x, i) => {
+          const same = p[i] && mxQuad(p[i][0], p[i][1]) === mxQuad(...expert(i));
+          const near = p[i] && Math.hypot(p[i][0] - expert(i)[0], p[i][1] - expert(i)[1]) <= 18;
+          return `<li><b>${esc(x.text || '')}</b> <span class="kp-mx-tag ${same ? 'ok' : 'no'}">${same ? (near ? T('mxNah') : T('mxGleichesFeld')) : T('mxAnderesFeld')}</span>${x.why ? `<div class="kp-text">${res(x.why)}</div>` : ''}</li>`;
+        }).join('')}</ol>
+        <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-mx-reset="${b.id}">${T('nochEinmal')}</button></div>`;
+    } else {
+      side = `<p class="kp-mx-eyebrow">${placed} ${T('von')} ${items.length} ${T('mxAbgelegt')}</p>
+        <p class="kp-mx-help">${T('mxHilfe')}</p>
+        <div class="kp-mx-chips">${items.map((x, i) => `<button type="button" class="kp-mx-chip${i === sel ? ' is-sel' : ''}${p[i] ? ' is-placed' : ''}" data-mx-sel="${i}" data-block="${b.id}" aria-pressed="${i === sel}"><span>${i + 1}</span>${esc(x.text || '')}</button>`).join('')}</div>
+        ${placed === items.length && items.length ? `<div class="kp-quiz-actions"><button class="kp-btn" data-mx-cmp="${b.id}">${esc(b.compareLabel || T('mxVergleichen'))}</button></div>` : ''}`;
+    }
+    return `<div class="kp-mx" data-matrix="${b.id}">
+      ${b.eyebrow || b.title || b.intro ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
+      <div class="kp-mx-split">${field}<div class="kp-mx-side" role="status">${side}</div></div>
+    </div>`;
+  }
+
+  // Prozess: Schritte einzeln durchklicken
+  function renderProcess(b) {
+    const steps = b.steps || [];
+    const n = Math.min(state.dlg[b.id] || 0, Math.max(0, steps.length - 1));
+    const s = steps[n] || {};
+    // Strang (Vorbild Rise „Ausbildung von Mustern“): jeder Schritt eine eigene Karte mit Akzentkante links, Bild oben in
+    // der Karte, die Karten hängen an einer dünnen Linie; „Weiter“ hängt die nächste darunter wie beim Stapel
+    if (b.look === 'strang') return `<div class="kp-process kp-proc-strang" data-process="${b.id}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      <ol class="kp-strang">${steps.slice(0, n + 1).map((x, i) => `<li class="kp-strang-item${i === n ? ' kp-proc-new' : ''}">
+        ${x.image && x.image.src ? `<div class="kp-strang-media"><img loading="lazy" decoding="async" src="${esc(res(x.image.src))}" alt="${esc(x.image.alt || '')}"${focusStyle(x.image)}></div>` : ''}
+        <div class="kp-strang-body"><p class="kp-strang-eyebrow">${T('schritt')} ${i + 1}</p>${x.title ? `<h3 class="kp-proc-title">${esc(x.title)}</h3>` : ''}<div class="kp-text">${res(x.html)}</div></div></li>`).join('')}</ol>
+      ${n < steps.length - 1 ? `<div class="kp-quiz-actions kp-strang-go"><button class="kp-btn" data-proc-go="${b.id}" data-i="${n + 1}">${T('weiter')} → <span class="kp-proc-count">${n + 2} ${T('von')} ${steps.length}</span></button></div>` : ''}</div>`;
+    // Stapel: Schritte stehen untereinander und kommen nacheinander dazu
+    if (b.look === 'stapel') return `<div class="kp-process kp-proc-stack" data-process="${b.id}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      <ol class="kp-proc-list">${steps.slice(0, n + 1).map((x, i) => `<li class="kp-proc-item${i === n ? ' kp-proc-new' : ''}">
+        <span class="kp-proc-num" aria-hidden="true">${i + 1}</span>
+        <div>${x.title ? `<h4 class="kp-proc-title">${esc(x.title)}</h4>` : ''}<div class="kp-text">${res(x.html)}</div></div>
+        ${x.image && x.image.src ? `<div class="kp-proc-media"><img loading="lazy" decoding="async" src="${esc(res(x.image.src))}" alt="${esc(x.image.alt || '')}"${focusStyle(x.image)}></div>` : ''}</li>`).join('')}${steps.slice(n + 1).map((x, k) => `<li class="kp-proc-item kp-proc-later" aria-hidden="true"><span class="kp-proc-num">${n + k + 2}</span><div><h4 class="kp-proc-title">${esc(x.title || T('schritt') + ' ' + (n + k + 2))}</h4></div></li>`).join('')}</ol>
+      ${n < steps.length - 1 ? `<div class="kp-quiz-actions"><button class="kp-btn" data-proc-go="${b.id}" data-i="${n + 1}">${T('weiter')} → <span class="kp-proc-count">${n + 2} ${T('von')} ${steps.length}</span></button></div>` : ''}</div>`;
+    return `<div class="kp-process" data-process="${b.id}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      <ol class="kp-proc-nav">${steps.map((x, i) => `<li><button class="${i === n ? 'current' : ''} ${i < n ? 'done' : ''}" data-proc-go="${b.id}" data-i="${i}" aria-current="${i === n}"><span>${i + 1}</span>${esc(x.title || '')}</button></li>`).join('')}</ol>
+      <div class="kp-proc-body">
+        ${s.image && s.image.src ? `<div class="kp-proc-media"><img loading="lazy" decoding="async" src="${esc(res(s.image.src))}" alt="${esc(s.image.alt || '')}"${focusStyle(s.image)}></div>` : ''}
+        <div><p class="kp-eyebrow">${T('schritt')} ${n + 1} ${T('von')} ${steps.length}</p>
+          ${s.title ? `<h4 class="kp-proc-title">${esc(s.title)}</h4>` : ''}
+          <div class="kp-text">${res(s.html)}</div></div>
+      </div>
+      <div class="kp-quiz-actions">
+        ${n > 0 ? `<button class="kp-btn kp-sec" data-proc-go="${b.id}" data-i="${n - 1}">← ${T('zurueck')}</button>` : ''}
+        ${n < steps.length - 1 ? `<button class="kp-btn" data-proc-go="${b.id}" data-i="${n + 1}">${T('weiter')} →</button>` : ''}
+      </div></div>`;
+  }
+
+  // Weiter-Sperre: Der Rest der Seite erscheint erst auf Klick
+  function renderGate(b) {
+    const done = (state.self[b.id] || {}).done;
+    return done ? '<div class="kp-gate-open" aria-hidden="true"></div>'
+      : `<div class="kp-gate"><div class="kp-text">${res(b.html)}</div>
+        <button class="kp-btn" data-gate="${b.id}">${esc(b.label || 'Weiter')}</button></div>`;
+  }
+
+  // ---------- Genially-Ansatz: Code-Schloss, Fundstücke, Wahlbrett ----------
+  // Code-Schloss (schloss): wie die Weiter-Sperre, nur öffnet ein Code statt eines Klicks. Der Code kommt aus den
+  // Fundstücken (b.clue an Übungen davor), nicht aus Raten; ein Hinweis steht nach hintAfter Fehlversuchen auf Abruf bereit.
+  const lockNorm = s => String(s == null ? '' : s).replace(/\s+/g, '').toLowerCase();
+  const lockDigits = b => b.mode !== 'text' && /^\d+$/.test(lockNorm(b.code));
+  const lockAfter = b => (b.hintAfter === '' || b.hintAfter == null ? 2 : Math.max(0, Number(b.hintAfter) || 0));
+  // Fundstücke im Kurs vor diesem Schloss (frühere Seiten und darüber auf derselben Seite)
+  function lockClues(b) {
+    const out = [];
+    for (let pi = 0; pi < pages.length; pi++) {
+      for (const x of pages[pi].blocks || []) {
+        if (x.id === b.id) return out;
+        if (String(x.clue || '').trim()) out.push({ b: x, page: pi });
+      }
+    }
+    return out;
+  }
+  // Gefunden: einmal erledigt, bleibt das Fundstück (state.self.clues), auch wenn blockDone() auf einer anderen Seite das DOM nicht sieht
+  const clueFound = x => !!((state.self.clues || {})[x.id]) || (pages[state.current] && (pages[state.current].blocks || []).includes(x) && blockDone(x));
+  function lockInvHtml(b) {
+    const list = lockClues(b);
+    if (!list.length) return '';
+    return `<div class="kp-lock-inv" data-lock-inv="${b.id}" data-sig="${list.map(c => (clueFound(c.b) ? 1 : 0)).join('')}"><p class="kp-lock-inv-title">${icon('key')}${esc(T('fundstuecke'))}</p><ul>${list.map(c => clueFound(c.b)
+      ? `<li class="found"><span class="kp-lock-clue">${esc(c.b.clue)}</span></li>`
+      : `<li><span class="kp-lock-miss">${esc(T('nochNichtGefunden'))}</span>${c.page !== state.current ? `<button type="button" class="kp-lock-go" data-goto="${c.page}">${plainTitle(pages[c.page].title || '')}</button>` : ''}</li>`).join('')}</ul></div>`;
+  }
+  const LOCK_SVG = '<svg class="kp-lock-svg" viewBox="0 0 48 48" aria-hidden="true"><path class="kp-lock-shackle" d="M15 22v-7a9 9 0 0 1 18 0v7"/><rect x="10" y="22" width="28" height="20" rx="4"/><circle cx="24" cy="31" r="2.4"/><path d="M24 33.5v3"/></svg>';
+  function lockHelpHtml(b) {
+    const st = state.self[b.id] || {};
+    if (!plainText(b.hint)) return '';
+    if (st.hint) return `<div class="kp-lock-hint" data-lock-hinttext tabindex="-1">${res(b.hint)}</div>`;
+    return (st.tries || 0) >= lockAfter(b) ? `<button type="button" class="kp-btn kp-sec" data-lock-hint="${b.id}">${esc(T('hinweisZeigen'))}</button>` : '';
+  }
+  function renderSchloss(b) {
+    const st = state.self[b.id] || {};
+    const head = b.title ? `<div class="kp-sec-head">${b.eyebrow ? eyebrow(b.eyebrow) : ''}<h2 class="kp-sec-title">${accent(b.title)}</h2></div>` : '';
+    if (st.done) {
+      return `<div class="kp-schloss kp-lock-open" data-schloss="${b.id}">${LOCK_SVG}${head}
+        <p class="kp-lock-fb" role="status">${esc(T('schlossOffen'))}</p>
+        ${plainText(b.success) ? `<div class="kp-text kp-lock-success" data-lock-success tabindex="-1">${res(b.success)}</div>` : ''}</div>`;
+    }
+    const code = lockNorm(b.code), n = Math.max(1, Math.min(12, code.length || 4));
+    const fields = lockDigits(b) || (b.mode !== 'text' && !code)
+      ? `<div class="kp-lock-dials" data-lock-dials role="group" aria-label="${esc(T('schlossGruppe'))}">${Array.from({ length: n }, (x, i) => `<div class="kp-lock-dial">
+          <button type="button" class="kp-lock-step" data-lock-step="1" aria-label="${esc(T('schlossHoeher').replace('{n}', i + 1))}">▲</button>
+          <input class="kp-lock-digit" data-lock-digit="${i}" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="${esc(T('schlossStelle').replace('{n}', i + 1).replace('{m}', n))}">
+          <button type="button" class="kp-lock-step" data-lock-step="-1" aria-label="${esc(T('schlossTiefer').replace('{n}', i + 1))}">▼</button></div>`).join('')}</div>`
+      : `<div class="kp-lock-dials" data-lock-dials><input class="kp-lock-text" data-lock-text type="text" autocomplete="off" spellcheck="false" aria-label="${esc(T('schlossCode'))}"></div>`;
+    return `<div class="kp-schloss" data-schloss="${b.id}">${LOCK_SVG}${head}
+      ${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      ${fields}
+      <div class="kp-lock-act"><button type="button" class="kp-btn" data-lock-try="${b.id}">${esc(b.button || T('schlossOeffnen'))}</button></div>
+      <p class="kp-lock-fb" data-lock-fb role="status" aria-live="polite"></p>
+      <div class="kp-lock-help" data-lock-help>${lockHelpHtml(b)}</div>
+      ${lockInvHtml(b)}</div>`;
+  }
+  function lockTry(box) {
+    const b = findBlock(box.dataset.schloss);
+    if (!b) return;
+    const st = state.self[b.id] || (state.self[b.id] = { tries: 0 });
+    const digits = [...box.querySelectorAll('[data-lock-digit]')];
+    const val = digits.length ? digits.map(x => x.value.trim()).join('') : ((box.querySelector('[data-lock-text]') || {}).value || '');
+    const fb = box.querySelector('[data-lock-fb]');
+    if (!lockNorm(val) || (digits.length && digits.some(x => !x.value.trim()))) {
+      fb.classList.remove('is-wrong'); fb.textContent = T('schlossLeer');
+      return;
+    }
+    if (lockNorm(val) === lockNorm(b.code) && lockNorm(b.code)) {
+      st.done = true;
+      uiSound('erledigt');
+      report();
+      render();
+      const sec = root.querySelector(`[data-block="${b.id}"]`);
+      const ok = sec && (sec.querySelector('[data-lock-success]') || sec.querySelector('.kp-lock-fb'));
+      if (ok) { ok.tabIndex = -1; ok.focus({ preventScroll: true }); }
+      if (sec && sec.nextElementSibling) sec.nextElementSibling.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+    st.tries = (st.tries || 0) + 1;
+    uiSound('falsch');
+    fb.classList.add('is-wrong');
+    fb.textContent = T('schlossFalsch');
+    const dials = box.querySelector('[data-lock-dials]');
+    if (dials && !reducedMotion()) {
+      dials.classList.remove('kp-lock-shake'); void dials.offsetWidth; dials.classList.add('kp-lock-shake');
+      dials.addEventListener('animationend', () => dials.classList.remove('kp-lock-shake'), { once: true });
+    }
+    const help = box.querySelector('[data-lock-help]');
+    if (help) help.innerHTML = lockHelpHtml(b);
+    report();
+  }
+
+  // Fundstück (b.clue an einer Übung): sobald die Übung erledigt ist, steht unter ihr die Karte „Fundstück: …“.
+  // Was einmal gefunden ist, merkt sich state.self.clues; die Inventare der Schlösser auf der Seite ziehen nach.
+  function updateClues() {
+    const p = pages[state.current];
+    if (!p) return;
+    (p.blocks || []).forEach(b => {
+      if (!String(b.clue || '').trim()) return;
+      const sec = root.querySelector(`section[data-block="${b.id}"]`);
+      if (!sec || sec.hidden) return;
+      if (!(state.self.clues || {})[b.id] && !blockDone(b)) return;
+      (state.self.clues || (state.self.clues = {}))[b.id] = 1;
+      if (!sec.querySelector(':scope > .kp-clue')) sec.insertAdjacentHTML('beforeend', `<aside class="kp-clue" data-clue="${b.id}" role="status">${icon('key')}<span><b>${esc(T('fundstueck'))}:</b> ${esc(b.clue)}</span></aside>`);
+    });
+    root.querySelectorAll('[data-lock-inv]').forEach(el => {
+      const b = findBlock(el.dataset.lockInv);
+      if (b && el.dataset.sig !== lockClues(b).map(c => (clueFound(c.b) ? 1 : 0)).join('')) el.outerHTML = lockInvHtml(b);
+    });
+  }
+
+  // Wahlbrett (Choice Board): die Lernenden wählen selbst, welche Aufgaben sie machen. Kachel mit Ziel führt auf eine Seite
+  // (erledigt, sobald sie besucht ist), Kachel mit Aufgabe klappt ein Feld auf („Erledigt“ setzt state.self[id].d).
+  let wbOpen = {};
+  const wbMin = b => Math.max(1, Math.min((b.items || []).length || 1, Number(b.min) || 2));
+  function wbDone(b, i) {
+    const it = (b.items || [])[i] || {};
+    const t = it.target ? pageIndexById(it.target) : -1;
+    if (t >= 0) return state.visited.has(t);
+    return ((state.self[b.id] || {}).d || []).includes(i);
+  }
+  const wbCount = b => (b.items || []).filter((x, i) => wbDone(b, i)).length;
+  function wbStatus(b) {
+    const n = wbCount(b), m = wbMin(b);
+    return `<p class="kp-wb-status${n >= m ? ' all' : ''}" data-wb-status role="status" aria-live="polite">${esc(n >= m ? T('wbGeschafft').replace('{n}', n) : T('wbStand').replace('{n}', n).replace('{m}', m))}</p>`;
+  }
+  function renderWahlbrett(b) {
+    const list = b.items || [];
+    const open = wbOpen[b.id];
+    const cols = Math.max(1, Math.min(3, list.length === 4 ? 2 : list.length));
+    const tiles = list.map((it, i) => {
+      const done = wbDone(b, i), t = it.target ? pageIndexById(it.target) : -1;
+      const media = it.image && it.image.src ? `<span class="kp-wb-img"><img src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"></span>`
+        : it.icon && ICONS[it.icon] ? `<span class="kp-wb-ico">${icon(it.icon)}</span>` : '';
+      const inner = `${media}<span class="kp-wb-title">${esc(it.title || '')}</span>${it.text ? `<span class="kp-wb-text">${esc(it.text)}</span>` : ''}
+        <span class="kp-wb-kind">${esc(t >= 0 ? T('wbZurSeite') : T('wbOeffnen'))} →</span>${done ? `<span class="kp-wb-check" title="${esc(T('wbErledigtMark'))}">${icon('check')}<span class="kp-sr">${esc(T('wbErledigtMark'))}</span></span>` : ''}`;
+      const btn = t >= 0 ? `<button type="button" class="kp-wb-btn" data-goto="${t}" data-wb-tile="${i}">${inner}</button>`
+        : `<button type="button" class="kp-wb-btn" data-wb="${b.id}" data-i="${i}" data-wb-tile="${i}" aria-expanded="${open === i}" aria-controls="wb-${b.id}-${i}">${inner}</button>`;
+      return `<li class="kp-wb-tile${done ? ' done' : ''}">${btn}</li>`;
+    }).join('');
+    const it = open != null ? list[open] : null;
+    const panel = it ? `<div class="kp-wb-panel" id="wb-${b.id}-${open}" role="region" aria-labelledby="wb-${b.id}-${open}-h" tabindex="-1" data-wb-panel="${b.id}" data-i="${open}">
+        <h3 id="wb-${b.id}-${open}-h">${esc(it.title || '')}</h3><div class="kp-text">${res(it.html || '')}</div>
+        <div class="kp-wb-actions">${wbDone(b, open) ? '' : `<button type="button" class="kp-btn" data-wb-done="${b.id}" data-i="${open}">${esc(T('wbErledigt'))}</button>`}
+        <button type="button" class="kp-btn kp-sec" data-wb-close="${b.id}" data-i="${open}">${esc(T('schliessen'))}</button></div></div>` : '';
+    return `<div class="kp-wb" data-wahlbrett="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      ${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      ${wbStatus(b)}
+      <ul class="kp-wb-grid" style="--n:${cols}">${tiles}</ul>${panel}</div>`;
+  }
+  function wbRefresh(b, focusSel) {
+    const el = root.querySelector(`[data-wahlbrett="${b.id}"]`);
+    if (!el) return;
+    refreshBlock(el, renderWahlbrett(b));
+    const f = focusSel && root.querySelector(`[data-wahlbrett="${b.id}"] ${focusSel}`);
+    if (f) f.focus({ preventScroll: false });
+  }
+  // Checkliste: die Lernenden haken selbst ab, der Stand steht in state.self[id].c (Indizes)
+  function clStatus(b) {
+    const done = ((state.self[b.id] || {}).c || []).length, n = (b.items || []).length;
+    return `<p class="kp-cl-status${done >= n && n ? ' all' : ''}" role="status" data-cl-status>${esc(T(done >= n && n ? 'clAlle' : 'clStand').replace('{n}', done).replace('{z}', n))}</p>`;
+  }
+  // Gegenüberstellung: Schritte an einer senkrechten Achse, je Schritt zwei beschriftete Seiten.
+  // Die Analogie zum Bekannten trägt das Neue – deshalb steht links immer das Vertraute.
+  function renderCompare(b) {
+    const steps = b.steps || [];
+    const l = b.leftLabel || 'Bekannt', r = b.rightLabel || 'Neu';
+    return `<div class="kp-cmp" data-cmp="${b.id}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      ${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      <ol class="kp-cmp-list">${steps.map((s, i) => `<li class="kp-cmp-step">
+        <span class="kp-cmp-dot" aria-hidden="true">${i + 1}</span>
+        <div class="kp-cmp-card">
+          <p class="kp-cmp-eyebrow">${esc(s.eyebrow || `${T('schritt')} ${i + 1}`)}</p>
+          ${s.title ? `<h3>${esc(s.title)}</h3>` : ''}
+          <div class="kp-cmp-sides">
+            <div class="kp-cmp-side"><p class="kp-cmp-label">${esc(l)}</p><div class="kp-text">${res(s.left)}</div></div>
+            <div class="kp-cmp-side"><p class="kp-cmp-label kp-cmp-new">${esc(r)}</p><div class="kp-text">${res(s.right)}</div></div>
+          </div>
+          ${s.image && s.image.src ? `<img class="kp-cmp-img" loading="lazy" decoding="async" src="${esc(res(s.image.src))}" alt="${esc(s.image.alt || '')}">` : ''}
+        </div>
+      </li>`).join('')}</ol>
+    </div>`;
+  }
+
+  // Sammelalbum: Für jede besuchte Seite kommt ein Fundstück dazu. Der Stand kommt aus `state.visited`,
+  // das Album speichert also nichts Eigenes und bleibt beim Wiedereinstieg richtig.
+  function renderAlbum(b) {
+    const items = b.items || [];
+    const found = it => { const i = pageIndexById(it.page); return i >= 0 && state.visited.has(i); };
+    const n = items.filter(found).length;
+    const geheim = b.reveal === 'geheim';
+    const cards = items.map((it, i) => {
+      const ok = found(it);
+      const name = ok || !geheim ? esc(it.title || `${T('fundstueck')} ${i + 1}`) : '?';
+      return `<li class="kp-alb-item ${ok ? 'kp-alb-found' : ''}">
+        <div class="kp-alb-pic">${ok && it.image && it.image.src
+          ? `<img loading="lazy" decoding="async" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || it.title || '')}">`
+          : `<span aria-hidden="true">${ok ? '✓' : '?'}</span>`}</div>
+        <h3>${name}</h3>
+        ${ok && plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : `<p class="kp-alb-open">${T(ok ? 'gefunden' : 'nochOffen')}</p>`}
+      </li>`;
+    }).join('');
+    const alle = items.length && n === items.length;
+    return `<div class="kp-album" data-album="${b.id}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      ${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      <p class="kp-alb-count"><b>${n}</b> ${T('von')} ${items.length} ${T('gefunden')}</p>
+      <div class="kp-alb-bar"><i style="width:${items.length ? Math.round(n / items.length * 100) : 0}%"></i></div>
+      <ul class="kp-alb-list">${cards}</ul>
+      ${alle && plainText(b.doneHtml) ? `<div class="kp-alb-done kp-text" role="status">${res(b.doneHtml)}</div>` : ''}
+    </div>`;
+  }
+
+  function renderChecklist(b) {
+    const c = (state.self[b.id] || {}).c || [];
+    return `<div class="kp-checklist${b.look === 'karten' ? ' kp-cl-karten' : ''}" data-checklist="${b.id}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      ${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      <ul class="kp-cl-list">${(b.items || []).map((t, i) => `<li><label class="${c.includes(i) ? 'done' : ''}"><input type="checkbox" data-check-item="${i}" ${c.includes(i) ? 'checked' : ''}>${TICK}<span>${esc(t)}</span></label></li>`).join('')}</ul>
+      ${clStatus(b)}</div>`;
+  }
+
+  // Anhang: Dateien zum Herunterladen
+  // Linkkarte: Vorschau auf einen Artikel oder ein Video draussen (Bild, Titel, zwei Zeilen, „Weitere Informationen dw.com“)
+  function linkHost(url) { try { return new URL(String(url)).hostname.replace(/^www\./, ''); } catch (e) { return ''; } }
+  function renderLinkcard(b) {
+    const url = String(b.url || '').trim();
+    const host = linkHost(url);
+    const img = b.image && b.image.src ? `<div class="kp-lc-media"><img loading="lazy" decoding="async" src="${esc(res(b.image.src))}" alt="${esc(b.image.alt || '')}"${b.image.focus ? ` style="object-position:${esc(b.image.focus)}"` : ''}></div>` : '';
+    const inner = `${img}<div class="kp-lc-body">${b.source ? `<p class="kp-eyebrow">${esc(b.source)}</p>` : ''}<h3 class="kp-lc-title">${accent(b.title || url || 'Link')}</h3>${b.html ? `<div class="kp-text kp-lc-text">${res(b.html)}</div>` : ''}<span class="kp-lc-more">${esc(b.label || T('weitereInfos'))}${host ? ` <b>${esc(host)}</b>` : ''} ›</span></div>`;
+    return url
+      ? `<a class="kp-linkcard" href="${esc(url)}" target="_blank" rel="noopener">${inner}</a>`
+      : `<div class="kp-linkcard kp-lc-empty">${inner}<p class="kp-lock">Noch keine Adresse hinterlegt.</p></div>`;
+  }
+
+  function renderAttachments(b) {
+    const items = (b.files || []).filter(f => f.src);
+    return `<div class="kp-files${b.look === 'knopf' ? ' kp-files-knopf' : ''}">
+      ${b.title ? `<p class="kp-label">${esc(b.title)}</p>` : ''}
+      ${items.length ? `<ul>${items.map(f => `<li><a href="${esc(res(f.src))}" download="${esc(f.name || 'datei')}">${icon('book')}<span><strong>${esc(f.name || 'Datei')}</strong>${f.note ? `<em>${esc(f.note)}</em>` : ''}</span><span class="kp-file-dl">${T('herunterladen')}</span></a></li>`).join('')}</ul>`
+        : '<p class="kp-lock">Noch keine Datei hinterlegt.</p>'}</div>`;
+  }
+
+  // Das eigene Bild eines Bausteins (fuer die Kulisse): Bild, Titelbild, Poster, erste Suchbild-Runde
+  function ownImage(b) {
+    const src = o => (o && o.src) || '';
+    return src(b.image) || src(b.poster && { src: b.poster }) || src(b.media && b.media.poster && { src: b.media.poster }) || src(((b.rounds || []).find(r => r && r.image && r.image.src) || {}).image) || '';
+  }
+  // Ein Video allein (media mit Video oder ivideo): Vorschaubild für die unscharfe Kulisse rund um das Video (Prüfung 19.10.2026,
+  // Vorbild bildungsinnovator „Virtuell führen“: das Video füllt die Breite, keine graue Fläche drumherum)
+  const isVideoBlock = b => !!b && ((b.type === 'media' && b.media && b.media.kind === 'video' && !(b.presenter && b.presenter.image && b.presenter.image.src) && !(b.expert && (b.expert.name || b.expert.castId || (b.expert.image && b.expert.image.src)))) || (b.type === 'ivideo' && (b.src || b.url)));
+  function videoBackdrop(list) {
+    const vis = (list || []).filter(b => !(b.type === 'kurzfrage' && kfBubble(b)) && !['sources', 'divider'].includes(b.type));
+    if (vis.length !== 1 || !isVideoBlock(vis[0])) return '';
+    const pic = ownImage(vis[0]);
+    return pic ? `--kp-vbg:url('${esc(res(pic))}');` : 'none';
+  }
+
+  // ---------- Seite und Ergebnis ----------
+  // Bildschirmseiten (settings.screen, Vorbild youknow): Eine Seite ist eine Folie. Mit Text und Übung wird sie geteilt
+  // (Titel und Text links, Übung oder Bild rechts auf einer getönten Fläche bis an die Ränder), sonst steht der Inhalt
+  // senkrecht mittig. page.arrange: '' (automatisch), 'stapel', 'geteilt', 'geteilt-links'; b.slot: 'text' | 'buehne'.
+  // Tabelle: Zeilen in b.cells (eine Zeile je Zeile, Zellen mit | getrennt), erste Zeile als Kopf (header), erste Spalte als Zeilenkopf (firstCol)
+  function tableRows(b) { return String(b.cells || '').split(/\r?\n/).map(r => r.trim()).filter(Boolean).map(r => r.split('|').map(c => c.trim())); }
+  function renderTable(b) {
+    const rows = tableRows(b), n = Math.max(1, ...rows.map(r => r.length));
+    const head = b.header !== false && rows.length > 1 ? rows.shift() : null;
+    const cell = (c, i, tag) => tag === 'th' ? `<th scope="${i < 0 ? 'col' : 'row'}">${esc(c || '')}</th>` : `<td>${esc(c || '')}</td>`;
+    const pad = r => r.concat(Array(Math.max(0, n - r.length)).fill(''));
+    return `<div class="kp-table-box">${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      <div class="kp-table-wrap" role="region" tabindex="0" aria-label="${esc(plainTitle(b.title || '') || b.caption || T('tabelle'))}"><table class="kp-table${b.firstCol ? ' kp-table-rowhead' : ''}">${b.caption ? `<caption>${esc(b.caption)}</caption>` : ''}
+        ${head ? `<thead><tr>${pad(head).map(c => cell(c, -1, 'th')).join('')}</tr></thead>` : ''}
+        <tbody>${rows.map(r => `<tr>${pad(r).map((c, i) => cell(c, 0, b.firstCol && i === 0 ? 'th' : 'td')).join('')}</tr>`).join('')}</tbody></table></div></div>`;
+  }
+  const SPLIT_TEXT = ['text', 'note', 'statement', 'gate', 'sources', 'divider', 'attachments', 'linkcard', 'table'];
+  const SPLIT_NO = ['hero', 'textimage', 'chapters', 'casebank', 'game', 'agenda', 'compare', 'pool', 'review', 'pretest', 'certificate', 'team', 'comicstrip', 'album', 'simulation', 'mission', 'vstatements', 'cards', 'timeline'];
+  // Nennung zum Bild der Folie (page.bgImage.credit): Storyset und Fotos verlangen sie, ein Bildbaustein zeigt sie selbst
+  function slideCredit(p) {
+    const c = p.bgImage && p.bgImage.src && p.bgImage.credit;
+    return c ? `<p class="kp-slide-credit">${esc(c)}</p>` : '';
+  }
+  const SLIDE_KINDS = ['mitte', 'welle', 'welle-links', 'kreis', 'karte', 'karte-links', 'buehne', 'buehne-hell', 'form', 'form-links', 'plakat', 'ordner', 'szene', 'lupe', 'rahmen', 'rahmen-links', 'muster', 'muster-links', 'verlauf', 'verlauf-links', 'wechsel', 'kopfband', 'uebung', 'vergleich', 'zahl', 'zahlen', 'bilduebung', 'bilduebung-links', 'zielkarte', 'zielkarte-links', 'versetzt', 'randblock', 'randblock-links', 'fotoband', 'schach', 'zweifarb', 'zweifarb-links'];
+  // Folie „Zahl“: der erste dieser Bausteine steht groß links, alles andere rechts
+  const ZAHL_TYPES = ['bignumber', 'statement', 'image', 'anim', 'lottie'];
+  // Bausteine, die in der Folie „Wechsel“ als Bild neben dem Text stehen
+  const PIC_TYPES = ['image', 'media', 'vstatements', 'ivideo', 'lottie', 'anim', 'vscene'];
+  // b.slot 'unten' gilt nur auf der geteilten Folie: der Baustein steht unter Text und Bühne über die ganze Breite (Vorbild Rise
+  // „Arbeitsschutz für alle“: Kernsatz unter Einleitung und Personenkarten); auf anderen Folien zählt er zur Bühne
+  const slotOf = b => (b.slot === 'text' ? 'text' : b.slot === 'buehne' ? 'stage' : b.slot === 'unten' ? 'below' : SPLIT_TEXT.includes(b.type) ? 'text' : 'stage');
+  function arrangeOf(p) {
+    if (!set.screen || !p) return '';
+    const blocks = p.blocks || [];
+    const first = blocks[0] || {}, fd = first.design || {};
+    // Ein randloser Anfang (Foto-Abschnitt, Titelbild, Spiel) füllt den Bildschirm schon selbst
+    const bleed = !p.result && (fd.bg || fd.width === 'full' || first.cover || first.type === 'game');
+    if (p.result) return 'fit';
+    if (SLIDE_KINDS.concat(['geteilt', 'geteilt-links']).includes(p.arrange)) return p.arrange;
+    // Ein Hintergrundbild der ganzen Folie ohne eigene Wahl: Inhalt mittig darauf (Vorbild: Kapitelwahl über der Küche)
+    if (p.bgImage && p.bgImage.src && !p.arrange) return 'mitte';
+    if (p.arrange === 'stapel') return bleed ? '' : 'fit';
+    const unsuited = blocks.some(b => SPLIT_NO.includes(b.type) || b.cover || (b.type === 'dialog' && b.stage) || (b.design && (b.design.bg || ['wide', 'full', 'half'].includes(b.design.width))));
+    // Eine „Kurz gefragt“-Sprechblase liegt über der Seite und belegt keinen Platz auf der Folie
+    const slots = blocks.filter(b => !(b.type === 'kurzfrage' && kfBubble(b))).map(slotOf);
+    if (!unsuited && slots.includes('text') && slots.includes('stage')) return 'geteilt';
+    return bleed ? '' : 'fit';
+  }
+
+  // Ein Kernsatz als randloser Abschnitt allein auf einer Bildschirmseite füllt die Folie (sonst Band oben, darunter leer)
+  // Kino (Prüfung 19.10.2026, Vorbild bildungsinnovator: Bänder und Bilder über die ganze Fläche): ein Video allein auf einer
+  // mittigen Bildschirmseite füllt die ganze Folie, Titel weiß oben auf der unscharfen Kulisse, kein leerer Streifen darunter
+  // Dunkle Folie (Vorbild Rise „Mit Struktur zum Ziel“): page.tone 'dunkel' auf einer Folie ohne eigene Aufteilung färbt die ganze Fläche dunkel
+  function darkSlide(p) { return !!(p && !p.result && p.tone === 'dunkel' && ['fit', ''].includes(arrangeOf(p)) && !(p.blocks || []).some(b => b.type === 'hero')); }
+  // Infofolie baut sich auf (page.einflug): Kopf, Absätze, Listenpunkte, Karten und Bilder fliegen nacheinander ein.
+  // Nur beim Zeichnen der Seite, nicht beim Neuzeichnen eines Bausteins; unter „Bewegung reduzieren“ steht alles sofort (CSS).
+  const EI_TEXT = '.kp-text:not(.kp-text .kp-text, .kp-card .kp-text, details .kp-text, .kp-fig-quote *)';
+  const EI_ITEMS = `.kp-page-head > :is(.kp-eyebrow, h1, .kp-readtime), ${EI_TEXT} > :is(p, h2, h3, blockquote), ${EI_TEXT} > :is(ul, ol) > li, details.kp-deep, .kp-card, .kp-cl-list > li, .kp-files li, .kp-fig, .kp-fig-quote, .kp-tk-list > li`;
+  function setupEinflug(scope) {
+    const main = scope.querySelector && scope.querySelector('main.kp-einflug');
+    if (!main || main.dataset.ei) return;
+    main.dataset.ei = '1';
+    let n = 0;
+    const seen = new Set();
+    main.querySelectorAll(':scope > .kp-page-head, .kp-block, ' + EI_ITEMS).forEach(el => {
+      if (el.closest('[hidden]')) return;
+      const isBlock = el.classList.contains('kp-block') || el.classList.contains('kp-page-head');
+      if (isBlock) { if (!el.querySelector(EI_ITEMS)) { el.classList.add('kp-ei'); el.style.setProperty('--kp-ei', Math.min(n++, 16)); } return; }
+      if (seen.has(el)) return; seen.add(el);
+      el.classList.add('kp-ei');
+      if (el.matches('.kp-fig') || el.closest('.kp-split-stage, .kp-slide-panel ~ *')) el.classList.add('kp-ei-side');
+      el.style.setProperty('--kp-ei', Math.min(n++, 16));
+    });
+  }
+  function kinoPage(p) { return !!(set.screen && p && !p.result && arrangeOf(p) === 'fit' && videoBackdrop(p.blocks)); }
+  function soloBleed(p) {
+    if (!set.screen || !p || p.result || !p.hideTitle || arrangeOf(p) !== '') return false;
+    const bl = (p.blocks || []).filter(b => !(b.type === 'kurzfrage' && kfBubble(b)) && b.type !== 'sources');
+    return bl.length === 1 && ['statement', 'text', 'note', 'bignumber'].includes(bl[0].type) && !!(bl[0].design && bl[0].design.bg) && !bl[0].showIf;
+  }
+
+  // Ein Baustein allein auf einer mittigen Bildschirmseite, der die Folie ganz füllt (Prüfung 20.10.2026, Vorbilder
+  // bildungsinnovator: Zitatband, Überblick mit Fotokarten): Merkkarte, Kartenstapel, Kapitelübersicht als Startseite, Teilnahmebestätigung
+  const FILL_TYPES = ['merkkarte', 'kartenstapel', 'certificate'];
+  function soloFill(p) {
+    if (!set.screen || !p || p.result || arrangeOf(p) !== 'fit') return '';
+    const bl = (p.blocks || []).filter(b => !(b.type === 'kurzfrage' && kfBubble(b)) && !['sources', 'divider'].includes(b.type));
+    if (bl.length !== 1 || bl[0].showIf) return '';
+    const t = bl[0].type;
+    return FILL_TYPES.includes(t) || (t === 'chapters' && bl[0].look === 'start') ? t : '';
+  }
+  const fillOf = b => { const p = pages[pageIdxOf(b.id)]; return !!p && soloFill(p) === b.type; };
+
+  function chapterRingHtml(p) {
+    if (!set.chapterCounter || p.result) return '';
+    const list = chapterList(), at = list.findIndex(c => c.pages[0] === pages.indexOf(p));
+    if (at < 0 || list.length < 2) return '';
+    const u = 2 * Math.PI * 52, part = (at + 1) / list.length;
+    return `<div class="kp-chring" role="img" aria-label="${esc(T('kapitelVon').replace('{n}', at + 1).replace('{m}', list.length))}">
+      <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="kp-chring-bg" cx="60" cy="60" r="52"></circle><circle class="kp-chring-fill" cx="60" cy="60" r="52" style="--u:${u.toFixed(1)};--o:${(u * (1 - part)).toFixed(1)}"></circle></svg>
+      <span class="kp-chring-num" aria-hidden="true">${at + 1}<small>/</small>${list.length}</span></div>`;
+  }
+
+  function renderPage(p) {
+    if (p.result) { const r = renderResult(); return arrangeOf(p) === 'fit' ? `<div class="kp-fit">${r}</div>` : r; }
+    const arrange = arrangeOf(p);
+    const split = arrange === 'geteilt' || arrange === 'geteilt-links';
+    const slide = SLIDE_KINDS.includes(arrange);
+    // Titelzeile buendig mit einem breiten ersten Baustein (Klasse kp-head-wide)
+    const firstWide = !split && !slide && (((p.blocks || [])[0] || {}).design || {}).width === 'wide';
+    // Microlearning: die erste Seite eines Kapitels bekommt das dunkle Band mit Kapitelnummer „05 / 06“
+    const chs = theme.style === 'micro' ? microChapters() : null;
+    const chAt = chs ? chs.findIndex(ch => ch.pages[0] === pages.indexOf(p)) : -1;
+    const lessons = chs && lektion() ? microLessons() : null;
+    const lesAt = lessons ? lessons.indexOf(pages.indexOf(p)) : -1;
+    const num = lessons ? (lesAt >= 0 ? `<span class="kp-ml-num kp-ml-lesson">${esc(T('lektionVon').replace('{n}', lesAt + 1).replace('{m}', lessons.length))}</span>` : '') : chAt >= 0 ? `<span class="kp-ml-num">${String(chAt + 1).padStart(2, '0')}<small>/ ${String(chs.length).padStart(2, '0')}</small></span>` : '';
+    // Lesezeit je Seite (settings.readTime): dieselbe Rechnung wie die Kurszeit, nur fuer diese Seite
+    const read = set.readTime && !p.result ? `<p class="kp-readtime">${icon('clock')} ${T('lesezeit')}: ${T('ca')} ${kursZeit([p]).minutes} ${kursZeit([p]).minutes === 1 ? T('minute') : T('minuten')}</p>` : '';
+    // Kapitelzähler (settings.chapterCounter, Vorbild „Schwächen überwinden“ mit Ring „2 / 8“): großer Ring am Kapitelanfang
+    const cring = chs ? '' : chapterRingHtml(p);
+    // Maskottchen steht am Anfang jedes Kapitels neben dem Titel, mit der Haltung dieser Seite
+    const masc = mascotCast() && !p.result && chapterList().some(c => c.pages[0] === pages.indexOf(p)) ? mascotHtml(p.mascotPose, 'kp-mascot-head') : '';
+    const side = masc ? `<div class="kp-head-side">${masc}${cring}</div>` : cring;
+    const head = p.hideTitle ? '' : `<header class="kp-page-head${firstWide ? ' kp-head-wide' : ''}${chAt >= 0 || lessons ? ' kp-ml-chapstart' : ''}${side ? ' kp-has-chring' : ''}">${num}${eyebrow(p.eyebrow)}<h1>${accent(p.title)}</h1>${chAt >= 0 && !lessons && p.chapter && plainTitle(p.title) !== p.chapter ? `<p class="kp-ml-chap">${esc(p.chapter)}</p>` : ''}${read}${side}</header>`;
+    let blocked = false; // hinter einer Weiter-Sperre bleibt der Rest der Seite verborgen
+    const parts = (p.blocks || []).map(b => {
+      if (blocked) return `<section class="kp-block kp-b-${b.type} kp-hidden" data-block="${b.id}" hidden></section>`;
+      if ((b.type === 'gate' || b.type === 'schloss') && !(state.self[b.id] || {}).done) blocked = true;
+      const look = b.design || {};
+      const cls = ['kp-block', 'kp-b-' + b.type];
+      if (isCustom(b) || b.type === 'html') cls.push('kp-b-custom');
+      if (look.bg) cls.push('kp-bg-' + look.bg);
+      if (look.width && look.width !== 'normal') cls.push('kp-w-' + look.width);
+      if (look.space === 'large') cls.push('kp-sp-large');
+      if (look.bg === 'mesh') cls.push('kp-tone-' + (['warm', 'kalt', 'haus'].includes(look.tone) ? look.tone : 'haus'));
+      if (set.layout === 'scroll' || theme.effects !== 'dezent') cls.push('fx-reveal');
+      // Foto-Hintergrund: Der Schleier bestimmt Stimmung und Lesbarkeit
+      if (look.bg === 'image') cls.push('kp-ov-' + (look.overlay || 'light'));
+      const bgMove = look.bg === 'image' && look.bgImage && look.bgImage.src && ['zoom', 'pan'].includes(look.bgMotion);
+      if (bgMove) cls.push('kp-bgm', 'kp-bgm-' + look.bgMotion);
+      if (look.bg === 'dark' || (look.bg === 'image' && ['dark', 'primary'].includes(look.overlay))) cls.push('kp-on-dark');
+      const styles = [];
+      if (look.bg === 'image' && look.bgImage && look.bgImage.src) {
+        styles.push(`--kp-bgimg:url('${esc(res(look.bgImage.src))}')`);
+        if (look.bgImage.focus) styles.push(`--kp-bgpos:${esc(look.bgImage.focus)}`);
+      }
+      // Kulisse: das eigene Bild des Bausteins liegt stark unscharf und vergroessert hinter dem Abschnitt,
+      // das scharfe Bild steht mittig darauf (ohne eigenes Bild bleibt nur die dunkle Flaeche)
+      if (look.bg === 'ambient') {
+        const own = ownImage(b);
+        if (own) styles.push(`--kp-bgimg:url('${esc(res(own))}')`);
+        cls.push('kp-on-dark');
+      }
+      const style = styles.length ? ` style="${styles.join(';')}"` : '';
+      const decor = look.decor ? `<span class="kp-decor" aria-hidden="true">${icon(look.decor)}</span>` : '';
+      const lang = look.lang ? ` lang="${esc(look.lang)}"` : '';
+      const band = look.band ? `<span class="kp-band">${esc(look.band)}</span>` : '';
+      // Abschnittsform: weicher Übergang zwischen zwei farbigen Abschnitten
+      const shape = look.bg && look.shape && look.shape !== 'kante'
+        ? `<span class="kp-shape kp-shape-${esc(look.shape)}" aria-hidden="true"></span>` : '';
+      const inner = b.type === 'sources' ? renderBlock(b) : footnotes(renderBlock(b));
+      return `<section class="${cls.join(' ')}" data-block="${b.id}"${hasCond(b) ? ' data-cond="1"' + (conditionMet(b.showIf) ? '' : ' hidden') : ''}${style}${lang}>${bgMove ? '<span class="kp-bgmove" aria-hidden="true"></span>' : ''}${decor}<div class="kp-block-inner">${band}${narrationButton(b)}${inner}</div>${shape}</section>`;
+    });
+    // Zwei halbbreite Blöcke nebeneinander: aufeinanderfolgende werden zu einer Reihe gebündelt
+    const out = [];
+    (p.blocks || []).forEach((b, i) => {
+      const half = ((b.design || {}).width === 'half') && !(blocked && i > 0);
+      const prev = out[out.length - 1];
+      if (half && prev && prev.row && prev.n < 2) { prev.html += parts[i]; prev.n++; }
+      else out.push(half ? { row: true, n: 1, html: parts[i] } : { row: false, html: parts[i] });
+    });
+    // Ohne Test gibt es keine Ergebnisseite: die Empfehlung steht dann auf der letzten Seite
+    const isLast = !pages.some(x => x.result) && pages.indexOf(p) === pages.length - 1;
+    if (slide) {
+      // Folie mit Vollbild: „mitte“ legt Titel und Bausteine als Karten mittig auf das Bild, „welle“ stellt sie auf eine
+      // geschwungene Fläche rechts (bzw. links), das Bild bleibt daneben als Szene sichtbar
+      const bgFocus = f => (f && typeof f === 'object' ? `${+f.x || 50}% ${+f.y || 50}%` : f); // {x, y} aus älteren Dateien, sonst Text wie „50% 30%“
+      const bg = p.bgImage && p.bgImage.src ? `--kp-slidebg:url('${esc(res(p.bgImage.src))}');${p.bgImage.focus ? `--kp-bgpos:${esc(bgFocus(p.bgImage.focus))};` : ''}` : '';
+      // Zeichnung (SVG) statt Foto: in den Fotofeldern von Muster, Verlauf, Rahmen und Kopfband ganz zeigen statt anschneiden (Prüfung 19.10.2026)
+      const bgDraw = bg && /\.svg(\?|$)|^data:image\/svg/i.test(String(p.bgImage.src)) ? ' kp-bg-drawing' : '';
+      const kind = arrange.replace(/-(links|hell)$/, '');
+      const flip = /-links$/.test(arrange);
+      // Muster (Vorbild „Fragen gezielt einsetzen“): links eine Fläche in der Hauptfarbe mit großen Zeichen in Sprechblasen
+      // (page.pattern, z. B. „QA“ oder „?!“), darauf eine weiße Karte mit Titel und Text, rechts das Foto über die halbe Folie
+      if (kind === 'muster') {
+        const ch = [...String(p.pattern || '?!').replace(/\s+/g, '')].slice(0, 6);
+        const cells = Array.from({ length: 12 }, (x, k) => `<i>${esc(ch[k % ch.length] || '?')}</i>`).join('');
+        return `<div class="kp-slide kp-slide-muster${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-muster-feld" aria-hidden="true">${cells}</div><div class="kp-muster-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-muster-karte">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      }
+      // Verlauf (Vorbild „Das Warum und die Alternative ermitteln“): das Foto steht links und läuft weich in den Grund aus,
+      // Titel und Text rechts daneben ohne Karte, gern als Ich-Erzählung der Person im Bild
+      if (kind === 'verlauf') {
+        return `<div class="kp-slide kp-slide-verlauf${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-verlauf-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-verlauf-text">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      }
+      // Rahmen (Vorbild Business-Präsentation „Our Philosophy“): das Foto steht in einem versetzten Linienrahmen, eine weiße
+      // Karte mit Titel und allen Bausteinen überlappt es von der Seite
+      if (kind === 'rahmen') {
+        return `<div class="kp-slide kp-slide-rahmen${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-rahmen-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-rahmen-karte">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      }
+      // Szene (Vorbild illustrierte Storyline-Kurse, „Setz jetzt deine Kopfhörer auf“): die Illustration aus page.bgImage füllt
+      // die Folie, bis zu zwei Figuren aus page.figures stehen links und rechts im Bild, alle Bausteine hängen als Schild
+      // dazwischen, der Titel sitzt klein als Plakette oben links (Vorbild „Was ist eine Branche?“)
+      if (kind === 'szene') {
+        const figs = (p.figures || []).slice(0, 2).map((f, i) => {
+          const c = castOf(f || {});
+          if (!c || !(c.look || (c.image && c.image.src))) return '';
+          return `<div class="kp-szene-fig kp-szene-fig-${i ? 'r' : 'l'}${c.look === 'image' || !c.look ? ' kp-szene-img' : ''}" aria-hidden="true"${c.color ? ` style="--kp-shirt:${esc(c.color)}"` : ''}>${c.look === 'image' || !c.look ? (c.image && c.image.src ? `<img src="${esc(res(poseImage(c, f.pose)))}" alt="">` : '') : avatarSvg(c.look, f.pose || c.pose, true)}</div>`;
+        }).join('');
+        const nf = (p.figures || []).filter(f => f && f.castId).length;
+        return `<div class="kp-slide kp-slide-szene${bg ? ' kp-has-bg' : ''} kp-szene-n${Math.min(2, nf)}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}>${head ? `<div class="kp-szene-plakette">${head}</div>` : ''}${figs}<div class="kp-slide-panel kp-szene-schild">${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      }
+      // Lupe (Vorbild Schulungsvideo „Belehrung zum Infektionsschutzgesetz“): eine große Lupe liegt auf der Illustration,
+      // Titel und Textbausteine stehen im Glas, die Übung rechts daneben
+      if (kind === 'lupe') {
+        const txt = [], stg = [];
+        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? txt : stg).push(parts[i]));
+        // Die Schrift im Glas richtet sich nach dem längsten Wort, damit es ohne Trennung in den Kreis passt
+        const lw = Math.max(8, ...plainTitle(p.title || '').split(/\s+/).map(w => w.length));
+        return `<div class="kp-slide kp-slide-lupe${bg ? ' kp-has-bg' : ''}${stg.length ? '' : ' kp-lupe-solo'}" style="${bg}--lw:${lw}"${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-lupe"><div class="kp-lupe-glas kp-slide-panel">${head}${txt.join('')}</div><span class="kp-lupe-griff" aria-hidden="true"></span></div>${stg.length ? `<div class="kp-lupe-stage">${stg.join('')}</div>` : ''}${isLast ? nextCourseCard() : ''}</div>`;
+      }
+      // Ordner (Vorbild Storyline „Setting Boundaries“): die Seiten des Kapitels als nummerierte Reiter links am Blatt,
+      // der aktuelle Reiter in der Akzentfarbe mit Pfeil ins Blatt; ein Klick springt zur Seite (Sperren wie im Inhaltsverzeichnis)
+      if (kind === 'ordner') {
+        const idx = pages.indexOf(p), ch = p.chapter || '';
+        let a = idx, z = idx;
+        while (a > 0 && !pages[a - 1].result && (pages[a - 1].chapter || '') === ch) a--;
+        while (z < pages.length - 1 && !pages[z + 1].result && (pages[z + 1].chapter || '') === ch) z++;
+        // höchstens acht Reiter: ein Fenster um die aktuelle Seite
+        if (z - a > 7) { a = Math.max(a, Math.min(idx - 3, z - 7)); z = a + 7; }
+        const maxOk = unlockedUpTo(), tabs = [];
+        for (let i = a; i <= z; i++) tabs.push(`<button type="button" class="kp-ordner-tab${i === idx ? ' current' : ''}${state.visited.has(i) && i !== idx ? ' seen' : ''}" data-goto="${i}" ${set.gating && i > maxOk ? 'disabled' : ''} ${i === idx ? 'aria-current="page"' : ''} aria-label="${esc(plainTitle(pages[i].title || '') || String(i + 1))}">${i - a + 1}</button>`);
+        return `<div class="kp-slide kp-slide-ordner${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><div class="kp-ordner"><nav class="kp-ordner-tabs" aria-label="${esc(T('seitenImKapitel'))}">${tabs.join('')}</nav><div class="kp-slide-panel kp-ordner-sheet">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div></div>`;
+      }
+      // Wechsel (Vorbild LUCYDATE „Wie wirke ich auf dich?“): je zwei Bausteine bilden einen Abschnitt über die ganze Breite,
+      // das Bild (Foto, Video) steht abwechselnd rechts und links, der Grund wechselt zwischen getönt und hell. Abschnitte,
+      // deren Bausteine noch verborgen sind (showIf, gate), blendet das CSS über :has() aus.
+      if (kind === 'wechsel') {
+        const bl = p.blocks || [], rows = [];
+        for (let i = 0; i < bl.length; i += 2) rows.push([i, i + 1].filter(k => k < bl.length));
+        const html = rows.map((r, k) => {
+          const pic = r.find(i => PIC_TYPES.includes(bl[i].type));
+          const other = r.filter(i => i !== pic);
+          const side = pic == null || r.length < 2 ? '' : (k % 2 ? ' kp-wechsel-links' : '');
+          const textCol = `<div class="kp-wechsel-text">${k === 0 ? head : ''}${other.map(i => parts[i]).join('')}</div>`;
+          const picCol = pic != null ? `<div class="kp-wechsel-bild">${parts[pic]}</div>` : '';
+          return `<div class="kp-wechsel-row${side}${r.length < 2 ? ' kp-wechsel-solo' : ''}${k % 2 ? '' : ' kp-wechsel-tint'}">${textCol}${picCol}</div>`;
+        }).join('');
+        return `<div class="kp-slide kp-slide-wechsel">${html || head}${isLast ? `<div class="kp-wechsel-row kp-wechsel-solo kp-wechsel-end">${nextCourseCard()}</div>` : ''}</div>`;
+      }
+      // Kopfband (Vorbild Rise „Fragen gezielt einsetzen / Zuhören und Fragen!“): oben ein Band aus Musterfläche mit weißer
+      // Karte (Titel und erster Textbaustein) und Foto, darunter weiß die übrigen Bausteine geteilt: Text links, Video oder
+      // Übung rechts. Zeichen der Musterfläche aus page.pattern wie bei „muster“.
+      if (kind === 'kopfband') {
+        const bl = p.blocks || [];
+        const firstText = bl.length && slotOf(bl[0]) === 'text' ? 0 : -1;
+        const ch = [...String(p.pattern || '?!').replace(/\s+/g, '')].slice(0, 6);
+        const cells = Array.from({ length: 12 }, (x, k) => `<i>${esc(ch[k % ch.length] || '?')}</i>`).join('');
+        const txt = [], stg = [];
+        bl.forEach((b, i) => { if (i !== firstText) (slotOf(b) === 'text' ? txt : stg).push(parts[i]); });
+        const below = txt.length || stg.length ? `<div class="kp-kopfband-unten${txt.length && stg.length ? '' : ' kp-kopfband-solo'}">${txt.length ? `<div class="kp-kopfband-text">${txt.join('')}</div>` : ''}${stg.length ? `<div class="kp-kopfband-stage">${stg.join('')}</div>` : ''}</div>` : '';
+        return `<div class="kp-slide kp-slide-kopfband${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-kopfband"><div class="kp-muster-feld" aria-hidden="true">${cells}</div><div class="kp-kopfband-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-kopfband-karte">${head}${firstText >= 0 ? parts[firstText] : ''}</div></div>${below}${isLast ? nextCourseCard() : ''}</div>`;
+      }
+      // Kreis (Vorbild bildungsinnovator): Farbverlauf mit Titel und Text links, das Foto im großen Kreis rechts,
+      // die Übung als Karte, die über den Kreis ragt. Bühne (Vorbild youknow dunkel): Titel und Text oben auf dunklem Grund,
+      // darunter die Übung auf dem Foto. Beide teilen die Bausteine wie die geteilte Seite (slotOf).
+      // Übung (Designprüfung 10.10.2026, Vorbild Storyline-Drag-and-Drop-Vorlagen): oben eine schmale Zeile mit Titel und
+      // Aufgabentext nebeneinander, darunter die Bühne über die ganze Breite, die Übung bis 1200 px breit und mittig
+      // Runde bildungsinnovator 20.10.2026 (Kerstin: „komplett gleich nachbauen“), neun Folien nach den Vorschauen der Bibliothek:
+      // Zielkarte („In diesem Training erfährst Du,“ in AGG, Compliance, Arbeitsschutz u. v. m.): das Foto unscharf und aufgehellt
+      // über die ganze Folie, darauf eine Karte 50 : 50, links weiß mit dunkler Kante, Titel und Liste mit Pfeil im Kreis, rechts
+      // dasselbe Foto scharf (oder der erste Bildbaustein der Seite); tone 'farbe' pastell ohne Kante, 'dunkel' in der Hauptfarbe
+      if (kind === 'zielkarte') {
+        const bl = p.blocks || [];
+        const pic = bl.findIndex(b => b.type === 'image');
+        const txt = bl.map((b, i) => i).filter(i => i !== pic);
+        const tone = p.tone === 'dunkel' ? ' kp-ziel-dunkel' : p.tone === 'farbe' ? ' kp-ziel-farbe' : '';
+        const foto = pic >= 0 ? `<div class="kp-ziel-foto kp-ziel-hasblock">${parts[pic]}</div>` : `<div class="kp-ziel-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div>`;
+        return `<div class="kp-slide kp-slide-zielkarte${flip ? ' kp-slide-flip' : ''}${tone}${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><div class="kp-ziel-card"><div class="kp-slide-panel kp-ziel-text${p.tone === 'dunkel' ? ' kp-on-dark' : ''}">${head}${txt.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div>${foto}</div></div>`;
+      }
+      // Versetzt („Plan / Ziele“ in Kündigungsgespräche, „Ziele / Herausforderungen“ in Superkraft Empathie): zwei weiße Karten
+      // nebeneinander auf Foto oder Verlauf, die rechte steht höher; Listen tragen einen Haken im Kreis
+      if (kind === 'versetzt') {
+        const bl = p.blocks || [];
+        const vis = bl.map((b, i) => i).filter(i => !['gate', 'schloss', 'sources', 'divider'].includes(bl[i].type));
+        const [l, r] = vis, rest = bl.map((b, i) => i).filter(i => i !== l && i !== r);
+        return `<div class="kp-slide kp-slide-versetzt${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}>${head ? `<div class="kp-vs-head">${head}</div>` : ''}<div class="kp-vs-grid"><div class="kp-vs-card kp-vs-l">${l != null ? parts[l] : ''}</div><div class="kp-vs-card kp-vs-r">${r != null ? parts[r] : ''}</div></div>${rest.length || isLast ? `<div class="kp-vs-rest">${rest.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div>` : ''}</div>`;
+      }
+      // Randblock (Kündigungsgespräche „Willkommen“, Psychologische Sicherheit „Omar, Teamlead“): auf dunklem Grund eine helle Fläche
+      // vom linken Rand bis zur Mitte, das Video oder Foto liegt darauf und ragt über sie hinaus, rechts höher eine helle Textkarte
+      // mit Kante links, darunter ein großes Liniensymbol (page.icon)
+      if (kind === 'randblock') {
+        const bl = p.blocks || [];
+        const pic = bl.findIndex(b => PIC_TYPES.includes(b.type));
+        const rest = bl.map((b, i) => i).filter(i => i !== pic);
+        return `<div class="kp-slide kp-slide-randblock${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><span class="kp-rb-block" aria-hidden="true"></span><div class="kp-rb-media">${pic >= 0 ? parts[pic] : ''}</div><div class="kp-rb-side"><div class="kp-slide-panel kp-rb-card">${head}${rest.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div>${p.icon ? `<span class="kp-rb-icon" aria-hidden="true">${icon(p.icon)}</span>` : ''}</div></div>`;
+      }
+      // Fotoband („Anne fragt nach“ in „Was sagt die Forschung über Kreativität?“): das Foto über die ganze Folie, oben links eine
+      // weiße, leicht durchscheinende Karte mit Titel und Text, die Personen im Bild bleiben frei
+      if (kind === 'fotoband') {
+        return `<div class="kp-slide kp-slide-fotoband${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel kp-fb-card">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      }
+      // Schachbrett (Teammeetings verbessern, Kognitive Flexibilität): Fotos und Stimmen im Raster 2 × 2 ohne Lücke, Foto | Zitat,
+      // darunter Zitat | Foto; Zitatfelder in der Hauptfarbe, die nach unten heller wird
+      if (kind === 'schach') {
+        const bl = p.blocks || [];
+        const pics = bl.map((b, i) => i).filter(i => PIC_TYPES.includes(bl[i].type));
+        const txts = bl.map((b, i) => i).filter(i => !pics.includes(i) && !['sources', 'divider'].includes(bl[i].type));
+        const n = Math.max(pics.length, txts.length), cells = [];
+        for (let k = 0; k < n; k++) {
+          const a = pics[k] != null ? `<div class="kp-sb-pic">${parts[pics[k]]}</div>` : '<div class="kp-sb-pic kp-sb-leer"></div>';
+          const t = txts[k] != null ? `<div class="kp-sb-txt kp-on-dark">${parts[txts[k]]}</div>` : '<div class="kp-sb-txt kp-sb-leer"></div>';
+          cells.push(k % 2 ? t + a : a + t);
+        }
+        return `<div class="kp-slide kp-slide-schach">${head}<div class="kp-sb-grid">${cells.join('')}</div>${isLast ? nextCourseCard() : ''}</div>`;
+      }
+      // Zweifarbig (Besser schlafen „Hast Du das schon überprüfen lassen?“, Clever entscheiden): die Folie hart geteilt, links hell
+      // mit Foto und Text, rechts dunkel (tone 'farbe': Hauptfarbe, die nach unten ausläuft) mit Titel, nummerierter Liste oder Übung
+      if (kind === 'zweifarb') {
+        const bl = p.blocks || [];
+        const pic = bl.findIndex(b => PIC_TYPES.includes(b.type));
+        const left = pic >= 0 ? [pic].concat(bl[pic + 1] && slotOf(bl[pic + 1]) === 'text' ? [pic + 1] : []) : [0];
+        const right = bl.map((b, i) => i).filter(i => !left.includes(i));
+        return `<div class="kp-slide kp-slide-zweifarb${flip ? ' kp-slide-flip' : ''}${p.tone === 'farbe' ? ' kp-zf-farbe' : ''}"><div class="kp-zf-hell">${left.filter(i => bl[i]).map(i => parts[i]).join('')}</div><div class="kp-slide-panel kp-zf-dunkel kp-on-dark">${head}${right.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      }
+      if (kind === 'uebung') {
+        const txt = [], stg = [];
+        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? txt : stg).push(parts[i]));
+        // page.tone 'dunkel' (Vorbild bildungsinnovator „Führen mit Zielvereinbarungen“): das Kopfband in der dunklen Hauptfarbe,
+        // Titel links, Einleitung rechts, die Übung darunter auf hellem Grund
+        const dark = p.tone === 'dunkel';
+        return `<div class="kp-slide kp-slide-uebung${dark ? ' kp-uebung-dunkel' : ''}${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><div class="kp-uebung-head${dark ? ' kp-on-dark' : ''}">${head}${txt.length ? `<div class="kp-uebung-text">${txt.join('')}</div>` : ''}</div><div class="kp-uebung-stage${bg ? ' kp-uebung-foto' + (bgDraw ? bgDraw : ' kp-on-dark') : ''}">${stg.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      }
+      // Bild + Übung (Prüfung 19.10.2026, Vorbilder bildungsinnovator „Schneller ohne Stress“ und „Dialog- und Konfliktfähigkeit“):
+      // das Foto füllt die halbe Folie bis an alle Ränder, daneben Titel, Text und Übung auf der dunklen Hauptfarbe
+      if (kind === 'bilduebung') {
+        return `<div class="kp-slide kp-slide-bilduebung${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-bilduebung-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-bilduebung-panel kp-on-dark">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      }
+      // Vergleich: Titel oben, darunter zwei Spalten mit einer Trennlinie (Vorher/Nachher, Richtig/Falsch, zwei Rollen);
+      // der erste Baustein steht links, der zweite rechts, weitere darunter über die ganze Breite
+      if (kind === 'vergleich') {
+        const bl = p.blocks || [];
+        const vis = bl.map((b, i) => i).filter(i => !(bl[i].type === 'gate' || bl[i].type === 'schloss' || bl[i].type === 'sources' || bl[i].type === 'divider'));
+        const [l, r] = vis, rest = vis.slice(2);
+        const lab = t => (t ? `<p class="kp-vergleich-label kp-eyebrow">${esc(t)}</p>` : '');
+        return `<div class="kp-slide kp-slide-vergleich${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}>${head}<div class="kp-vergleich-grid"><div class="kp-vergleich-col kp-vergleich-l">${lab(p.vsLeft)}${l != null ? parts[l] : ''}</div><div class="kp-vergleich-col kp-vergleich-r">${lab(p.vsRight)}${r != null ? parts[r] : ''}</div></div>${rest.length || isLast ? `<div class="kp-vergleich-rest">${rest.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div>` : ''}</div>`;
+      }
+      // Zahlenpaar (Vorbild bildungsinnovator „94 % / 75 %“, „51 % / 68 %“): dunkles Foto über die ganze Folie, der Titel oben,
+      // zwei bis drei Große Zahlen nebeneinander (je mit Text und Meinungsfrage), alles Weitere (Zitat, Text) darunter
+      if (kind === 'zahlen') {
+        const bl = p.blocks || [];
+        const nums = bl.map((b, i) => i).filter(i => bl[i].type === 'bignumber');
+        const rest = bl.map((b, i) => i).filter(i => !nums.includes(i));
+        return `<div class="kp-slide kp-slide-zahlen kp-on-dark${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}>${head}<div class="kp-zahlen-row" style="--n:${Math.max(1, nums.length)}">${nums.map(i => parts[i]).join('')}</div>${rest.length || isLast ? `<div class="kp-zahlen-rest">${rest.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div>` : ''}</div>`;
+      }
+      // Zahl: eine Kennzahl, ein Kernsatz oder ein Bild groß links (erster Baustein aus ZAHL_TYPES), Titel und Erklärung rechts
+      if (kind === 'zahl') {
+        const bl = p.blocks || [];
+        const big = bl.findIndex(b => ZAHL_TYPES.includes(b.type));
+        const rest = bl.map((b, i) => i).filter(i => i !== big);
+        return `<div class="kp-slide kp-slide-zahl${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><div class="kp-zahl-big">${big >= 0 ? parts[big] : ''}</div><div class="kp-zahl-text">${head}${rest.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      }
+      if (kind === 'kreis' || kind === 'buehne' || kind === 'plakat') {
+        const txt = [], stg = [];
+        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? txt : stg).push(parts[i]));
+        // Plakat (Vorbild PUMA): dunkles Foto über die ganze Folie, riesiger Titel in kursiven Versalien links, die Übung rechts
+        if (kind === 'plakat') return `<div class="kp-slide kp-slide-plakat kp-on-dark${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel">${head}${txt.join('')}${isLast ? nextCourseCard() : ''}</div><div class="kp-plakat-stage">${stg.join('')}</div></div>`;
+        if (kind === 'kreis') {
+          const pic = bg ? `<div class="kp-kreis-pic" style="${bg}"${p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div>` : '';
+          return `<div class="kp-slide kp-slide-kreis${pic ? ' kp-has-bg' : ''}"><div class="kp-slide-panel">${head}${txt.join('')}${isLast ? nextCourseCard() : ''}</div><div class="kp-kreis-side">${pic}${stg.length ? `<div class="kp-kreis-float">${stg.join('')}</div>` : ''}</div></div>`;
+        }
+        // Bühne hell (Vorbild Rise-Kurs „Mit diesen Daten …“): helles Kopfband statt des dunklen. Ohne Folienfoto liegt das
+        // Bild des ersten Bühnenbausteins unscharf als Kulisse dahinter (wie design.bg „ambient“)
+        const hell = arrange === 'buehne-hell';
+        const own = !bg ? (p.blocks || []).filter(b => slotOf(b) === 'stage').map(ownImage).find(Boolean) : '';
+        const stageBg = bg || (own ? `--kp-slidebg:url('${esc(res(own))}');` : '');
+        return `<div class="kp-slide kp-slide-buehne${hell ? ' kp-buehne-hell' : ''}${bg ? ' kp-has-bg' : ''}"><div class="kp-buehne-top${hell ? '' : ' kp-on-dark'}">${head}${txt.join('')}</div><div class="kp-buehne-stage${own ? ' kp-buehne-ambient kp-on-dark' : ''}"${stageBg ? ` style="${stageBg}"` : ''}>${stg.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      }
+      return `<div class="kp-slide kp-slide-${kind}${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel${kind === 'karte' ? ' kp-on-dark' : ''}">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+    }
+    if (split) {
+      const txt = [], stg = [], unten = [];
+      (p.blocks || []).forEach((b, i) => { const s = slotOf(b); (s === 'text' ? txt : s === 'below' ? unten : stg).push(parts[i]); });
+      // Ein Foto ohne Geräterahmen allein auf der Bühne füllt die Fläche randlos
+      const onStage = (p.blocks || []).filter(b => slotOf(b) === 'stage');
+      // Zeichnungen (SVG) bleiben eingepasst, damit nichts abgeschnitten wird (Vorbild: Normen-Stapel auf grauer Fläche)
+      const fill = onStage.length === 1 && onStage[0].type === 'image' && onStage[0].image && !DEVICE_FRAMES.includes(onStage[0].image.frame) && !/\.svg(\?|$)|^data:image\/svg/i.test(onStage[0].image.src || '') && onStage[0].image.fit !== 'contain';
+      const vbg = fill ? '' : videoBackdrop(onStage);
+      return `<div class="kp-split${arrange === 'geteilt-links' ? ' kp-split-flip' : ''}${unten.length ? ' kp-has-unten' : ''}"><div class="kp-split-text">${head}${txt.join('')}${isLast && !unten.length ? nextCourseCard() : ''}</div><div class="kp-split-stage${fill ? ' kp-stage-fill' : ''}${vbg ? ' kp-stage-video kp-on-dark' : ''}"${vbg && vbg !== 'none' ? ` style="${vbg}"` : ''}>${stg.join('')}</div>${unten.length ? `<div class="kp-split-unten">${unten.join('')}${isLast ? nextCourseCard() : ''}</div>` : ''}</div>`;
+    }
+    const body = head + out.map(x => (x.row ? `<div class="kp-row">${x.html}</div>` : x.html)).join('') + (isLast ? nextCourseCard() : '');
+    const vbg = arrange === 'fit' ? videoBackdrop(p.blocks) : '';
+    return arrange === 'fit' ? `<div class="kp-fit${vbg ? ' kp-fit-video' : ''}${vbg && set.screen ? ' kp-on-dark' : ''}"${vbg && vbg !== 'none' ? ` style="${vbg}"` : ''}>${body}</div>` : body;
+  }
+
+  // Was im Kurs erledigt wurde: Seiten, Kapitel, richtige Fragen, Übungen – für „Das hast du geschafft“
+  function achievements() {
+    const content = pages.map((p, i) => i).filter(i => !pages[i].result && !pages[i].extra);
+    const seen = content.filter(i => state.visited.has(i)).length;
+    const chapters = chapterList(true);
+    const chaptersDone = chapters.filter(c => c.pages.every(i => state.visited.has(i))).length;
+    const qs = items.filter(it => it.q || it.html);
+    const right = qs.filter(it => itemFraction(it) >= 1).length;
+    let ex = 0, exDone = 0;
+    pages.forEach(p => (p.blocks || []).forEach(b => {
+      if (b.type === 'quiz' || b.type === 'pool' || b.type === 'pretest' || b.type === 'review' || !INTERACTIVE_DONE.includes(b.type) || (b.type === 'takeaways' && (!b.recall || b.look === 'zeilen')) || (b.type === 'cards' && !cardsRv(b).length) || (b.type === 'bignumber' && !bnAsk(b))) return;
+      ex++; if (blockDone(b)) exDone++;
+    }));
+    return { seen, pagesTotal: content.length, chaptersDone, chaptersTotal: chapters.filter(c => c.name).length, right, questions: qs.length, exDone, ex };
+  }
+  const INTERACTIVE_DONE = ['mappe', 'videopaar', 'bildschirm', 'schloss', 'wahlbrett', 'markieren', 'merkkarte', 'kartenstapel', 'formular', 'interaktion', 'fragen', 'ueberdich', 'kurzfrage', 'branch', 'dialog', 'selfcheck', 'reflection', 'actionplan', 'ivideo', 'mission', 'game', 'simulation', 'casebank', 'triage', 'promptbuild', 'findtext', 'hotspots', 'checklist', 'sortcats', 'flipcards', 'glossquiz', 'predict', 'process', 'album', 'levers', 'chat', 'matrix', 'takeaways', 'aufdecken', 'cards', 'bignumber', 'team', 'pyramide', 'venn'];
+
+  // Ergebnisring: Kreis füllt sich bis zum Prozentwert (Animation über stroke-dashoffset, unter „Bewegung reduzieren“ steht er sofort)
+  function scoreRing(pct, passed) {
+    const r = 54, u = 2 * Math.PI * r;
+    const off = u * (1 - Math.max(0, Math.min(100, pct)) / 100);
+    return `<div class="kp-score-ring ${passed ? 'is-ok' : 'is-no'}" role="img" aria-label="${pct} %">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="kp-ring-bg" cx="60" cy="60" r="${r}"></circle>
+        <circle class="kp-ring-on" cx="60" cy="60" r="${r}" stroke-dasharray="${u.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" style="--kp-ring-u:${u.toFixed(2)}" transform="rotate(-90 60 60)"></circle>
+      </svg>
+      <div class="kp-score" data-count data-count-to="${pct} %">${pct} %</div>
+    </div>`;
+  }
+
+  // Empfehlung „Wie geht es weiter?“ am Kursende (settings.nextCourse): auf der Ergebnisseite, ohne Test auf der letzten Seite
+  function nextCourseCard() {
+    const n = set.nextCourse || {};
+    if (!String(n.title || '').trim()) return '';
+    const url = String(n.url || '').trim();
+    return `<div class="kp-nextcourse"><p class="kp-label">${T('wieWeiter')}</p>
+      ${n.image && n.image.src ? `<img class="kp-nc-img" src="${esc(res(n.image.src))}" alt="${esc(n.image.alt || '')}" loading="lazy">` : ''}
+      <div class="kp-nc-body"><h2 class="kp-q">${accent(n.title)}</h2>${plainText(n.text) ? `<div class="kp-text">${res(n.text)}</div>` : ''}
+      ${url ? `<a class="kp-btn kp-nc-link" href="${esc(url)}" target="_blank" rel="noopener">${esc(n.label || T('kursOeffnen'))} ↗</a>` : ''}</div></div>`;
+  }
+  // Durchsicht je Frage auf der Ergebnisseite: was ich geantwortet habe und was richtig ist (settings.reviewAnswers, Standard an)
+  function answerPair(q, a) {
+    const unit = q.unit ? ' ' + q.unit : '';
+    if (!a) return { mine: T('nichtBeantwortet'), right: '' };
+    if (q.kind === 'fill') return { mine: a.map(x => x || '–').join(' · '), right: fillSolutions(q).map(s => s[0]).join(' · ') };
+    if (q.kind === 'numeric') { const tol = Number(q.tolerance) || 0, n = Number(q.answer) || 0; return { mine: (a[0] || '–') + unit, right: (tol ? `${fmtNum(n - tol)} ${T('bis')} ${fmtNum(n + tol)}` : fmtNum(n)) + unit }; }
+    if (q.kind === 'order') return { mine: a.map(i => (q.items || [])[i]).join(' → '), right: (q.items || []).join(' → ') };
+    if (q.kind === 'match') { const p = q.pairs || []; return { mine: p.map((x, i) => `${x.left} → ${p[a[i]] ? p[a[i]].right : '–'}`).join('; '), right: p.map(x => `${x.left} → ${x.right}`).join('; ') }; }
+    if (q.kind === 'pins') { const n = (q.pins || []).length; return { mine: T('stellenRichtig').replace('{r}', a.filter((v, i) => v === i).length).replace('{n}', n), right: '' }; }
+    if (q.kind === 'hotspot') return { mine: evaluate(q, a) >= 1 ? T('stelleImBild') : '–', right: T('stelleImBild') };
+    if (q.kind === 'claims') { const yes = q.labelTrue && q.labelTrue !== 'Wahr' ? q.labelTrue : T('ja'), no = q.labelFalse && q.labelFalse !== 'Falsch' ? q.labelFalse : T('nein'); const c = q.claims || []; return { mine: c.map((x, i) => `${x.text}: ${a[i] === 1 ? yes : a[i] === 0 ? no : '–'}`).join('; '), right: c.map(x => `${x.text}: ${x.yes === false ? no : yes}`).join('; ') }; }
+    const ans = normAnswers(q);
+    return { mine: a.map(i => i === -1 ? T('weissNicht') : (ans[i] || {}).text || '').filter(Boolean).join(', '), right: ans.filter(x => x.correct).map(x => x.text).join(', ') };
+  }
+  function renderResult() {
+    const s = score();
+    if (s.open) {
+      return `<div class="kp-result"><h1>Fast geschafft</h1><p>Es ${s.open === 1 ? 'ist noch 1 Testfrage' : 'sind noch ' + s.open + ' Testfragen'} offen. ${esc(T('fragenZurueck'))}</p></div>`;
+    }
+    const passed = s.pct >= passScore;
+    // Je Lernziel: Balken, Anzahl richtiger Fragen und Sprung ins Kapitel, in dem das Ziel behandelt wird
+    const objs = objectiveStats().map(x => Object.assign(x, { self: selfImage(x.o.id) }));
+    const objHtml = objs.length ? `<div class="kp-objectives"><p class="kp-label">${T('ergebnisJeLernziel')}</p>${objs.map((x, i) => {
+      const chap = pages[x.firstPage] && pages[x.firstPage].chapter || '';
+      const chapStart = chap ? pages.findIndex(p => p.chapter === chap) : x.firstPage;
+      return `<div class="kp-obj ${x.passed ? 'ok' : 'weak'}" style="--kp-i:${i}">
+        <span class="kp-obj-text">${esc(x.o.text)}${chap ? `<em class="kp-obj-chap">${esc(chap)}</em>` : ''}</span>
+        <strong>${x.pct} %</strong>
+        <div class="kp-obj-bar" role="progressbar" aria-valuenow="${x.pct}" aria-valuemin="0" aria-valuemax="100"><div style="width:${x.pct}%"></div>${x.self ? `<i class="kp-obj-mark" style="left:${x.self.pct}%" aria-hidden="true"></i>` : ''}</div>
+        <span class="kp-obj-count">${x.right} ${T('von')} ${x.total} ${T('richtig')}${x.self ? `<span class="kp-obj-self" data-self-obj="${esc(x.o.id)}"> · ${T('selbstbild')}: ${esc(x.self.text)}</span>` : ''}</span>
+        ${x.self && x.self.pct >= 75 && !x.passed ? `<span class="kp-obj-calib" data-calib="ueber">${T('selbstUeber')}</span>` : x.self && x.self.pct <= 25 && x.passed ? `<span class="kp-obj-calib" data-calib="unter">${T('selbstUnter')}</span>` : ''}
+        ${x.passed ? `<span class="kp-obj-ok">${icon('check-circle')} ${T('sitzt')}</span>` : `<button class="kp-btn kp-sec kp-obj-go" data-goto="${chapStart}">${chap ? `${T('zumKapitel')} „${esc(chap)}“` : T('nochmalAnsehen')}</button>`}</div>`;
+    }).join('')}</div>` : '';
+    const sureWrong = graded().filter(it => it.q && state.conf[it.id] === 2 && itemFraction(it) < 1).length;
+    const confRev = confReview();
+    const calib = sureWrong ? `<div class="kp-note kp-calib">${esc(T('kalibFalsch').replace('{n}', sureWrong === 1 ? 'einer Frage' : sureWrong + ' Fragen'))}</div>` : '';
+    const review = graded().map(it => {
+      const f = itemFraction(it);
+      const playName = { simulation: 'Klickpfad', mission: 'Mini-Mission', game: 'Level-Spiel' };
+      const label = it.q ? it.q.question : it.branch ? (it.branch.prompt || 'Entscheidung') : it.play ? `${playName[it.play.type]}: ${String(it.play.title || pages[it.pageIndex].title).replace(/\*/g, '')}` : 'Frage auf der Seite „' + pages[it.pageIndex].title + '“';
+      const ap = it.q && set.reviewAnswers !== false ? answerPair(it.q, state.answers[it.id]) : null;
+      const more = ap ? `<details class="kp-rv-more"${f != null && f < 1 ? ' open' : ''}><summary>${esc(T('antwortLoesung'))}</summary>
+        <p data-rv-mine><span class="kp-label">${esc(T('deineAntwort'))}</span> ${esc(ap.mine)}</p>${ap.right && f < 1 ? `<p data-rv-right><span class="kp-label">${esc(T('loesung'))}</span> ${esc(ap.right)}</p>` : ''}
+        ${f < 1 && it.q.explanation ? `<div class="kp-text kp-rv-expl">${res(it.q.explanation)}</div>` : ''}</details>` : '';
+      return `<div><span aria-label="${f >= 1 ? 'richtig' : f > 0 ? 'teilweise richtig' : 'falsch'}">${f >= 1 ? '✔' : f > 0 ? '◐' : '✘'}</span><div class="kp-rv-body">${esc(label)}${more}</div></div>`;
+    }).join('');
+    // „Das hast du geschafft“: Zahlen aus dem Lernstand
+    const a = achievements();
+    const stat = (n, label, ico) => `<div class="kp-done-item">${icon(ico)}<b>${n}</b><span>${label}</span></div>`;
+    const doneHtml = `<div class="kp-done"><p class="kp-label">${T('geschafftTitel')}</p><div class="kp-done-grid">
+      ${stat(`${a.seen} ${T('von')} ${a.pagesTotal}`, T('seitenGesehen'), 'book')}
+      ${a.chaptersTotal ? stat(`${a.chaptersDone} ${T('von')} ${a.chaptersTotal}`, T('kapitelFertig'), 'layers') : ''}
+      ${a.questions ? stat(`${a.right} ${T('von')} ${a.questions}`, T('fragenRichtig'), 'check-circle') : ''}
+      ${a.ex ? stat(`${a.exDone} ${T('von')} ${a.ex}`, T('uebungenErledigt'), 'target') : ''}
+    </div></div>`;
+    const certPage = pages.findIndex(p => (p.blocks || []).some(b => b.type === 'certificate'));
+    const name = firstName();
+    const prev = state.self.prev && state.self.prev.max ? state.self.prev : null;
+    const prevHtml = prev ? `<p class="kp-prev ${s.pct > prev.pct ? 'up' : s.pct < prev.pct ? 'down' : 'same'}" data-prev="${prev.pct}">${T('letzterVersuch')}: ${prev.pct} % · ${T('heute')}: <b>${s.pct} %</b> · ${s.pct > prev.pct ? T('besserAls') : s.pct < prev.pct ? T('unterLetztem') : T('gleichWie')}</p>` : '';
+    return `<div class="kp-result"><p class="kp-label">${T('deinErgebnis')}</p>${scoreRing(s.pct, passed)}
+      <p>${s.got} von ${s.max} Punkten · Bestehensgrenze ${passScore} %</p>${prevHtml}
+      <div class="kp-feedback ${passed ? 'ok' : 'no'}" role="status">${passed ? (name ? `${T('bestandenName').replace('{n}', esc(name))}` : T('bestanden')) : T('nichtBestanden')}</div>
+      <div class="kp-quiz-actions" style="justify-content:center">
+        ${passed ? '' : '<button class="kp-btn" data-retry-all>Test wiederholen</button>'}
+        ${passed && certPage >= 0 ? `<button class="kp-btn" data-goto="${certPage}">Zum Zertifikat</button>` : ''}
+      </div>${goalBack()}${wegHtml()}${doneHtml}${objHtml}${calib}${confRev}
+      ${planCard(certBlock())}<div class="kp-review">${review}</div>${nextCourseCard()}</div>`;
+  }
+
+  // Eigene Interaktion: eine selbst gebaute HTML-Datei (b.code) läuft abgeschirmt im Rahmen: sandbox ohne same-origin,
+  // Content-Security-Policy ohne Netz (kein fetch, keine fremden Skripte, keine KI-Aufrufe). Das Kursdesign kommt als
+  // CSS-Variablen hinein, der Rahmen meldet Höhe und „fertig“ per postMessage (window.kurs.fertig(wert)).
+  const IA_VARS = ['--kp-primary', '--kp-accent', '--kp-accent-ink', '--kp-on-accent', '--kp-bg', '--kp-surface', '--kp-text', '--kp-muted', '--kp-line', '--kp-title', '--kp-ok', '--kp-no', '--kp-radius', '--kp-font', '--kp-font-head', '--kp-shadow'];
+  function iaHead(b) {
+    const cs = getComputedStyle(document.documentElement);
+    const vars = IA_VARS.map(v => [v, cs.getPropertyValue(v).trim()]).filter(x => x[1]).map(x => `${x[0]}: ${x[1]};`).join(' ');
+    // Schriften des Kurses (Google oder fonts/fonts.css im Paket) als absolute Adresse mitgeben
+    const fonts = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).filter(l => /font/i.test(l.href)).map(l => `<link rel="stylesheet" href="${esc(l.href)}">`).join('');
+    const st = state.self[b.id] || {};
+    const info = { name: firstName(), erledigt: !!st.done, wert: st.s == null ? null : st.s, sprache: state.lang || course.lang || 'de', ruhig: reducedMotion() };
+    const bridge = `(function(){var I=${JSON.stringify(b.id)};var k=window.kurs=${JSON.stringify(info).replace(/</g, '\\u003c')};
+k.fertig=function(w){parent.postMessage({kurs:'interaktion',id:I,fertig:true,wert:typeof w==='number'&&isFinite(w)?Math.max(0,Math.min(1,w)):null},'*');k.erledigt=true;};
+var last=0;function h(){var d=document.documentElement,v=Math.ceil(Math.max(d.getBoundingClientRect().height,document.body?document.body.getBoundingClientRect().bottom:0));if(Math.abs(v-last)>1){last=v;parent.postMessage({kurs:'interaktion',id:I,h:v},'*');}}
+addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if(window.ResizeObserver){var r=new ResizeObserver(h);r.observe(document.documentElement);if(document.body)r.observe(document.body);}});setInterval(h,1500);})();`;
+    return `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https: http: file:; font-src data: https: http: file:; img-src data: blob:; media-src data: blob:"><meta name="viewport" content="width=device-width, initial-scale=1">${fonts}<style>:root { ${vars} } html, body { margin: 0; background: transparent; } body { font-family: var(--kp-font, system-ui, sans-serif); color: var(--kp-text, #1d2530); line-height: 1.5; }</style><script>${bridge}<\/script>`;
+  }
+  // Zusatzbibliotheken im Rahmen: libs ['three'] bettet Three.js (js/vendor/three.min.js, über window.VENDOR_SRC) ein, weil die
+  // CSP des Rahmens keine Skriptdateien lädt. Der Export schreibt VENDOR_SRC.three dafür inline ins Paket (scorm.js, extraLibs).
+  const iaWantsThree = b => Array.isArray(b.libs) && b.libs.includes('three');
+  function iaLibs(b) {
+    if (!iaWantsThree(b)) return '';
+    const src = (typeof window !== 'undefined' && window.VENDOR_SRC && window.VENDOR_SRC.three) || '';
+    return src ? `<script>${src.replace(/<\/script/gi, '<\\/script')}<\/script>` : '';
+  }
+  function renderInteraktion(b) {
+    const code = String(b.code || '').trim();
+    const st = state.self[b.id] || {};
+    const title = b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : '';
+    if (!code) return `<div class="kp-ia">${title}<p class="kp-mission-wait">${esc(T('iaFehlt'))}</p></div>`;
+    const head = iaHead(b) + iaLibs(b);
+    let doc = res(code);
+    if (iaWantsThree(b)) doc = doc.replace(/<script[^>]*\ssrc=["'][^"']*three(?:\.min)?\.js["'][^>]*>\s*<\/script>/gi, ''); // der Tag der Datei weicht der eingebetteten Fassung
+    doc = /<head(\s[^>]*)?>/i.test(doc) ? doc.replace(/<head(\s[^>]*)?>/i, m => m + head) : head + doc;
+    return `<div class="kp-ia" data-ia="${esc(b.id)}">${title}<iframe class="kp-ia-frame" data-ia-frame="${esc(b.id)}" title="${b.alt ? esc(b.alt) : plainTitle(b.title || '') || esc(T('iaTitel'))}" sandbox="allow-scripts" style="height:${Math.max(120, Number(b.height) || 360)}px" srcdoc="${esc(doc)}"></iframe><p class="kp-ia-done" data-ia-done ${st.done ? '' : 'hidden'}>✓ ${esc(T('iaErledigt'))}</p></div>`;
+  }
+
+  // Kursart Microlearning: Seitenleiste mit Status, Lernzeit, zwei Balken und Kapitelliste (Vorbild: Lernplattformen mit fester linker Leiste)
+  function microChapters() {
+    const out = [];
+    pages.forEach((p, i) => {
+      if (p.result) return;
+      const name = p.chapter || '';
+      const last = out[out.length - 1];
+      if (last && last.name === name) last.pages.push(i); else out.push({ name, pages: [i] });
+    });
+    return out;
+  }
+  // Lektions-Look (theme.sideLook 'lektion', Vorbild Articulate Rise): jede Seite ist eine Lektion, Kapitel sind Abschnitte darüber
+  const lektion = () => theme.style === 'micro' && theme.sideLook === 'lektion';
+  function microInfo(chapters) {
+    const info = pages.map((p, i) => i).filter(i => (pages[i].blocks || []).some(b => b.type === 'sources' || b.type === 'attachments')).pop();
+    const infoCh = info != null ? chapters.find(ch => ch.pages.length === 1 && ch.pages[0] === info) : null;
+    return { info, infoCh };
+  }
+  function microLessons() {
+    const chapters = microChapters();
+    const { infoCh } = microInfo(chapters);
+    return chapters.filter(ch => ch !== infoCh).reduce((a, ch) => a.concat(ch.pages), []);
+  }
+  function microSide() {
+    const pr = progressResult();
+    const content = pages.map((p, i) => p.result || p.extra ? -1 : i).filter(i => i >= 0);
+    const pagesPct = content.length ? Math.round(content.filter(i => state.visited.has(i)).length / content.length * 100) : 0;
+    const sc = score();
+    const resultPct = graded().length ? Math.round(sc.max ? sc.got / sc.max * 100 : 0) : null;
+    const maxOk = unlockedUpTo();
+    const chapters = microChapters();
+    const testPages = new Set(graded().map(it => it.pageIndex));
+    // Ein eigenes Kapitel nur für den Mediennachweis steht als Eintrag „Weitere Informationen“ unter der Liste, nicht doppelt darin
+    const { info, infoCh } = microInfo(chapters);
+    // Lektions-Look: Abschnitt (Kapitel) als Überschrift, darunter jede Seite mit Statuskreis (offen, gerade hier, erledigt)
+    const lesson = i => {
+      const cur = i === state.current, done = state.visited.has(i) && !cur;
+      const locked = set.gating && i > maxOk;
+      const mark = done ? `<b class="kp-ml-mark" aria-label="${esc(T('mlAbgeschlossen'))}">✓</b>` : `<i class="kp-ml-ring${cur ? ' now' : ''}" aria-hidden="true"></i>`;
+      return `<li class="kp-ml-ch${cur ? ' current' : ''}${done ? ' done' : ''}"><button type="button" data-goto="${i}" ${locked ? 'disabled' : ''} ${cur ? 'aria-current="page"' : ''}><span>${esc(plainTitle(pages[i].title || ''))}</span>${testPages.has(i) && !done ? '<b class="kp-ml-mark kp-ml-q" aria-hidden="true">?</b>' : mark}</button></li>`;
+    };
+    const list = lektion() ? chapters.filter(ch => ch !== infoCh).map(ch => `<li class="kp-ml-sec">${ch.name ? `<p class="kp-ml-sec-name">${esc(ch.name)}</p>` : ''}<ol>${ch.pages.map(lesson).join('')}</ol></li>`).join('')
+      : chapters.filter(ch => ch !== infoCh).map((ch, k) => {
+      const seen = ch.pages.filter(i => state.visited.has(i)).length;
+      const cur = ch.pages.includes(state.current);
+      const done = seen === ch.pages.length;
+      const test = ch.pages.some(i => testPages.has(i));
+      const locked = set.gating && ch.pages[0] > maxOk;
+      return `<li class="kp-ml-ch${cur ? ' current' : ''}${done ? ' done' : ''}"><button type="button" data-goto="${ch.pages[0]}" ${locked ? 'disabled' : ''} ${cur ? 'aria-current="true"' : ''}><span>${esc(ch.name || pages[ch.pages[0]].title || (k + 1))}</span>${done ? '<b class="kp-ml-mark" aria-label="erledigt">✓</b>' : test ? '<b class="kp-ml-mark kp-ml-q" aria-hidden="true">?</b>' : ''}</button><i class="kp-ml-chbar" style="--w:${Math.round(seen / ch.pages.length * 100)}%"></i></li>`;
+    }).join('');
+    const bar = (pct, label) => `<div class="kp-ml-bar"><b>${pct == null ? '–' : pct + ' %'}</b><span>${label}</span><i role="progressbar" aria-label="${esc(label)}" aria-valuenow="${pct || 0}" aria-valuemin="0" aria-valuemax="100" style="--w:${pct || 0}%"></i></div>`;
+    return `<nav class="kp-ml-side" aria-label="${esc(T('inhalt'))}">
+      <div class="kp-ml-top">
+        <p class="kp-ml-status">${icon('check-circle')} ${T('mlStatus')}: ${pr.completed ? T('mlAbgeschlossen') : T('mlInBearbeitung')}</p>
+        <h2 class="kp-ml-title">${esc(course.title)}</h2>
+        ${course.subtitle ? `<p class="kp-ml-sub">${esc(course.subtitle)}</p>` : ''}
+        <p class="kp-ml-time">${icon('clock')} ${estimateMinutes()} ${T('mlMinuten')}</p>
+        <div class="kp-ml-bars">${bar(pagesPct, T('mlFortschritt'))}${bar(resultPct, T('mlErgebnis'))}</div>
+        ${goalCard('kp-goal-side')}
+      </div>
+      <ol class="kp-ml-chapters">${list}</ol>
+      ${info != null ? `<button type="button" class="kp-ml-info" data-goto="${info}"><b>${T('mlWeitere')}</b><span>${T('mlMedien')}</span></button>` : ''}
+    </nav>`;
+  }
+  function render(moveFocus) {
+    doneSeen = null;
+    // Laufende Videos, Töne und Zeitgeber der vorigen Seite beenden
+    mediaTimers.forEach(t => (typeof t === 'object' ? t.stop() : clearInterval(t)));
+    mediaTimers = [];
+    clearTimeout(dlgTimer); filmAuto.clear();
+    stopSound(); disarmAudio();
+    cbOpen = null; // ein offener Fall gehört zur Seite, die gerade verlassen wird
+    const p = pages[state.current];
+    if (!p) { root.innerHTML = '<main class="kp-main"><h1>Dieser Kurs hat noch keine Seiten.</h1></main>'; return; }
+    state.visited.add(state.current);
+    if (drawReviews(state.current)) buildItems();
+    pageStyle.textContent = res(p.css) + '\n' + (p.blocks || []).map(b => b.blockCss ? scopeCss(res(b.blockCss), `[data-block="${b.id}"]`) : '').join('\n');
+    let header = '';
+    // Eingeklappte Leiste oben oder unten: das KI-Kennzeichen (Pflicht auf jeder Seite) wandert aus der Kopfzeile nach unten links
+    const aiInHead = !(navShut && navPos !== 'links');
+    let prog = '';
+    if (!chrome.hideHeader) {
+      if (chrome.header) {
+        header = `<header class="kp-custom-head">${fill(res(chrome.header))}</header>`;
+      } else {
+        const tools = [];
+        if (set.toc !== false) tools.push(`<button class="kp-iconbtn" data-drawer="toc">${T('inhalt')}</button>`);
+        const hub = pages.findIndex(x => (x.blocks || []).some(b => b.type === 'chapters'));
+        if (hub >= 0 && hub !== state.current) tools.push(`<button class="kp-iconbtn" data-goto="${hub}">${T('uebersicht')}</button>`);
+        if (set.search !== false && pages.length > 3) tools.push(`<button class="kp-iconbtn" data-drawer="search">${T('suchen')}</button>`);
+        if (set.notes) tools.push(`<button class="kp-iconbtn" data-drawer="notes">${T('notizen')}</button>`);
+        if (set.trainerMode) tools.push(`<button class="kp-iconbtn" data-drawer="trainer" title="${esc(T('trTitel'))}">${T('trainer')}</button>`);
+        if ((course.glossary || []).length) tools.push(`<button class="kp-iconbtn" data-drawer="glossary">${T('glossar')}</button>`);
+        // Sprachwahl, wenn der Kurs Übersetzungen hat
+        const langSel = langs.length ? `<label class="kp-lang"><span class="kp-sr">${T('sprache')}</span><select data-lang aria-label="${T('sprache')}">
+          <option value="">${esc((course.lang || 'de').toUpperCase())}</option>${langs.map(l => `<option value="${esc(l.code)}" ${state.lang === l.code ? 'selected' : ''}>${esc(l.code.toUpperCase())}</option>`).join('')}</select></label>` : '';
+        const logo = chrome.logo && chrome.logo.src ? `<img class="kp-logo" src="${esc(res(chrome.logo.src))}" alt="${esc(chrome.logo.alt || '')}">` : '';
+        // Das KI-Kennzeichen sitzt in der Kopfzeile: auf jeder Seite bei der ersten Begegnung sichtbar und nie über dem Inhalt
+        if (dezent) {
+          const ib = (attr, ico, label) => `<button class="kp-dz-btn" ${attr} aria-label="${esc(label)}" title="${esc(label)}">${icon(ico)}</button>`;
+          const dz = [];
+          if (hub >= 0 && hub !== state.current) dz.push(ib(`data-goto="${hub}"`, 'home', T('uebersicht')));
+          if (set.search !== false && pages.length > 3) dz.push(ib('data-drawer="search"', 'search', T('suchen')));
+          if (set.notes) dz.push(ib('data-drawer="notes"', 'pencil', T('notizen')));
+          if ((course.glossary || []).length) dz.push(ib('data-drawer="glossary"', 'book', T('glossar')));
+          if (set.trainerMode) dz.push(ib('data-drawer="trainer"', 'user', T('trainer')));
+          header = `<header class="kp-head kp-dz-head"><div class="kp-dz-tools">${dz.join('')}${aiInHead ? aiMarkHtml() : ''}${langSel}</div>${set.toc !== false ? `<button class="kp-dz-menu" data-drawer="toc" data-dz-menu aria-expanded="false" aria-controls="kp-drawer">${icon('menu')}<span>${T('menue')}</span></button>` : '<span></span>'}</header>`;
+        } else
+        header = `<header class="kp-head">${tools.join('')}${logo}<span class="kp-course">${esc(course.title)}${p.chapter ? `<span class="kp-head-chapter">${esc(p.chapter)}</span>` : ''}</span>${aiInHead ? aiMarkHtml() : ''}${langSel}<span class="kp-head-count">${state.current + 1} / ${pages.length}</span></header>`;
+        prog = set.progress === false ? '' : `<div class="kp-progress" role="progressbar" aria-label="Fortschritt" aria-valuenow="${Math.round((state.current + 1) / pages.length * 100)}" aria-valuemin="0" aria-valuemax="100"><div style="width:${(state.current + 1) / pages.length * 100}%"></div></div>`;
+      }
+    }
+    // Kopfleiste unten oder links: Kopfzeile und Navigation stehen zusammen in einer Leiste
+    const footHtml = `<footer class="${chrome.footer ? 'kp-custom-foot' : 'kp-foot'}" data-footer ${chrome.hideFooter ? 'hidden' : ''}></footer>`;
+    const bar = navPos === 'oben' ? `${header}${prog}` : '';
+    const sideBar = navPos === 'oben' ? footHtml
+      : `<div class="kp-navbar" id="kp-navbar">${prog}<div class="kp-navrow">${header}${theme.style === 'micro' && navPos === 'links' ? microSide() : ''}${footHtml}</div></div>`;
+    root.innerHTML = `
+      <a class="kp-skip" href="#kp-main">${T('zumInhalt')}</a>
+      ${bar}
+      ${set.layout === 'scroll' ? '<div class="kp-readbar" aria-hidden="true"><b></b></div>' : ''}
+      <main class="kp-main ${p.animation ? 'fx-' + p.animation : ''}${(arrangeOf(p) === 'fit' ? ' kp-fit-main' : arrangeOf(p) ? ' kp-split-main' : '')}${soloBleed(p) ? ' kp-solo-main' : ''}${soloFill(p) ? ' kp-fill-main kp-fill-' + soloFill(p) : ''}${kinoPage(p) ? ' kp-kino-main' : ''}${darkSlide(p) ? ' kp-dunkel-main kp-on-dark' : ''}${p.einflug ? ' kp-einflug' : ''}${set.slideNav && !coverPage(p) ? ' kp-has-pagenav' : ''}" id="kp-main" tabindex="-1">${pageLogo(p) || qChipHtml(p) ? `<div class="kp-page-top">${qChipHtml(p)}${pageLogo(p)}</div>` : ''}${renderPage(p)}${slideCredit(p)}${pageNavHtml(p)}</main>
+      ${sideBar}
+      ${chrome.hideHeader && chrome.hideFooter ? '' : `<button class="kp-nav-toggle" data-nav-toggle aria-controls="kp-navbar" aria-expanded="${!navShut}" aria-label="${esc(T(navShut ? 'leisteAuf' : 'leisteZu'))}" title="${esc(T(navShut ? 'leisteAuf' : 'leisteZu'))}">${icon('chev')}</button>`}
+      ${chrome.hideHeader || chrome.header || !aiInHead ? aiMarkHtml('kp-ai-fixed') : ''}
+      <div class="kp-backdrop" data-close-drawer></div>
+      <aside class="kp-drawer" id="kp-drawer" aria-label="Seitenleiste"></aside>
+      ${opts.review ? reviewPanelHtml() : ''}
+      <div class="kp-kf-dock" data-kf-dock aria-live="polite"></div>`;
+    kfOpen = null; kfTried = new Set(); kfPlanned = new Set(); wbOpen = {};
+    renderFooter();
+    activateComponents(root);
+    klangErledigt(); // Grundstand: was beim Öffnen schon fertig ist, klingt nicht
+    updateClues();
+    kfPops();
+    measureNav();
+    if (set.tour === true && !opts.preview && !opts.renderer && !tourSeen() && !reducedMotion()) { const tm = setTimeout(startTour, 1100); mediaTimers.push(tm); }
+    // Lernbuch-Karte auf der ersten Seite, einmal je Browser; die Bedienhilfe wartet dann, bis sie geschlossen ist (Tour startet erst beim nächsten Öffnen)
+    if (state.current === 0 && set.lernbuchIntro !== false && !opts.renderer && !opts.review && hasLernbuch() && !lbwSeen()) { const tm = setTimeout(lernbuchWelcome, 700); mediaTimers.push(tm); }
+    if (opts.focusBlock && state.current === opts.startPage) {
+      const el = root.querySelector(`[data-block="${opts.focusBlock}"]`);
+      opts.focusBlock = null;
+      if (el) setTimeout(() => el.scrollIntoView({ block: 'center' }), 60);
+    } else {
+      window.scrollTo(0, 0);
+    }
+    // Nach dem Seitenwechsel springt der Fokus auf den Inhalt (wichtig für Screenreader)
+    if (moveFocus) root.querySelector('#kp-main').focus({ preventScroll: true });
+    // Lesefortschritt innerhalb der Seite (Scroll-Darstellung)
+    const readbar = root.querySelector('.kp-readbar b');
+    if (readbar && !window.__kpReadbar) {
+      window.__kpReadbar = true;
+      window.addEventListener('scroll', () => {
+        const bar = root.querySelector('.kp-readbar b');
+        const max = document.documentElement.scrollHeight - window.innerHeight;
+        if (bar) bar.style.width = (max > 0 ? Math.min(100, window.scrollY / max * 100) : 100) + '%';
+      }, { passive: true });
+    }
+    // Ton der Folie beim Öffnen starten (settings.autoNarration); in der Editor-Vorschau erst nach einem Seitenwechsel,
+    // sonst finge der Ton bei jeder Änderung im Editor neu an
+    if (set.autoNarration && !opts.renderer && (moveFocus || !opts.preview)) autoAudio();
+    report();
+  }
+
+  // Ton beim Öffnen einer Folie: der erste sichtbare Ton der Seite (Sprecheraufnahme oder Browser-Stimme über [data-narr],
+  // Stimme der Begleitfigur über [data-ga-play]). Lässt der Browser ihn nicht zu (noch kein Klick, etwa auf der ersten Seite,
+  // beim Wiedereinstieg oder nach dem Neuladen), startet er beim ersten Klick oder Tastendruck auf dieser Seite.
+  // Ein Klick auf den Tonknopf selbst bleibt dessen eigene Sache (sonst schaltete er den eben gestarteten Ton wieder aus).
+  let audioArm = null;
+  function disarmAudio() { if (audioArm) { audioArm(); audioArm = null; } }
+  function autoAudio() {
+    disarmAudio();
+    if (!(audioPrefs.vol > 0)) return;
+    const main = root.querySelector('#kp-main') || root;
+    const btn = [...main.querySelectorAll('[data-narr], [data-ga-play], [data-bs-voice]')].find(x => !x.closest('[hidden]'));
+    if (!btn) return;
+    const page = state.current;
+    const arm = () => {
+      disarmAudio();
+      const fire = e => {
+        if (e.key === 'Escape') return;
+        disarmAudio();
+        if (e.target && e.target.closest && e.target.closest('[data-narr], [data-ga-play], [data-bs-voice], [data-gs-mute]')) return;
+        start();
+      };
+      ['pointerdown', 'pointerup', 'keydown'].forEach(ev => document.addEventListener(ev, fire, true));
+      audioArm = () => ['pointerdown', 'pointerup', 'keydown'].forEach(ev => document.removeEventListener(ev, fire, true));
+    };
+    const start = () => {
+      if (state.current !== page || !btn.isConnected) return;
+      if (btn.matches('[data-narr], [data-bs-voice]')) {
+        if (btn.classList.contains('playing') || btn.getAttribute('aria-pressed') === 'true') return;
+        btn.click();
+        const ctl = sound;
+        if (ctl && ctl.started) ctl.started.then(r => { if (r === 'blocked' && state.current === page) arm(); });
+        return;
+      }
+      const media = btn.closest('[data-guide-audio]').querySelector('audio');
+      if (!media || !media.paused) return;
+      root.querySelectorAll('[data-guide-audio] audio').forEach(a => { if (a !== media) a.pause(); });
+      stopSound();
+      media.volume = audioPrefs.vol; media.playbackRate = audioPrefs.rate;
+      const pr = media.play();
+      if (pr && pr.catch) pr.catch(err => { if (err && err.name === 'NotAllowedError' && state.current === page) arm(); });
+    };
+    start();
+  }
+
+  // Navigation in der Folie (settings.slideNav, Vorbild: Pillen „Zur vorigen Seite“ / „Zur nächsten Seite“ unten auf jeder
+  // Folie): zwei Knöpfe am Ende des Inhalts, nie auf einer bildschirmfüllenden Titelseite (dort führt der Startknopf).
+  // Zustand und Sperre setzt renderFooter() über [data-back]/[data-next] mit. Logo oben rechts auf jeder Seite (chrome.logoOnPages).
+  const coverPage = p => !!(p && (p.blocks || []).some(b => b.cover && (b.type === 'hero' || b.type === 'hotspots')));
+  function pageNavHtml(p) {
+    if (!set.slideNav || p.result || coverPage(p)) return '';
+    const toMap = mapReturn(pages.indexOf(p));
+    return `<nav class="kp-pagenav" aria-label="${esc(T('seitenwechsel'))}"><button type="button" class="kp-pill kp-pill-back" data-back>${icon('arrow')}<span>${T('zurVorigen')}</span></button><button type="button" class="kp-pill kp-pill-next" data-next><span>${toMap >= 0 ? T('zurueckZurKarte') : T('zurNaechsten')}</span>${icon(toMap >= 0 ? 'map' : 'arrow')}</button></nav>`;
+  }
+  const pageLogo = p => (chrome.logoOnPages && chrome.logo && chrome.logo.src && !p.result ? `<img class="kp-page-logo" src="${esc(res(chrome.logo.src))}" alt="${esc(chrome.logo.alt || '')}">` : '');
+  // Fragenzähler (settings.questionCounter): Chip „1 / 2“ oben rechts, zählt die beantworteten Fragen der Seite
+  function qChipHtml(p) {
+    const i = pages.indexOf(p);
+    const qs = items.filter(it => it.pageIndex === i && !it.branch && !it.play);
+    if (!set.questionCounter || !qs.length || p.result) return '';
+    const done = qs.filter(it => state.answers[it.id] != null).length;
+    return `<span class="kp-q-chip${done >= qs.length ? ' kp-q-chip-done' : ''}" data-q-chip role="status" aria-label="${esc(T('fragenBeantwortet').replace('{n}', done).replace('{m}', qs.length))}">${icon(done >= qs.length ? 'check' : 'question')}<b>${done}</b> / ${qs.length}</span>`;
+  }
+  function updateQChip() {
+    const chip = root.querySelector('[data-q-chip]'); const p = pages[state.current];
+    if (!chip || !p) return;
+    const html = qChipHtml(p); if (!html) return;
+    const tmp = document.createElement('div'); tmp.innerHTML = html;
+    chip.replaceWith(tmp.firstElementChild);
+  }
+  function renderFooter() {
+    updateQChip();
+    const foot = root.querySelector('[data-footer]');
+    if (!foot) return;
+    const hint = blockedHere();
+    // Eine Seite mit eigenem Weiter-Ziel ist nie eine Sackgasse, auch wenn sie am Ende der Liste steht
+    // (Räume einer Lernwelt liegen hinter der Übersicht und führen auf sie zurück)
+    const ownNext = pageIndexById((pages[state.current] || {}).next);
+    const toMap = ownNext < 0 ? mapReturn(state.current) : -1;
+    const last = state.current >= pages.length - 1 && ownNext < 0 && toMap < 0;
+    // In der Scroll-Darstellung kündigt der Fuß die nächste Seite an (gibt Orientierung)
+    const nx = last ? null : pages[nextIndex()];
+    const preview = set.layout === 'scroll' && nx && !hint
+      ? `<div class="kp-next-preview"><span>${nx.chapter && nx.chapter !== pages[state.current].chapter ? T('naechstesKapitel') + ' · ' + esc(nx.chapter) : T('alsNaechstes')}</span><strong>${accent(nx.title)}</strong></div>` : '';
+    foot.innerHTML = chrome.footer ? fill(res(chrome.footer), { hinweis: esc(hint) }) : dezent
+      ? `${hint ? `<span class="kp-lock" role="status">${hint}</span>` : ''}<button class="kp-dz-arrow kp-dz-back" data-back aria-label="${T('zurueck')}" title="${T('zurueck')}">${icon('chev')}</button>${toMap >= 0 ? `<button class="kp-dz-arrow kp-dz-map" data-next aria-label="${T('zurueckZurKarte')}" title="${T('zurueckZurKarte')}">${icon('map')}<span>${T('zurueckZurKarte')}</span></button>` : `<button class="kp-dz-arrow" data-next aria-label="${T('weiter')}" title="${T('weiter')}">${icon('chev')}</button>`}`
+      : `${preview}
+      <button class="kp-btn kp-sec" data-back>← ${T('zurueck')}</button>
+      ${hint ? `<span class="kp-lock" role="status">${hint}</span>` : ''}
+      <button class="kp-btn" data-next>${toMap >= 0 ? T('zurueckZurKarte') : T('weiter')} →</button>`;
+    // Zustand aller Navigationsknöpfe setzen, auch in eigenen Kopfzeilen und im Seiteninhalt
+    root.querySelectorAll('[data-back]').forEach(b => { b.disabled = state.current === 0 && !state.history.length; });
+    root.querySelectorAll('[data-next]').forEach(b => { b.disabled = last || !!hint; });
+  }
+
+  // KI-Kennzeichen: kleines Zeichen in der Kopfzeile, auf jeder Seite sichtbar (bei eigener oder ausgeblendeter Kopfzeile fest unten links).
+  // Artikel 50 Absatz 5 EU-KI-Verordnung verlangt klar, unterscheidbar und zugänglich –
+  // der ganze Text steht eine Taste entfernt, statt einmalig auf Seite 1 zu stehen. In der Leiste verdeckt es nie eine Antwort.
+  function aiMarkHtml(cls) {
+    const txt = String(set.aiNotice || '').trim();
+    if (!txt) return '';
+    return `<div class="kp-ai-mark ${cls || ''}">
+      <button type="button" class="kp-ai-btn" data-ai-toggle aria-expanded="false" aria-controls="kp-ai-text">
+        <span class="kp-ai-tag" aria-hidden="true">KI</span><span class="kp-ai-word">${T('kiMarke')}</span>
+      </button>
+      <div class="kp-ai-text" id="kp-ai-text" role="note" hidden><b>${T('kiHinweis')}</b> ${esc(txt)}</div>
+    </div>`;
+  }
+
+  // Die Leiste unten verdeckt sonst das Kennzeichen: ihre Höhe als Variable weitergeben
+  function measureNav() {
+    const st = document.documentElement.style;
+    // Randlose Bloecke rechnen mit der sichtbaren Breite: 50vw enthaelt die Scrollleiste und ragte sonst rechts hinaus
+    // Neben der Leiste links zählt nur die Fläche rechts davon (#app trägt die Leistenbreite als Innenabstand links),
+    // sonst ragten Titelseite, randlose Bilder und Bänder unter die Leiste
+    const half = () => {
+      const pad = root ? parseFloat(getComputedStyle(root).paddingLeft) || 0 : 0;
+      st.setProperty('--kp-half', ((document.documentElement.clientWidth - pad) / 2) + 'px');
+    };
+    measureNav.half = half;
+    half();
+    if (!measureNav.ro && typeof ResizeObserver === 'function') { measureNav.ro = new ResizeObserver(half); measureNav.ro.observe(document.documentElement); }
+    const bar = navPos === 'unten' ? root.querySelector('.kp-navbar') : null;
+    // display: none liefert 0 Höhe, eingeklappt zählt die Leiste also nicht mit
+    st.setProperty('--kp-navh', bar ? Math.round(bar.getBoundingClientRect().height) + 'px' : '0px');
+    // Die Kopfzeile oben zählt für eine bildschirmfüllende Titelseite genauso mit
+    const kopf = navPos === 'oben' ? root.querySelector('.kp-head') : null;
+    const prog = navPos === 'oben' ? root.querySelector('.kp-progress') : null;
+    const h = (kopf ? kopf.getBoundingClientRect().height : 0) + (prog ? prog.getBoundingClientRect().height : 0);
+    st.setProperty('--kp-headh', Math.round(h) + 'px');
+    // Bildschirmseiten: Bei der Leiste oben steht die Navigation unter dem Inhalt und zählt für die Seitenhöhe mit
+    const fuss = navPos === 'oben' ? root.querySelector('[data-footer]:not([hidden])') : null;
+    st.setProperty('--kp-footh', fuss ? Math.round(fuss.getBoundingClientRect().height) + 'px' : '0px');
+    // Pillen im Inhalt (settings.slideNav) zählen für die Bildschirmhöhe mit, sonst ragt jede Bildschirmseite um ihre Höhe hinaus
+    // (in der Flex-Spalte einer „fit“-Seite ist margin-top: auto und liefe als gebrauchter Wert in die Hunderte, dort zählt nur die Höhe)
+    const pn = root.querySelector('.kp-pagenav');
+    const pnMargin = pn && !pn.closest('.kp-fit-main') ? (parseFloat(getComputedStyle(pn).marginTop) || 0) : 0;
+    st.setProperty('--kp-pnavh', pn ? Math.round(pn.getBoundingClientRect().height + pnMargin) + 'px' : '0px');
+  }
+
+  // Platzhalter in eigenen Kopf- und Fußzeilen
+  function fill(template, extra) {
+    const p = pages[state.current];
+    const vars = Object.assign({
+      kurs: plainTitle(course.title), titel: plainTitle(p.title), kapitel: esc(p.chapter || ''),
+      seite: state.current + 1, seiten: pages.length,
+      fortschritt: Math.round((state.current + 1) / pages.length * 100), hinweis: ''
+    }, extra || {});
+    return String(template).replace(/\{\{(\w+)\}\}/g, (m, k) => (vars[k] != null ? vars[k] : m));
+  }
+
+  // Weiche Überblendung zwischen Seiten, wo der Browser sie kann; sonst direkter Wechsel
+  function pageTransition(swap, back) {
+    const html = document.documentElement;
+    if (document.startViewTransition && html.classList.contains('kp-modern') && !reducedMotion() && !document.hidden) {
+      html.classList.toggle('kp-back', !!back);
+      try {
+        const vt = document.startViewTransition(swap);
+        if (vt && vt.ready) vt.ready.catch(() => { /* übersprungen, z. B. bei schnellem Doppelklick */ });
+        if (vt && vt.finished) vt.finished.then(() => html.classList.remove('kp-back'), () => html.classList.remove('kp-back'));
+        return;
+      } catch (e) { html.classList.remove('kp-back'); }
+    }
+    swap();
+  }
+  function go(index) {
+    if (index < 0 || index >= pages.length || index === state.current) return;
+    const prev = state.current;
+    state.history.push(state.current);
+    state.current = index;
+    pageTransition(() => { render(true); chapterToast(prev); });
+  }
+
+  // Einen einzelnen Block neu zeichnen, ohne die Seite neu aufzubauen
+  function refreshBlock(el, html) {
+    const sec = el.closest('[data-block]');
+    const owner = sec && findBlock(sec.dataset.block);
+    const tmp = document.createElement('div');
+    tmp.innerHTML = footnotes(html);
+    const fresh = tmp.firstElementChild;
+    el.replaceWith(fresh);
+    activateComponents(fresh.parentElement || root);
+    if (owner && owner.type === 'pretest') {
+      // Beim Einstiegstest hängt der Ergebniskasten von allen Fragen ab: nur ihn erneuern
+      const t2 = document.createElement('div');
+      t2.innerHTML = renderPretest(owner);
+      const oldBox = sec.querySelector('.kp-pretest-box');
+      const newBox = t2.querySelector('.kp-pretest-box');
+      if (oldBox) oldBox.remove();
+      if (newBox) sec.appendChild(newBox);
+    }
+    // „Weiter ansehen“ im Video erst nach der Antwort
+    root.querySelectorAll('[data-vcontinue][data-q]').forEach(btn => { btn.disabled = state.answers[btn.dataset.q] == null; });
+    // Zertifikat und Nachbesprechung auf derselben Seite hängen von Antworten ab
+    root.querySelectorAll('.kp-b-certificate, .kp-b-debrief').forEach(s => {
+      if (s.querySelector('[data-cert-name]') && s.contains(document.activeElement)) return;
+      const b = findBlock(s.dataset.block);
+      if (b) s.innerHTML = renderBlock(b);
+    });
+    // Fokus auf die Rückmeldung, damit Screenreader sie vorlesen
+    const fb = fresh.querySelector && fresh.querySelector('.kp-feedback, .kp-saved, .kp-q');
+    if (fb) { fb.tabIndex = -1; fb.focus({ preventScroll: true }); }
+    updateConditions();
+    renderFooter();
+    report();
+  }
+
+  // ---------- Bedingungen und Szenario-Werte ----------
+  // b.showIf: { kind: 'choice', ref: Entscheidungs-id, value: Index | [Indizes] }
+  //           { kind: 'selfcheck', ref: Selbstcheck-id, value: Index des Ergebnisbereichs }
+  //           { kind: 'meter', ref: Szenario-Wert-id, op: 'gte' | 'lt', value: Zahl }
+  function selfcheckResultIndex(b) {
+    const st = state.self[b.id];
+    if (!b || !st || !st.done) return -1;
+    const sum = (st.a || []).reduce((x, y) => x + Math.max(0, Number(y) || 0), 0);
+    return (b.results || []).findIndex(x => sum >= Number(x.min) && sum <= Number(x.max));
+  }
+  // Szenario-Werte: Startwert plus die Wirkung aller getroffenen Entscheidungen, begrenzt auf 0 bis 100
+  function meterValues() {
+    const vals = {};
+    (course.meters || []).forEach(m => { vals[m.id] = Number(m.start) || 0; });
+    pages.forEach(p => branchesIn(p).forEach(br => {
+      const c = state.branch[br.id];
+      if (c == null) return;
+      const eff = ((br.options || [])[c] || {}).effects || {};
+      Object.keys(eff).forEach(k => { if (k in vals) vals[k] += Number(eff[k]) || 0; });
+    }));
+    Object.keys(vals).forEach(k => { vals[k] = Math.max(0, Math.min(100, vals[k])); });
+    return vals;
+  }
+  // Ist die Übung in einem Block erledigt? Grundlage für „erst zeigen, wenn …“ und für die Weiter-Sperre
+  function blockDone(b) {
+    if (!b) return true;
+    const st = state.self[b.id] || {};
+    const alle = (n, ok) => n > 0 && !!ok;
+    const umgedreht = () => {
+      const karten = root.querySelectorAll(`[data-block="${b.id}"] .kp-flip`);
+      return alle(karten.length, [...karten].every(f => f.classList.contains('kp-seen')));
+    };
+    switch (b.type) {
+      case 'quiz': return state.answers[b.id] != null;
+      case 'branch': return state.branch[b.id] != null && !branchWhyOpen(b);
+      case 'dialog': return b.decision ? state.branch[b.decision.id] != null && !branchWhyOpen(b.decision) : (state.dlg[b.id] || 0) >= (b.lines || []).length - 1;
+      case 'takeaways': return b.recall && b.look !== 'zeilen' ? alle((b.items || []).length, (b.items || []).every((x, i) => (st.open || []).includes(i))) : Object.keys(st).length > 0;
+      case 'gate': case 'selfcheck': case 'interaktion': case 'schloss': return !!st.done;
+      case 'wahlbrett': return (b.items || []).length > 0 && wbCount(b) >= wbMin(b);
+      case 'reflection': case 'actionplan': return state.texts[b.id] != null;
+      case 'ivideo': return !!state.watched[b.id];
+      case 'mission': case 'game': return !!(state.self.mm || {})[b.id];
+      case 'simulation': {
+        // Mit Stufe „Prüfen“ zählt erst ein Prüfdurchlauf, ohne sie ein kompletter Durchlauf in einer der angebotenen Stufen
+        const m = (b.modes || []).filter(x => SIM_MODES.includes(x));
+        return (m.length ? m : SIM_MODES).includes('pruefen') ? playFraction(b) != null : !!st.fin;
+      }
+      case 'casebank': return cbDoneCount(b) >= cbGoal(b);
+      case 'triage': return alle((b.items || []).length, (b.items || []).every((x, i) => (st.d || {})[i] != null));
+      case 'levers': return alle((b.sliders || []).length, (st.t || []).length >= (b.sliders || []).length);
+      case 'chat': return alle((b.turns || []).length, (Number(st.n) || 0) >= (b.turns || []).length);
+      case 'fragen': return ((st.asked || []).length) >= askMin(b);
+      case 'ueberdich': return !!st.done;
+      case 'kurzfrage': return typeof st.v === 'number';
+      case 'markieren': return !!st.done;
+      case 'merkkarte': return !!st.o;
+      case 'mappe': return !!st.r;
+      case 'videopaar': return typeof st.v === 'number';
+      case 'bildschirm': return !!st.done;
+      case 'kartenstapel': return !!st.done;
+      case 'formular': { const f = formFilled(b); return f.length > 0 && f.every(Boolean); }
+      case 'bignumber': return !bnAsk(b) || typeof st.v === 'number';
+      case 'matrix': return !!st.cmp;
+      case 'promptbuild': return alle((b.steps || []).length, (st.taken || []).length >= (b.steps || []).length);
+      case 'findtext': {
+        const gesucht = (b.spots || []).map((x, i) => i).filter(i => (b.spots[i] || {}).wrong !== false);
+        return alle(gesucht.length, gesucht.every(i => (st.hit || []).includes(i)));
+      }
+      case 'hotspots': {
+        const rounds = (b.rounds || []).filter(x => x && x.image && x.image.src);
+        if (rounds.length) return alle(rounds.length, rounds.every((rd, r) => (rd.points || []).length && (rd.points || []).every((pt, i) => pt.target || ((st.rs || {})[r] || {})[i])));
+        const list = b.points || [];
+        if (b.map) { const doors = list.filter(pt => pageIndexById(pt.target) >= 0); return alle(doors.length, doors.every(pt => { const d = pageIndexById(pt.target), ch = pages[d].chapter; return (ch ? pages.map((x, k) => k).filter(k => pages[k].chapter === ch && !pages[k].result) : [d]).every(k => state.visited.has(k)); })); }
+        const stops = list.map((x, i) => i).filter(i => !list[i].target);
+        return alle(stops.length, stops.every(i => (st.seen || {})[i]));
+      }
+      case 'layers': return Object.keys(st.on || {}).some(k => st.on[k]);
+      case 'cards': { const rv = cardsRv(b); return alle(rv.length, rv.every(i => (st.open || []).includes(i))); }
+      case 'pyramide': { const n = (b.levels || []).length; return alle(n, (b.levels || []).every((x, i) => (st.open || []).includes(i))); }
+      case 'venn': { const n = Math.min(3, (b.circles || []).length); return alle(n, (b.circles || []).slice(0, 3).every((x, i) => (st.open || []).includes(i))); }
+      // Team „aufklappen“: erledigt, wenn jede Person mit Text einmal aufgeklappt war (Stand aus dem toggle-Ereignis)
+      case 'team': { if (b.look === 'karussell') { const n = (b.members || []).length; return alle(n, n > 1 && (b.members || []).every((m, i) => (st.seen || []).includes(i))); } if (b.look !== 'aufklappen') return false; const ms = (b.members || []).map((m, i) => i).filter(i => plainText((b.members[i] || {}).html)); return alle(ms.length, ms.every(i => (st.open || []).includes(i))); }
+      case 'aufdecken': return (b.stops || []).length > 0 && (b.stops || []).every((x, i) => (st.seen || {})[i]);
+      case 'checklist': return alle((b.items || []).length, (st.c || []).length >= (b.items || []).length);
+      case 'flipcards': return umgedreht();
+      case 'glossquiz': return b.mode === 'memory' ? alle(drawnPairs(b).length, (st.found || []).length >= drawnPairs(b).length)
+        : b.mode === 'match' ? state.answers[b.id] != null : umgedreht();
+      case 'process': return alle((b.steps || []).length, (state.dlg[b.id] || 0) >= (b.steps || []).length - 1);
+      case 'pool': case 'pretest': return (b.questions || []).every(q => state.answers[q.id] != null);
+      case 'review': { const qs = reviewQuestions(b); return alle(qs.length, qs.every(q => state.answers[q.id] != null)); }
+      default: return Object.keys(st).length > 0;
+    }
+  }
+  function conditionMet(cond) {
+    if (!cond || !cond.kind) return true;
+    if (cond.kind === 'done') return blockDone(findBlock(cond.ref));
+    if (cond.kind === 'choice') {
+      const c = state.branch[cond.ref];
+      const want = Array.isArray(cond.value) ? cond.value.map(Number) : [Number(cond.value)];
+      return c != null && want.includes(c);
+    }
+    if (cond.kind === 'selfcheck') { const b = findBlock(cond.ref); return !!b && selfcheckResultIndex(b) === Number(cond.value); }
+    if (cond.kind === 'meter') {
+      const v = meterValues()[cond.ref];
+      if (v == null) return false;
+      return cond.op === 'lt' ? v < Number(cond.value) : v >= Number(cond.value);
+    }
+    return true;
+  }
+  const hasCond = b => !!(b && b.showIf && b.showIf.kind);
+  // Blöcke, die auf einer Seite gerade durch eine Bedingung verborgen sind (zählen nicht für die Sperre)
+  function condHiddenIds(p) {
+    const ids = new Set();
+    (p.blocks || []).forEach(b => {
+      if (!hasCond(b) || conditionMet(b.showIf)) return;
+      ids.add(b.id);
+      (b.questions || []).forEach(q => ids.add(q.id));
+      // Wiederholungen ziehen ihre Fragen erst zur Laufzeit – auch diese Kopien zählen nicht
+      if (b.type === 'review') reviewQuestions(b).forEach(q => ids.add(q.id));
+      if (b.decision) ids.add(b.decision.id);
+    });
+    return ids;
+  }
+  // Ein Abschnitt, der gerade freigeschaltet wurde, fährt herein und holt den Blick sanft nach
+  function revealSection(sec) {
+    if (reducedMotion()) return;
+    sec.classList.remove('kp-reveal-in');
+    void sec.offsetWidth; // Reflow, damit die Animation auch beim zweiten Mal startet
+    sec.classList.add('kp-reveal-in');
+    sec.addEventListener('animationend', () => sec.classList.remove('kp-reveal-in'), { once: true });
+    const r = sec.getBoundingClientRect();
+    if (r.top > window.innerHeight * 0.92) sec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  // Nach einer Entscheidung oder einem Selbstcheck: bedingte Blöcke und Anzeigen der Szenario-Werte nachziehen
+  function updateConditions() {
+    klangErledigt();
+    updateEchoes();
+    if (typeof kfPops === 'function') kfPops();
+    const p = pages[state.current];
+    let neu = false;
+    (p.blocks || []).forEach(b => {
+      if (!hasCond(b)) return;
+      const sec = root.querySelector(`section[data-block="${b.id}"][data-cond]`);
+      if (!sec) return;
+      const show = conditionMet(b.showIf);
+      if (sec.hidden === !show) return;
+      sec.hidden = !show;
+      neu = true;
+      if (show) {
+        sec.classList.add('fx-in');
+        activateComponents(sec);
+        revealSection(sec);
+      }
+    });
+    // Taucht ein Abschnitt auf oder ab, stimmt auch der Grund in der Fußzeile nicht mehr
+    if (neu) renderFooter();
+    root.querySelectorAll('[data-meters-live]').forEach(el => { el.outerHTML = meterPanel(null, true); });
+    updateClues();
+  }
+  // Anzeige der Szenario-Werte; mit Wirkung einer Entscheidung (eff) zeigt sie die Veränderung
+  function meterPanel(eff, live) {
+    const meters = course.meters || [];
+    if (!meters.length) return '';
+    const vals = meterValues();
+    const list = eff ? meters.filter(m => Number(eff[m.id])) : meters;
+    if (!list.length) return '';
+    return `<div class="kp-meters"${live ? ' data-meters-live' : ''} role="status">${list.map(m => {
+      const d = eff ? Number(eff[m.id]) || 0 : 0;
+      // Bildstufen: die höchste Stufe, deren min der Wert erreicht
+      const stage = (m.stages || []).filter(s => s && s.image && s.image.src && (Number(s.min) || 0) <= vals[m.id]).sort((a, z) => (Number(a.min) || 0) - (Number(z.min) || 0)).pop();
+      return `<div class="kp-meter${stage ? ' kp-meter-staged' : ''}" style="--c:${esc(m.color || 'var(--kp-primary)')}">${stage ? `<div class="kp-meter-pic"><img src="${esc(res(stage.image.src))}" alt="${esc(stage.image.alt || '')}"></div>` : ''}<span class="kp-meter-label">${esc(m.label || m.id)}${d ? ` <b class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : '−'}${Math.abs(d)}</b>` : ''}</span>
+        <span class="kp-meter-bar" role="img" aria-label="${esc(m.label || m.id)}: ${vals[m.id]} von 100"><i style="width:${vals[m.id]}%"></i></span></div>`;
+    }).join('')}</div>`;
+  }
+
+  function findBlock(id) {
+    for (const p of pages) for (const b of p.blocks || []) {
+      if (b.id === id) return b;
+      if (b.decision && b.decision.id === id) return b.decision;
+    }
+    return null;
+  }
+  function findQuestion(id) {
+    const it = items.find(x => x.id === id && x.q);
+    return it ? { q: it.q, graded: it.graded } : null;
+  }
+
+  // ---------- Animationen ----------
+  const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Zusatzbibliotheken (Paket: gsap.min.js, rough-notation.js, driver.js; Vorschau inline): nur bei Effekten „hochwertig“,
+  // jede mit Rückfall auf die CSS-Fassung, wenn die Datei fehlt
+  const fxOn = () => (theme.effects || 'hochwertig') !== 'dezent';
+  const gs = () => (fxOn() && !reducedMotion() && window.gsap ? window.gsap : null);
+  const notationOn = () => fxOn() && theme.notation !== 'aus' && !reducedMotion() && !!window.RoughNotation;
+  const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || getComputedStyle(root).getPropertyValue(name).trim();
+  // Handgezeichnete Markierung (Rough Notation): Kreis um die richtige Antwort, Strich unter dem Akzentwort, Kasten um die Zahl
+  const noted = new WeakSet();
+  function notate(el, type, extra) {
+    if (!el || !notationOn() || noted.has(el)) return null;
+    noted.add(el);
+    try {
+      const a = window.RoughNotation.annotate(el, Object.assign({ type, color: cssVar('--kp-accent-ink') || cssVar('--kp-accent') || '#c8781a', animationDuration: 650, strokeWidth: 2, padding: type === 'circle' ? [6, 10] : 3, multiline: true, iterations: 2 }, extra || {}));
+      a.show();
+      el.classList.add('kp-noted');
+      return a;
+    } catch (e) { return null; }
+  }
+  const fxShown = new Set(); // Blöcke, deren Listen schon einmal hereingefahren sind
+  function stopMotion(box) {
+    clearInterval(box.__timer);
+    box.dataset.playing = '';
+    const btn = box.querySelector('[data-motion-play]');
+    if (btn) btn.textContent = '▶ ' + T('abspielen');
+  }
+  // Zahlen zählen hoch und Balken wachsen, sobald sie sichtbar werden
+  function setupCounters(scope) {
+    const targets = [...scope.querySelectorAll('[data-count], .kp-bignum-value span, .kp-anim-count')].filter(el => !el.dataset.counted);
+    if (!targets.length) return;
+    const run = el => {
+      el.dataset.counted = '1';
+      const box = el.classList.contains('kp-anim-count') ? el.querySelector('b') : el;
+      const raw = el.dataset.countTo || box.textContent;
+      const num = parseFloat(String(raw).replace(/[^\d.,-]/g, '').replace(',', '.'));
+      if (!isFinite(num) || Math.abs(num) > 1e9) return;
+      const dec = (String(raw).split(/[.,]/)[1] || '').length;
+      const rest = String(raw).replace(/[\d.,\s-]/g, '');
+      if (reducedMotion()) return;
+      const final = String(raw);
+      if (num === 0) return;
+      const g = gs();
+      if (g) {
+        // GSAP: weiche Kurve, auch im Hintergrund korrekt zu Ende (die Bibliothek holt verpasste Zeit nach)
+        const o = { v: 0 };
+        g.to(o, { v: num, duration: 1.1, ease: 'power3.out', onUpdate: () => { box.textContent = o.v.toFixed(dec).replace('.', ',') + rest; }, onComplete: () => { box.textContent = final; } });
+        return;
+      }
+      const t0 = Date.now(), dur = 900;
+      const timer = setInterval(() => {
+        const p = Math.min(1, (Date.now() - t0) / dur);
+        box.textContent = (num * (1 - Math.pow(1 - p, 3))).toFixed(dec).replace('.', ',') + rest;
+        if (p >= 1) { clearInterval(timer); box.textContent = final; }
+      }, 40);
+      // Sicherheitsnetz: Wenn der Zeitgeber gebremst wird (Fenster im Hintergrund), steht am Ende trotzdem die Zahl
+      setTimeout(() => { clearInterval(timer); box.textContent = final; }, dur + 400);
+      mediaTimers.push(timer);
+    };
+    if (!window.IntersectionObserver) return targets.forEach(run);
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { run(e.target); io.unobserve(e.target); } }), { threshold: .4 });
+    targets.forEach(el => io.observe(el));
+  }
+  // Gestaffeltes Erscheinen und Zeichnen von Linien
+  function setupAnimations(scope) {
+    const items = [...scope.querySelectorAll('.kp-anim, .kp-stagger')].filter(el => !el.dataset.animOn);
+    if (!items.length) return;
+    const on = el => {
+      el.dataset.animOn = '1'; el.classList.add('run');
+      // Striche mit GSAP zeichnen (pathLength="1": Versatz 1 → 0), gestaffelt nach --d; ohne GSAP bleibt die CSS-Animation
+      const g = gs(), paths = g ? el.querySelectorAll('.kp-draw') : [];
+      if (paths.length) paths.forEach(pth => { pth.style.animation = 'none'; g.fromTo(pth, { strokeDashoffset: 1 }, { strokeDashoffset: 0, duration: .9, ease: 'power2.inOut', delay: parseFloat(pth.style.getPropertyValue('--d')) || 0 }); });
+    };
+    if (!window.IntersectionObserver || reducedMotion()) return items.forEach(on);
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { on(e.target); io.unobserve(e.target); } }), { threshold: .25 });
+    items.forEach(el => io.observe(el));
+  }
+
+  // ---------- Bausteine und Effekte aktivieren ----------
+  // Lange Wörter im Titel (z. B. „MENSCHENKENNTNIS“ in Versalien) brechen sonst mitten im Wort um oder laufen aus der Karte:
+  // die Schrift wird so weit verkleinert, bis das längste Wort in eine Zeile passt (nach dem Laden der Schriften noch einmal)
+  let fitWired = false;
+  const fitObs = typeof ResizeObserver === 'function' ? new ResizeObserver(list => list.forEach(e => fitTitle(e.target))) : null;
+  function fitTitle(el) {
+    if (!el.clientWidth || el.dataset.fitting) return;
+    el.dataset.fitting = '1';
+    el.style.fontSize = '';
+    // Das längste Wort mit der berechneten Schrift messen (Versalien und Laufweite eingerechnet); scrollWidth meldet
+    // den Umbruch mitten im Wort nicht als Überlauf
+    const cs = getComputedStyle(el), fs = parseFloat(cs.fontSize) || 30;
+    const ctx = (fitTitle.c || (fitTitle.c = document.createElement('canvas'))).getContext('2d');
+    ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${fs}px ${cs.fontFamily}`;
+    const ls = parseFloat(cs.letterSpacing) || 0, up = cs.textTransform === 'uppercase';
+    const widest = Math.max(0, ...String(el.textContent || '').split(/\s+/).filter(Boolean).map(w => ctx.measureText(up ? w.toLocaleUpperCase('de') : w).width + ls * w.length));
+    const room = el.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+    let size = fs;
+    if (widest > room) { size = Math.max(18, Math.floor(fs * room / widest * 0.98)); el.style.fontSize = size + 'px'; }
+    // Gegenprobe an den echten Zeilen: die Canvas-Messung liegt bei manchen Schriftschnitten rund 2 % unter der Darstellung
+    // („Entwicklungsdialog,“ 1 px zu breit, mit text-wrap: balance rutschte dann die ganze erste Zeile über den Rand)
+    try {
+      const rg = document.createRange(); rg.selectNodeContents(el);
+      for (let k = 0; k < 8 && size > 18; k++) {
+        const right = el.getBoundingClientRect().right - parseFloat(cs.paddingRight || 0) + 1;
+        if (![...rg.getClientRects()].some(r => r.right > right)) break;
+        size -= 1; el.style.fontSize = size + 'px';
+      }
+    } catch (e) { /* ohne Range-API */ }
+    // erst im nächsten Bild wieder messen, sonst löst die eigene Größenänderung den Beobachter erneut aus
+    requestAnimationFrame(() => { delete el.dataset.fitting; });
+  }
+  // Titelschrift über dem Foto: das Hauptwort füllt die Bildbreite genau (die CSS-Schätzung kennt die Laufweite der Schrift nicht)
+  function fitSchrift(h) {
+    const m = h.querySelector('.kp-schrift-main'); if (!m || !h.clientWidth) return;
+    m.style.fontSize = '';
+    const cs = getComputedStyle(h), w = h.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), sw = m.scrollWidth;
+    if (sw > 0 && w > 0) m.style.fontSize = Math.min(h.clientWidth * .31, parseFloat(getComputedStyle(m).fontSize) * w / sw * .98).toFixed(1) + 'px';
+  }
+  function fitTitles(scope) {
+    scope.querySelectorAll('.kp-schrift').forEach(fitSchrift);
+    scope.querySelectorAll('.kp-hero-title').forEach(el => {
+      fitTitle(el);
+      // Schriftwechsel (Webfont lädt nach) ändert die Höhe des Titels: dann neu anpassen
+      if (fitObs && !el.dataset.fitObs) { el.dataset.fitObs = '1'; fitObs.observe(el); }
+    });
+  }
+  // Ergebnisring über GSAP (sanfter Auslauf), Kernsatz mit handgezeichnetem Strich unter dem Akzentwort
+  function setupExtras(scope) {
+    const g = gs();
+    scope.querySelectorAll('.kp-ring-on:not([data-gs])').forEach(c => {
+      if (!g) return;
+      c.dataset.gs = '1'; c.style.animation = 'none';
+      const u = parseFloat(c.getAttribute('stroke-dasharray')) || 0, off = parseFloat(c.getAttribute('stroke-dashoffset')) || 0;
+      g.fromTo(c, { strokeDashoffset: u }, { strokeDashoffset: off, duration: 1.4, ease: 'power2.out', delay: .15 });
+    });
+    if (notationOn()) scope.querySelectorAll('.kp-statement-text .kp-accent, .kp-hero-title .kp-accent').forEach(el => setTimeout(() => notate(el, 'underline', { padding: 2, strokeWidth: 3 }), 500));
+  }
+  // Bewegte Illustrationen (Kerstin 16.10.2026, nach dem Vorbild der Erklärvideo-Renderer, dort bild.teile): eine Storyset-Zeichnung
+  // bekommt je Gruppe auf oberster Ebene eine leise Bewegung als CSS in der SVG selbst (Figur atmet, Sprechblase ploppt auf und
+  // schwebt, Pflanze wiegt, Licht blinkt, Hand winkt, Zahnrad dreht). Das Bild bleibt ein <img>, Layout und Spiegelung unverändert.
+  // Nur mit Effekten „hochwertig“, nie unter „Bewegung reduzieren“, nie bei Figuren auf der Bühne (die bewegt der Rahmen).
+  const ILLU_LIVE = new Map();
+  const illuPreset = id => {
+    const n = String(id).toLowerCase();
+    if (/background|floor|shadow/.test(n)) return '';
+    if (/bubble|speech|chat|message|dialog/.test(n)) return 'pop';
+    if (/plant|leaf|leaves|tree|flower/.test(n)) return 'wiegen';
+    if (/bolt|lightning|spark|star|heart|shine|alert|exclam/.test(n)) return 'blinken';
+    if (/charac|caracter|person|woman|^man|people|girl|boy/.test(n)) return 'atmen';
+    if (/hand|arm/.test(n)) return 'winken';
+    if (/gear|cog|setting|clock|wheel/.test(n)) return 'drehen';
+    if (/notification|icon|graph|chart|pin|check|coin|money|cloud|lamp|light|dust|smoke|steam|paper|document/.test(n)) return 'schweben';
+    return '';
+  };
+  const ILLU_CSS = `g.kp-ip{transform-box:fill-box}
+g.kp-ip-atmen{transform-origin:50% 100%;animation:kp-ip-atmen 4.2s ease-in-out infinite}
+g.kp-ip-schweben{transform-origin:50% 50%;animation:kp-ip-schweben 5s ease-in-out infinite}
+g.kp-ip-pop{transform-origin:50% 100%;animation:kp-ip-pop .6s cubic-bezier(.3,1.5,.5,1) backwards,kp-ip-schweben 4.6s .6s ease-in-out infinite}
+g.kp-ip-wiegen{transform-origin:50% 100%;animation:kp-ip-wiegen 5.5s ease-in-out infinite}
+g.kp-ip-blinken{transform-origin:50% 50%;animation:kp-ip-blinken 2.6s ease-in-out infinite}
+g.kp-ip-winken{transform-origin:50% 100%;animation:kp-ip-wiegen 2.4s ease-in-out infinite}
+g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infinite}
+@keyframes kp-ip-atmen{0%,100%{transform:scale(1,1)}50%{transform:scale(1.006,1.014)}}
+@keyframes kp-ip-schweben{0%,100%{transform:translate(0,0)}50%{transform:translate(0,-3%)}}
+@keyframes kp-ip-pop{from{transform:scale(.2);opacity:0}}
+@keyframes kp-ip-wiegen{0%,100%{transform:rotate(-1.6deg)}50%{transform:rotate(1.6deg)}}
+@keyframes kp-ip-blinken{0%,100%{opacity:1}50%{opacity:.55}}
+@keyframes kp-ip-drehen{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){g.kp-ip{animation:none!important}}`;
+  function illuAnimated(text) {
+    if (typeof DOMParser === 'undefined') return '';
+    const doc = new DOMParser().parseFromString(text, 'image/svg+xml'), svg = doc.documentElement;
+    if (!svg || svg.nodeName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) return '';
+    const NS = 'http://www.w3.org/2000/svg';
+    let n = 0;
+    [...svg.children].forEach(g => {
+      if (g.nodeName.toLowerCase() !== 'g' || !g.id) return;
+      const kind = illuPreset(g.id);
+      if (!kind) return;
+      // eigene Hülle, damit ein transform-Attribut der Gruppe nicht von der Animation überschrieben wird
+      const w = doc.createElementNS(NS, 'g');
+      w.setAttribute('class', 'kp-ip kp-ip-' + kind);
+      w.setAttribute('style', `animation-delay:${kind === 'pop' ? (0.4 + n * 0.35).toFixed(2) + 's,' + (1 + n * 0.35).toFixed(2) + 's' : (-n * 1.3).toFixed(1) + 's'}`);
+      g.parentNode.insertBefore(w, g); w.appendChild(g); n++;
+    });
+    if (!n) return '';
+    const st = doc.createElementNS(NS, 'style'); st.textContent = ILLU_CSS; svg.insertBefore(st, svg.firstChild);
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(doc));
+  }
+  function svgFromData(src) {
+    const m = String(src).match(/^data:image\/svg\+xml(;[^,]*)?,(.*)$/s);
+    if (!m) return null;
+    try { return /;base64/.test(m[1] || '') ? decodeURIComponent(escape(atob(m[2]))) : decodeURIComponent(m[2]); } catch (e) { return null; }
+  }
+  function liveIllus(scope) {
+    if (!document.documentElement.classList.contains('kp-fx-premium') || reducedMotion() || opts.renderer) return;
+    scope.querySelectorAll('img').forEach(img => {
+      if (img.dataset.illuLive || img.closest('.kp-actor, .kp-avatar, .kp-card-icon, .kp-head, .kp-navbar')) return;
+      const src = img.getAttribute('src') || '';
+      if (!/^data:image\/svg|\.svg(\?|$)/i.test(src)) return;
+      img.dataset.illuLive = '1';
+      const put = out => { if (out) img.setAttribute('src', out); };
+      if (ILLU_LIVE.has(src)) return put(ILLU_LIVE.get(src));
+      const text = svgFromData(src);
+      if (text != null) { const out = illuAnimated(text); ILLU_LIVE.set(src, out); return put(out); }
+      // Datei im Paket: nachladen, wo es geht (file:// lässt fetch nicht zu, dann bleibt das ruhige Bild)
+      try { fetch(src).then(r => r.ok ? r.text() : '').then(t => { const out = t ? illuAnimated(t) : ''; ILLU_LIVE.set(src, out); put(out); }).catch(() => {}); } catch (e) { /* ohne fetch */ }
+    });
+  }
+  function activateComponents(scope) {
+    // Schaubild als Zeichnung: Seitenverhältnis aus dem Bild, damit die Bühne auf Bildschirmseiten in die freie Höhe passt
+    scope.querySelectorAll('.kp-hs-drawing .kp-hs-zoom > img').forEach(im => {
+      const set = () => { const st = im.closest('.kp-hs-stage'); if (st && im.naturalWidth && im.naturalHeight) st.style.setProperty('--kp-hs-ar', (im.naturalWidth / im.naturalHeight).toFixed(4)); };
+      if (im.complete) set(); else im.addEventListener('load', set, { once: true });
+    });
+    setupEinflug(scope);
+    liveIllus(scope);
+    fitTitles(scope);
+    setupExtras(scope);
+    try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fitTitles(scope)); } catch (e) { /* ohne Font-API */ }
+    if (!fitWired) {
+      fitWired = true;
+      try { if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', () => fitTitles(root)); } catch (e) { /* ohne Font-API */ }
+      window.addEventListener('resize', () => fitTitles(root));
+      window.addEventListener('resize', () => root.querySelectorAll('[data-ml]').forEach(drawMatchLines));
+    }
+    scope.querySelectorAll('[data-ml]').forEach(drawMatchLines);
+    scope.querySelectorAll('.kp-chat-log').forEach(l => { l.scrollTop = l.scrollHeight; });
+    chatSfxRun(scope);
+    setupCounters(scope);
+    setupAnimations(scope);
+    scope.querySelectorAll('[data-ivideo]').forEach(setupVideo);
+    scope.querySelectorAll('[data-lottie]').forEach(setupLottie);
+    lottieFigs(scope);
+    scope.querySelectorAll('[data-mission]').forEach(setupMission);
+    scope.querySelectorAll('[data-seq]').forEach(setupSequence);
+    scope.querySelectorAll('[data-kurs-tabs]:not([data-ready])').forEach(box => {
+      box.dataset.ready = '1';
+      box.classList.add('kp-tabs');
+      const secs = Array.from(box.querySelectorAll(':scope > section'));
+      if (!secs.length) return;
+      const bar = document.createElement('div');
+      bar.className = 'kp-tabbar';
+      bar.setAttribute('role', 'tablist');
+      secs.forEach((s, i) => {
+        const btn = document.createElement('button');
+        btn.textContent = s.getAttribute('data-titel') || 'Reiter ' + (i + 1);
+        if (box.classList.contains('kp-tabs-lz')) { btn.setAttribute('aria-label', btn.textContent); btn.textContent = String(i + 1).padStart(2, '0'); }
+        btn.setAttribute('role', 'tab');
+        btn.onclick = () => {
+          secs.forEach((x, j) => { x.hidden = j !== i; });
+          Array.from(bar.children).forEach((x, j) => { x.classList.toggle('active', j === i); x.setAttribute('aria-selected', j === i); });
+        };
+        bar.appendChild(btn);
+        s.hidden = i > 0;
+      });
+      bar.firstChild.classList.add('active');
+      bar.firstChild.setAttribute('aria-selected', 'true');
+      box.insertBefore(bar, box.firstChild);
+    });
+    scope.querySelectorAll('[data-guide-audio]').forEach(box => {
+      const media = box.querySelector('audio'), btn = box.querySelector('[data-ga-play]'), time = box.querySelector('[data-ga-time]'), bars = [...box.querySelectorAll('.kp-ga-wave i')];
+      if (!media || media.dataset.wired) return;
+      media.dataset.wired = '1';
+      const fmt = s => isFinite(s) ? Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0') : '–:––';
+      const paint = () => { const f = media.duration ? media.currentTime / media.duration : 0; bars.forEach((x, i) => x.classList.toggle('on', i < f * bars.length)); time.textContent = fmt(media.duration ? (media.paused && !media.currentTime ? media.duration : media.currentTime) : NaN); };
+      media.addEventListener('loadedmetadata', paint);
+      media.addEventListener('timeupdate', paint);
+      media.addEventListener('play', () => { btn.textContent = '■'; btn.setAttribute('aria-pressed', 'true'); box.classList.add('playing'); });
+      const stop = () => { btn.textContent = '▶'; btn.setAttribute('aria-pressed', 'false'); box.classList.remove('playing'); paint(); };
+      media.addEventListener('pause', stop); media.addEventListener('ended', () => { media.currentTime = 0; stop(); });
+      if (media.readyState >= 1) paint();
+    });
+    scope.querySelectorAll('.kp-flip').forEach(f => {
+      const turn = () => { f.classList.toggle('flipped'); f.classList.add('kp-seen'); uiSound('aufdecken'); updateConditions(); };
+      f.onclick = turn;
+      f.onmouseenter = () => { f.classList.add('kp-seen'); updateConditions(); };
+      f.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); turn(); } };
+    });
+    scope.querySelectorAll('[data-lightbox]').forEach(img => {
+      const open = () => {
+        const lb = document.createElement('div');
+        lb.className = 'kp-lightbox';
+        lb.innerHTML = `<img src="${img.src}" alt="${esc(img.alt)}">`;
+        lb.onclick = () => lb.remove();
+        document.body.appendChild(lb);
+      };
+      img.onclick = open;
+      img.onkeydown = e => { if (e.key === 'Enter') open(); };
+    });
+    scope.querySelectorAll('[data-compare]').forEach(box => {
+      const slider = box.querySelector('input');
+      const after = box.querySelector('.kp-after');
+      const img = after.querySelector('img');
+      const apply = () => { after.style.width = slider.value + '%'; img.style.width = box.clientWidth + 'px'; };
+      slider.oninput = apply;
+      const base = box.querySelector(':scope > img');
+      if (base.complete) apply(); else base.onload = apply;
+      window.addEventListener('resize', apply);
+    });
+    (course.glossary || []).forEach(g => {
+      scope.querySelectorAll('[data-kurs-glossar]').forEach(el => {
+        if (el.getAttribute('data-kurs-glossar').toLowerCase() !== String(g.term).toLowerCase()) return;
+        el.classList.add('kp-gloss');
+        el.title = g.definition;
+        el.tabIndex = 0;
+      });
+    });
+    // Effekte „hochwertig“: Listenelemente fahren gestaffelt herein, beim Neuzeichnen eines Blocks (Antwort geprüft) nicht noch einmal
+    if (document.documentElement.classList.contains('kp-fx-premium')) {
+      scope.querySelectorAll('.kp-cards, .kp-agenda, .kp-ch-grid, .kp-tk-list, .kp-timeline, .kp-steps, .kp-flipgrid, .kp-cl-list, .kp-team, .kp-branch-options, .kp-answers').forEach(list => {
+        const sec = list.closest('[data-block]'), id = sec && sec.dataset.block;
+        const again = !!id && fxShown.has(id);
+        Array.from(list.children).forEach((el, i) => {
+          el.style.setProperty('--kp-i', Math.min(i, 8));
+          el.classList.add('fx-reveal');
+          if (again) el.classList.add('fx-in', 'fx-now');
+        });
+        if (id) fxShown.add(id);
+      });
+    }
+    const reveal = scope.querySelectorAll('.fx-reveal:not(.fx-in)');
+    if (reveal.length && window.IntersectionObserver) {
+      const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('fx-in'); io.unobserve(e.target); } }), { threshold: .12 });
+      reveal.forEach(el => io.observe(el));
+    } else {
+      reveal.forEach(el => el.classList.add('fx-in'));
+    }
+    // Fragen, die direkt im HTML gebaut wurden
+    scope.querySelectorAll('.kp-b-custom').forEach(sec => {
+      const blockId = sec.dataset.block;
+      sec.querySelectorAll('[data-kurs-quiz]').forEach((box, qi) => {
+        const id = blockId + ':' + qi;
+        const it = items.find(x => x.id === id);
+        if (!it || box.dataset.ready) return;
+        box.dataset.ready = '1';
+        box.classList.add('kp-hquiz');
+        const btns = Array.from(box.querySelectorAll('[data-kurs-antwort]'));
+        const show = () => {
+          const a = state.answers[id] || [];
+          const right = it.html.right;
+          btns.forEach((btn, i) => {
+            btn.classList.toggle('kp-right', right.indexOf(i) >= 0);
+            btn.classList.toggle('kp-wrong', a.indexOf(i) >= 0 && right.indexOf(i) < 0);
+            btn.disabled = true;
+          });
+          const ok = right.length === a.length && right.every(i => a.indexOf(i) >= 0);
+          let fb = box.querySelector('.kp-feedback');
+          if (!fb) { fb = document.createElement('div'); fb.setAttribute('role', 'status'); box.appendChild(fb); }
+          fb.className = 'kp-feedback ' + (ok ? 'ok' : 'no');
+          fb.textContent = ok ? (box.getAttribute('data-kurs-feedback-richtig') || 'Richtig!') : (box.getAttribute('data-kurs-feedback-falsch') || 'Leider nicht richtig.');
+          // Rückmeldung je Antwort und Erklärung, falls im HTML hinterlegt
+          btns.forEach((btn, i) => {
+            const msg = btn.getAttribute('data-kurs-rueckmeldung');
+            const visible = msg && (a.indexOf(i) >= 0 || (it.html.kind === 'multiple' && right.indexOf(i) >= 0));
+            if (visible && !btn.querySelector('.kp-answer-fb')) btn.insertAdjacentHTML('beforeend', `<span class="kp-answer-fb" style="display:block">${esc(msg)}</span>`);
+          });
+          box.querySelectorAll('[data-kurs-erklaerung]').forEach(x => { x.hidden = false; box.appendChild(x); });
+          const check = box.querySelector('[data-kurs-pruefen]');
+          if (check) check.remove();
+        };
+        if (state.answers[id]) return show();
+        const chosen = [];
+        const submit = a => { state.answers[id] = a; show(); renderFooter(); report(); };
+        btns.forEach((btn, i) => {
+          if (it.html.kind === 'multiple') btn.setAttribute('aria-pressed', 'false');
+          btn.onclick = () => {
+            if (it.html.kind !== 'multiple') return submit([i]);
+            const at = chosen.indexOf(i);
+            if (at >= 0) chosen.splice(at, 1); else chosen.push(i);
+            btn.classList.toggle('kp-chosen', at < 0);
+            btn.setAttribute('aria-pressed', String(at < 0));
+          };
+        });
+        if (it.html.kind === 'multiple') {
+          let check = box.querySelector('[data-kurs-pruefen]');
+          if (!check) { check = document.createElement('button'); check.className = 'kp-btn'; check.textContent = 'Antwort prüfen'; box.appendChild(check); }
+          check.onclick = () => { if (chosen.length) submit(chosen.slice().sort((x, y) => x - y)); };
+        }
+      });
+    });
+  }
+
+  // ---------- Schubladen ----------
+  const notesKey = 'kurs-notizen-' + (course.id || 'kurs');
+  // Notizen je Seite: im localStorage als Objekt { Seiten-id: Text }; ein alter Kurs mit einem einzigen Text liegt unter „_“
+  function notesAll() {
+    let raw = '';
+    try { raw = localStorage.getItem(notesKey) || ''; } catch (e) { /* kein Speicher */ }
+    if (!raw) return {};
+    if (raw[0] === '{') { try { const o = JSON.parse(raw); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } }
+    return { _: raw };
+  }
+  const noteFor = pi => String((notesAll())[pages[pi] && pages[pi].id] || '').trim();
+  function setNote(pi, text) {
+    const o = notesAll();
+    const id = pages[pi] && pages[pi].id;
+    if (!id) return;
+    if (String(text || '').trim()) o[id] = text; else delete o[id];
+    try { localStorage.setItem(notesKey, JSON.stringify(o)); } catch (e) { /* kein Speicher */ }
+  }
+  function notesBody() {
+    const all = notesAll();
+    const others = pages.map((p, pi) => ({ pi, t: String(all[p.id] || '').trim() })).filter(x => x.pi !== state.current && x.t);
+    return `<p class="kp-label kp-notes-page">${T('notizZuSeite')}: ${esc(plainTitle(pages[state.current].title || ''))}</p>
+      <textarea class="kp-notes" data-notes aria-label="${esc(T('notizZuSeite'))}" placeholder="${esc(T('notizLeer'))}">${esc(noteFor(state.current))}</textarea>
+      <p class="kp-label">${esc(T('notizHinweis'))}</p>
+      ${others.length || all._ ? `<p class="kp-label kp-notes-page">${T('notizAndere')}</p>${all._ ? `<div class="kp-lb-entry"><span class="kp-lb-q">${T('notizAllgemein')}</span><p>${esc(all._).replace(/\n/g, '<br>')}</p></div>` : ''}${others.map(x => `<div class="kp-lb-entry"><span class="kp-lb-q">${esc(plainTitle(pages[x.pi].title || ''))}</span><p>${esc(x.t).replace(/\n/g, '<br>')}</p><button type="button" class="kp-lb-go" data-goto="${x.pi}">${T('zurSeite')} ${x.pi + 1}</button></div>`).join('')}` : ''}`;
+  }
+  // Bedienhilfe (settings.tour, Driver.js): fünf Schritte über die vorhandenen Bedienelemente, einmal von selbst beim ersten
+  // Öffnen (nicht in der Vorschau, nicht unter „Bewegung reduzieren“), danach über den Eintrag im Inhaltsverzeichnis
+  const tourKey = 'kurs-tour-' + (course.id || 'kurs');
+  const tourSeen = () => { try { return !!localStorage.getItem(tourKey); } catch (e) { return true; } };
+  function tourSteps() {
+    const q = sel => root.querySelector(sel);
+    const steps = [];
+    const menu = q('[data-dz-menu]') || q('.kp-head [data-drawer="toc"]') || q('[data-drawer="toc"]');
+    if (menu) steps.push({ element: menu, popover: { title: T('tourMenuTitel'), description: T('tourMenu') } });
+    const next = q('.kp-pagenav [data-next]') || q('[data-footer] [data-next]') || q('[data-next]');
+    if (next) steps.push({ element: next, popover: { title: T('tourWeiterTitel'), description: T('tourWeiter') } });
+    const prog = q('.kp-progress');
+    if (prog && prog.getBoundingClientRect().height > 0) steps.push({ element: prog, popover: { title: T('tourFortschrittTitel'), description: T('tourFortschritt') } });
+    const ai = q('.kp-ai-mark');
+    if (ai) steps.push({ element: ai, popover: { title: T('tourKiTitel'), description: T('tourKi') } });
+    const chip = q('[data-q-chip]');
+    if (chip) steps.push({ element: chip, popover: { title: T('tourZaehlerTitel'), description: T('tourZaehler') } });
+    return steps;
+  }
+  function startTour() {
+    const d = window.driver && (window.driver.js ? window.driver.js.driver : window.driver.driver);
+    if (!d) return false;
+    closeDrawer();
+    const steps = tourSteps();
+    if (!steps.length) return false;
+    try { localStorage.setItem(tourKey, '1'); } catch (e) { /* ohne Speicher */ }
+    d({ showProgress: steps.length > 1, animate: !reducedMotion(), overlayOpacity: .55, stagePadding: 6, stageRadius: 10, allowClose: true,
+      nextBtnText: T('weiter'), prevBtnText: T('zurueck'), doneBtnText: T('tourFertig'), progressText: '{{current}} ' + T('von') + ' {{total}}', popoverClass: 'kp-tour', steps }).drive();
+    return true;
+  }
+  function openDrawer(which) {
+    const d = root.querySelector('#kp-drawer');
+    const titles = { toc: 'Kursinhalt', notes: 'Meine Notizen', glossary: 'Glossar', search: T('suchen'), trainer: T('trTitel'), lernbuch: T('lernbuch') };
+    let body = '';
+    if (which === 'lernbuch') {
+      body = lernbuchBody();
+    } else if (which === 'trainer') {
+      body = trainerDrawerBody();
+    } else if (which === 'search') {
+      body = `<label class="kp-search-box"><span class="kp-sr">${T('suchen')}</span>
+        <input type="search" data-search-input placeholder="${T('suchen')} …" aria-label="${T('suchen')}"></label>
+        <div class="kp-search-res" data-search-res><p class="kp-lock">${esc(T('suchHinweis'))}</p></div>`;
+    } else if (which === 'toc') {
+      const maxOk = unlockedUpTo();
+      let lastChapter = null;
+      body = pages.map((p, i) => {
+        let out = '';
+        const ch = p.chapter || '';
+        if (ch !== lastChapter) { lastChapter = ch; if (ch) out += `<div class="kp-toc-chapter">${esc(ch)}</div>`; }
+        const locked = set.gating && i > maxOk;
+        const mark = state.visited.has(i) ? '✓' : '·';
+        return out + `<button class="kp-toc-item ${i === state.current ? 'current' : ''}" data-goto="${i}" ${locked ? 'disabled' : ''} ${i === state.current ? 'aria-current="page"' : ''}><span class="kp-toc-state" aria-hidden="true">${mark}</span><span>${plainTitle(p.title)}</span></button>`;
+      }).join('');
+      body += '<p style="margin-top:18px"><button class="kp-btn kp-sec" data-print>Zusammenfassung drucken</button></p>';
+      // Am Handy sind die weiteren Knöpfe der Kopfzeile hier erreichbar (die Kopfzeile bleibt einzeilig)
+      const extra = [];
+      const hub = pages.findIndex(x => (x.blocks || []).some(b => b.type === 'chapters'));
+      if (hub >= 0 && hub !== state.current) extra.push(`<button class="kp-iconbtn" data-goto="${hub}">${T('uebersicht')}</button>`);
+      if (set.search !== false && pages.length > 3) extra.push(`<button class="kp-iconbtn" data-drawer="search">${T('suchen')}</button>`);
+      if (set.notes) extra.push(`<button class="kp-iconbtn" data-drawer="notes">${T('notizen')}</button>`);
+      if (set.trainerMode) extra.push(`<button class="kp-iconbtn" data-drawer="trainer">${T('trainer')}</button>`);
+      if ((course.glossary || []).length) extra.push(`<button class="kp-iconbtn" data-drawer="glossary">${T('glossar')}</button>`);
+      if (extra.length) body = `<div class="kp-drawer-tools">${extra.join('')}</div>` + body;
+      // Das eigene Ziel und das Lernbuch stehen oben (unter dem Vollbild): es geht um die Person, nicht nur um die Seiten
+      const lb = lernbuchEntries().length;
+      if (hasLernbuch()) body = `<div class="kp-toc-fs"><button class="kp-btn kp-sec kp-lb-open" data-drawer="lernbuch">${T('lernbuch')}${lb ? ` (${lb})` : ''}</button></div>` + body;
+      body = goalCard('kp-goal-toc') + body;
+      if (set.tour === true && window.driver) body = `<div class="kp-toc-fs"><button class="kp-btn kp-sec" data-tour>${icon('question')} ${T('tour')}</button></div>` + body;
+      if (soundsAllowed()) body = `<div class="kp-toc-fs"><button class="kp-btn kp-sec" data-sounds aria-pressed="${soundsOn()}">${icon(soundsOn() ? 'volume' : 'mute')} ${T(soundsOn() ? 'klangAn' : 'klangAus')}</button></div>` + body;
+      if (fsEnabled()) body = `<div class="kp-toc-fs">${fsButton()}</div>` + body;
+    } else if (which === 'notes') {
+      body = notesBody();
+    } else {
+      body = (course.glossary || []).map(g => `<div class="kp-glossar-term">${esc(g.term)}</div><div class="kp-glossar-def">${esc(g.definition)}</div>`).join('');
+    }
+    d.innerHTML = `<div class="kp-drawer-head"><span>${titles[which]}</span><button data-close-drawer aria-label="Schließen">×</button></div><div class="kp-drawer-body">${body}</div>`;
+    d.classList.add('open');
+    root.querySelector('.kp-backdrop').classList.add('open');
+    root.querySelectorAll('[data-dz-menu]').forEach(m => m.setAttribute('aria-expanded', String(which === 'toc')));
+    const ta = d.querySelector('[data-notes]');
+    if (ta) ta.oninput = () => setNote(state.current, ta.value);
+    const tn = d.querySelector('[data-tr-notes]');
+    if (tn) tn.oninput = () => { try { localStorage.setItem(trainerKey, tn.value); } catch (e) { /* kein Speicher */ } };
+    const si = d.querySelector('[data-search-input]');
+    if (si) si.oninput = () => showSearch(si.value, d.querySelector('[data-search-res]'));
+    (d.querySelector('[data-search-input]') || d.querySelector('.kp-toc-item.current') || d.querySelector('button, textarea')).focus();
+  }
+  // Volltextsuche im Kurs: Seiten und Blöcke mit Fundstelle
+  function searchIndex() {
+    const out = [];
+    pages.forEach((p, i) => {
+      if (p.result) return;
+      (p.blocks || []).forEach(b => {
+        const walk = o => {
+          let s = '';
+          if (Array.isArray(o)) return o.map(walk).join(' ');
+          if (!o || typeof o !== 'object') return '';
+          ['html', 'text', 'title', 'question', 'prompt', 'intro', 'caption', 'name', 'role', 'transcript', 'reveal', 'sub'].forEach(k => { if (typeof o[k] === 'string') s += ' ' + plainText(o[k]); });
+          Object.keys(o).forEach(k => { if (o[k] && typeof o[k] === 'object') s += ' ' + walk(o[k]); });
+          return s;
+        };
+        const text = walk(b).replace(/\s+/g, ' ').trim();
+        if (text) out.push({ page: i, block: b.id, title: String(p.title || '').replace(/\*/g, ''), chapter: p.chapter || '', text });
+      });
+    });
+    return out;
+  }
+  let searchData = null;
+  function showSearch(q, box) {
+    q = String(q || '').trim();
+    if (!box) return;
+    if (q.length < 2) { box.innerHTML = `<p class="kp-lock">${esc(T('suchHinweis'))}</p>`; return; }
+    searchData = searchData || searchIndex();
+    const needle = q.toLowerCase();
+    const hits = searchData.filter(x => x.text.toLowerCase().includes(needle)).slice(0, 30);
+    if (!hits.length) { box.innerHTML = `<p class="kp-lock">${esc(T('keineTreffer'))}</p>`; return; }
+    box.innerHTML = hits.map(h => {
+      const at = h.text.toLowerCase().indexOf(needle);
+      const from = Math.max(0, at - 40);
+      const snip = `${from > 0 ? '… ' : ''}${esc(h.text.slice(from, at))}<mark>${esc(h.text.substr(at, q.length))}</mark>${esc(h.text.slice(at + q.length, at + q.length + 60))} …`;
+      return `<button class="kp-search-hit" data-goto="${h.page}" data-focus-block="${h.block}">
+        <b>${esc(h.title)}</b>${h.chapter ? `<em>${esc(h.chapter)}</em>` : ''}<span>${snip}</span></button>`;
+    }).join('');
+  }
+
+  // Vollbild für Lernende: nur, wo der Browser es erlaubt (im LMS-Rahmen hängt es an allowfullscreen, das iPhone kann kein Seiten-Vollbild)
+  function fsEnabled() { return !!(document.fullscreenEnabled || document.webkitFullscreenEnabled); }
+  // Video im Vollbild: über die Fullscreen-API oder, wo sie fehlt (iPhone), über den Vollbildmodus des Videoelements
+  function vidFsOk() { try { return fsEnabled() || typeof document.createElement('video').webkitEnterFullscreen === 'function'; } catch (e) { return false; } }
+  function videoFullscreen(v) {
+    if (!v) return;
+    const go = v.requestFullscreen || v.webkitRequestFullscreen;
+    if (fsEnabled() && go) { try { const r = go.call(v); if (r && r.catch) r.catch(() => {}); } catch (e) {} }
+    else if (typeof v.webkitEnterFullscreen === 'function') { try { v.webkitEnterFullscreen(); } catch (e) {} }
+    const pl = v.play && v.play(); if (pl && pl.catch) pl.catch(() => {});
+  }
+  function fsActive() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+  const fsLabel = () => `${fsActive() ? T('vollbildAus') : T('vollbild')}<kbd aria-hidden="true">F</kbd>`;
+  const fsButton = () => `<button class="kp-btn kp-sec kp-fs-btn" data-fullscreen aria-pressed="${fsActive()}" aria-keyshortcuts="F">${fsLabel()}</button>`;
+  function toggleFullscreen() {
+    if (!fsEnabled()) return;
+    const el = document.documentElement;
+    try {
+      const p = fsActive() ? (document.exitFullscreen || document.webkitExitFullscreen).call(document) : (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+      if (p && p.catch) p.catch(() => { /* abgelehnt, z. B. ohne Klick */ });
+    } catch (e) { /* Browser ohne Vollbild */ }
+  }
+  // Kurse starten im Vollbild: Browser erlauben es erst nach einer Geste, deshalb beim ersten Klick oder Tastendruck.
+  // Esc oder F11 beenden es; danach bleibt der Kurs im Fenster (einmal je Aufruf, F oder das Inhaltsverzeichnis schalten zurück).
+  // Nicht in der Editor-Vorschau, nicht im LMS-Rahmen ohne allowfullscreen, nicht, wenn der Browser schon per F11 bildschirmfüllend ist.
+  if (!opts.renderer && !opts.preview && set.fullscreen !== false) {
+    const fsStop = () => { document.removeEventListener('click', fsStart, true); document.removeEventListener('keydown', fsStart, true); };
+    const fsStart = e => {
+      if (e.type === 'keydown' && (/^(Escape|F11|Tab|Shift|Control|Alt|Meta|AltGraph|CapsLock|f|F)$/.test(e.key) || e.ctrlKey || e.metaKey || e.altKey)) return;
+      const sc = window.screen || {};
+      if (fsActive() || !fsEnabled() || (sc.height && window.innerHeight >= sc.height - 2 && window.innerWidth >= sc.width - 2)) return fsStop();
+      const el = document.documentElement;
+      try {
+        const p = (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+        // Abgelehnt (keine echte Geste): beim nächsten Klick noch einmal
+        if (p && p.then) p.then(fsStop, () => { /* nächster Versuch */ }); else fsStop();
+      } catch (err) { fsStop(); }
+    };
+    document.addEventListener('click', fsStart, true);
+    document.addEventListener('keydown', fsStart, true);
+  }
+  function toggleNav() {
+    navShut = !navShut;
+    document.documentElement.classList.toggle('kp-nav-zu', navShut);
+    // Oben und unten wird neu gezeichnet, damit das KI-Kennzeichen aus der Leiste nach unten links wandert; dann Höhen neu messen
+    if (navPos !== 'links') { render(); root.querySelector('[data-nav-toggle]')?.focus({ preventScroll: true }); }
+    measureNav();
+    try { localStorage.setItem(navKey, navShut ? 'zu' : 'auf'); } catch (e) { /* kein Speicher */ }
+    root.querySelectorAll('[data-nav-toggle]').forEach(b => { b.setAttribute('aria-expanded', String(!navShut)); b.setAttribute('aria-label', T(navShut ? 'leisteAuf' : 'leisteZu')); b.title = T(navShut ? 'leisteAuf' : 'leisteZu'); });
+  }
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(ev => document.addEventListener(ev, () => {
+    root.querySelectorAll('[data-fullscreen]').forEach(b => { b.innerHTML = fsLabel(); b.setAttribute('aria-pressed', String(fsActive())); });
+  }));
+
+  function closeDrawer() {
+    const d = root.querySelector('#kp-drawer');
+    if (!d || !d.classList.contains('open')) return;
+    d.classList.remove('open');
+    root.querySelector('.kp-backdrop').classList.remove('open');
+    root.querySelectorAll('[data-dz-menu]').forEach(m => m.setAttribute('aria-expanded', 'false'));
+  }
+
+  function printSummary() {
+    const css = Array.from(document.querySelectorAll('style')).map(s => s.textContent).join('\n');
+    const parts = course.pages.map(p => `<div class="kp-print-page">${p.hideTitle ? `<h1>${plainTitle(p.title)}</h1>` : ''}${renderPage(p)}</div>`).join('');
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>${esc(course.title)}</title><style>${css}</style></head><body><main class="kp-main"><p class="kp-label">${esc(course.title)}</p>${parts}</main></body></html>`);
+    w.document.close();
+    w.document.querySelectorAll('.fx-reveal').forEach(el => el.classList.add('fx-in'));
+    w.document.querySelectorAll('details').forEach(el => { el.open = true; });
+    setTimeout(() => w.print(), 400);
+  }
+
+  // ---------- Kommentarmodus für Fachexperten (Review-Version) ----------
+  const reviewKey = 'kurs-review-' + (course.id || 'kurs');
+  function reviewList() { try { return JSON.parse(localStorage.getItem(reviewKey) || '[]'); } catch (e) { return []; } }
+  function reviewPanelHtml() {
+    const p = pages[state.current];
+    const mine = reviewList().filter(c => c.pageId === p.id);
+    let name = '';
+    try { name = localStorage.getItem('kurs-review-name') || ''; } catch (e) { /* kein Speicher */ }
+    return `<div class="kp-review-mode">
+      <div class="kp-review-panel" data-review-panel hidden>
+        <strong>Kommentar zu „${plainTitle(p.title)}“</strong>
+        ${mine.map(c => `<div class="kp-rc"><b>${esc(c.name)}:</b> ${esc(c.text)}</div>`).join('')}
+        <input type="text" data-review-name placeholder="Dein Name" value="${esc(name)}">
+        <textarea data-review-text rows="3" placeholder="Was soll geändert werden?"></textarea>
+        <button class="kp-btn" data-review-save>Kommentar speichern</button>
+        <button class="kp-btn kp-sec" data-review-export>Alle Kommentare als Datei speichern (${reviewList().length})</button>
+      </div>
+      <button class="kp-btn" data-review-toggle>Kommentar${mine.length ? ` (${mine.length})` : ''}</button>
+    </div>`;
+  }
+
+  // Für die Code-Ansicht im Editor: nur den Baukasten zurückgeben
+  if (opts.renderer) {
+    drawPools(false);
+    buildItems();
+    return { renderBlock, avatarSvg, icon, ICONS, UI_DE };
+  }
+
+  // ---------- Bedienung ----------
+  function collectAnswer(q, box) {
+    if (q.kind === 'fill') {
+      const vals = Array.from(box.querySelectorAll('[data-blank]')).map(i => i.value);
+      return vals.some(v => v.trim()) ? vals : null;
+    }
+    if (q.kind === 'numeric') { const el = box.querySelector('[data-num]'); return el && numVal(el.value) != null ? [el.value.trim()] : null; }
+    if (q.kind === 'match' && q.look === 'linien') {
+      const sel = Array.from(box.querySelectorAll('[data-ml-left]')).map(el => Number(el.dataset.to));
+      return sel.some(v => v >= 0) ? sel : null;
+    }
+    if (q.kind === 'order') return Array.from(box.querySelectorAll('.kp-order-item')).map(el => Number(el.dataset.item));
+    if (q.kind === 'claims') { const v = (q.claims || []).map((x, i) => { const r = box.querySelector(`input[name="cl-${q.id}-${i}"]:checked`); return r ? Number(r.value) : -1; }); return v.length && v.every(x => x >= 0) ? v : null; }
+    if (q.kind === 'pins') { const at = pinsAt[q.id] || []; return (q.pins || []).length && (q.pins || []).every((p, i) => at[i] >= 0) ? at.slice(0, q.pins.length) : null; }
+    if (q.kind === 'match' && q.dragdrop) {
+      const drops = Array.from(box.querySelectorAll('[data-mdd-drop]'));
+      const sel = drops.map(d => {
+        const c = d.querySelector('[data-mdd-card]');
+        return c ? Number(c.dataset.mddCard) : -1;
+      });
+      return sel.some(v => v >= 0) ? sel : null;
+    }
+    if (q.kind === 'match') {
+      const sel = Array.from(box.querySelectorAll('[data-match]')).map(s => Number(s.value));
+      return sel.some(v => v >= 0) ? sel : null;
+    }
+    const given = Array.from(box.querySelectorAll(`input[name="q-${q.id}"]:checked`)).map(i => Number(i.value));
+    return given.length ? given.sort((x, y) => x - y) : null;
+  }
+
+  // Einschätzung vorher: nur Übungsfragen; bewertete Fragen behalten die Abfrage nach der Antwort, die Punkte ändern sich nie
+  function confBefore(q, isGraded) {
+    if (set.confidence !== 'vorher' || isGraded || q.kind === 'hotspot' || /~resume$/.test(q.id)) return false;
+    const it = items.find(x => x.id === q.id);
+    return !(it && it.pretest); // der Einstiegstest misst nur, er braucht keinen Zwischenschritt
+  }
+  function confTopic(q) {
+    if (q.topic) return q.topic;
+    const it = items.find(x => x.id === q.id);
+    const pg = it ? pages[it.pageIndex] : null;
+    return pg ? (pg.chapter || String(pg.title || '').replace(/\*/g, '')) : T('dieseFrage');
+  }
+  // Rückblick: wie gut lag die Einschätzung vor den Übungsfragen? (Ergebnisseite)
+  function confReview() {
+    if (set.confidence !== 'vorher') return '';
+    const rated = items.filter(it => it.q && !it.graded && confBefore(it.q, false) && state.conf[it.id] != null && state.answers[it.id] != null);
+    if (!rated.length) return '';
+    const over = [], under = [];
+    rated.forEach(it => {
+      const c = state.conf[it.id], ok = evaluate(it.q, state.answers[it.id]) >= 1;
+      if (c === 2 && !ok) over.push(confTopic(it.q));
+      if (c === 0 && ok) under.push(confTopic(it.q));
+    });
+    const fit = rated.length - over.length - under.length;
+    const list = a => [...new Set(a)].map(esc).join(', ');
+    return `<div class="kp-note kp-conf-review" data-conf-review><span class="kp-label">${T('selbsteinschaetzung')}</span>
+      <p>${T('eingeschaetztPassend').replace('{n}', fit).replace('{m}', rated.length)}</p>
+      ${over.length ? `<p data-conf-over><b>${T('ueberschaetzt')}:</b> ${list(over)}</p>` : ''}
+      ${under.length ? `<p data-conf-under><b>${T('unterschaetzt')}:</b> ${list(under)}</p>` : ''}</div>`;
+  }
+
+  function needsConf(q, box) {
+    if (!(q.confidence || set.confidence)) return false;
+    if (state.conf[q.id] != null && set.confidence === 'vorher') return false;
+    const c = box.querySelector(`input[name="c-${q.id}"]:checked`);
+    if (c) { state.conf[q.id] = Number(c.value); return false; }
+    const msg = box.querySelector('[data-conf-msg]');
+    if (msg) msg.textContent = T('wieSicher');
+    return true;
+  }
+
+  function answer(q, a, box) {
+    state.answers[q.id] = a;
+    state.tries[q.id] = (state.tries[q.id] || 0) + 1;
+    state.took[q.id] = (Date.now() - (state.seen[q.id] || Date.now())) / 1000;
+    const found = findQuestion(q.id);
+    refreshBlock(box, renderQuiz(q, found ? found.graded : true));
+    klangNachAntwort(q.id);
+    if (q.kind === 'multiple' && q.look === 'regal') { regalClosed.delete(q.id); const c = root.querySelector(`[data-quiz="${q.id}"] .kp-regal-card`); if (c) c.focus({ preventScroll: true }); return; }
+    // Richtige Antwort handgezeichnet einkreisen (eine Antwort), unterstreichen (mehrere), Zahl einrahmen
+    if (notationOn()) {
+      const fresh = root.querySelector(`[data-quiz="${q.id}"]`);
+      if (!fresh || !fresh.querySelector('.kp-feedback.ok')) return;
+      const rights = [...fresh.querySelectorAll('.kp-answer.kp-right, .kp-numeric input.kp-right')];
+      setTimeout(() => rights.forEach((el, i) => notate(el, rights.length === 1 ? (el.tagName === 'INPUT' ? 'box' : 'circle') : 'underline', { animationDelay: i * 150 })), 120);
+    }
+  }
+
+  function download(name, text) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 500);
+  }
+
+  // Level-Spiele melden ihr Ergebnis per postMessage; nur Nachrichten aus den eigenen Spielrahmen zählen
+  window.addEventListener('message', e => {
+    const d = e.data;
+    // Aufnahme im Editor: Szene von vorn wie ein Video abspielen
+    if (d && d.type === 'kurs-film-start' && d.id) {
+      const b = findBlock(d.id);
+      if (!b || b.type !== 'dialog') return;
+      state.dlg[b.id] = 0; filmAuto.add(b.id);
+      const el = root.querySelector(`[data-block="${b.id}"]`);
+      if (el) el.scrollIntoView({ block: 'center' });
+      setTimeout(() => dialogStep(b), 400);
+      return;
+    }
+    // Eigene Interaktion: Höhe anpassen und „fertig“ übernehmen, nur aus dem eigenen Rahmen
+    if (d && d.kurs === 'interaktion') {
+      const frame = Array.from(root.querySelectorAll('iframe[data-ia-frame]')).find(f => f.contentWindow === e.source);
+      if (!frame || d.id !== frame.dataset.iaFrame) return;
+      const b = findBlock(frame.dataset.iaFrame);
+      if (!b) return;
+      if (d.h) frame.style.height = Math.max(60, Math.min(4000, Math.ceil(Number(d.h) || 0))) + 'px';
+      if (d.fertig) {
+        const st = state.self[b.id] || (state.self[b.id] = {});
+        const w = typeof d.wert === 'number' && isFinite(d.wert) ? Math.max(0, Math.min(1, d.wert)) : null;
+        st.done = 1;
+        if (w != null) st.s = st.s == null ? w : Math.max(st.s, w);
+        const ok = frame.closest('[data-ia]').querySelector('[data-ia-done]');
+        if (ok) ok.hidden = false;
+        updateConditions(); renderFooter(); report();
+      }
+      return;
+    }
+    if (!d || d.type !== 'minimission:complete' || !d.detail) return;
+    const frame = Array.from(root.querySelectorAll('iframe[data-game]')).find(f => f.contentWindow === e.source);
+    if (!frame || d.detail.id !== frame.dataset.game) return;
+    const r = { ok: d.detail.skipped ? 0 : 1, e: Number(d.detail.errors) || 0, r: d.detail.revealed ? 1 : 0, k: d.detail.skipped ? 1 : 0 };
+    const all = state.self.mm || {};
+    if (missionRank(r) >= missionRank(all[frame.dataset.game])) all[frame.dataset.game] = r;
+    state.self.mm = all;
+    renderFooter();
+    report();
+  });
+
+  // Matrix: gesetzte Nummern ziehen (Maus, Finger) oder mit den Pfeiltasten schieben
+  let mxDragged = false;
+  root.addEventListener('pointerdown', e => {
+    const d = e.target.closest && e.target.closest('[data-mx-dot]');
+    if (!d || e.button > 0) return;
+    const field = d.closest('[data-mx-field]'), b = findBlock(d.dataset.block), i = Number(d.dataset.mxDot);
+    const st = state.self[b.id]; if (!field || !st || !st.p || !st.p[i]) return;
+    const r = field.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
+    let moved = false, pos = st.p[i];
+    try { d.setPointerCapture(e.pointerId); } catch (err) { /* ohne Capture */ }
+    const move = ev => {
+      if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
+      moved = true;
+      pos = [Math.round(Math.max(2, Math.min(98, (ev.clientX - r.left) / r.width * 100))), Math.round(Math.max(2, Math.min(98, 100 - (ev.clientY - r.top) / r.height * 100)))];
+      d.style.left = pos[0] + '%'; d.style.top = (100 - pos[1]) + '%';
+    };
+    const up = () => {
+      d.removeEventListener('pointermove', move); d.removeEventListener('pointerup', up); d.removeEventListener('pointercancel', up);
+      if (!moved) return;
+      mxDragged = true; setTimeout(() => { mxDragged = false; }, 0);
+      st.p[i] = pos; report();
+      refreshBlock(d.closest('[data-matrix]'), renderMatrix(b));
+    };
+    d.addEventListener('pointermove', move); d.addEventListener('pointerup', up); d.addEventListener('pointercancel', up);
+  });
+  root.addEventListener('keydown', e => {
+    const d = e.target.closest && e.target.closest('[data-mx-dot]');
+    const dir = { ArrowLeft: [-2, 0], ArrowRight: [2, 0], ArrowUp: [0, 2], ArrowDown: [0, -2] }[e.key];
+    if (!d || !dir) return;
+    e.preventDefault();
+    const b = findBlock(d.dataset.block), i = Number(d.dataset.mxDot), st = state.self[b.id];
+    if (!st || !st.p || !st.p[i]) return;
+    st.p[i] = [Math.max(2, Math.min(98, st.p[i][0] + dir[0])), Math.max(2, Math.min(98, st.p[i][1] + dir[1]))];
+    d.style.left = st.p[i][0] + '%'; d.style.top = (100 - st.p[i][1]) + '%';
+    report();
+  });
+  root.addEventListener('click', e => {
+    const t = e.target;
+    // Code-Schloss: Stelle hoch oder runter, öffnen, Hinweis auf Abruf
+    const lockStep = t.closest('[data-lock-step]');
+    if (lockStep) {
+      const inp = lockStep.closest('.kp-lock-dial').querySelector('[data-lock-digit]');
+      const v = /^\d$/.test(inp.value) ? Number(inp.value) : (Number(lockStep.dataset.lockStep) > 0 ? -1 : 10);
+      inp.value = String((v + Number(lockStep.dataset.lockStep) + 10) % 10);
+      return;
+    }
+    const lockBtn = t.closest('[data-lock-try]');
+    if (lockBtn) return lockTry(lockBtn.closest('[data-schloss]'));
+    const lockHint = t.closest('[data-lock-hint]');
+    if (lockHint) {
+      const b = findBlock(lockHint.dataset.lockHint);
+      (state.self[b.id] || (state.self[b.id] = { tries: 0 })).hint = true;
+      const help = lockHint.closest('[data-lock-help]');
+      help.innerHTML = lockHelpHtml(b);
+      const h = help.querySelector('[data-lock-hinttext]'); if (h) h.focus();
+      report();
+      return;
+    }
+    // Wahlbrett: Aufgabe aufklappen, als erledigt markieren, schließen
+    const wbTile = t.closest('[data-wb]');
+    if (wbTile) {
+      const b = findBlock(wbTile.dataset.wb), i = Number(wbTile.dataset.i);
+      if (wbOpen[b.id] === i) { delete wbOpen[b.id]; wbRefresh(b, `[data-wb-tile="${i}"]`); } else { wbOpen[b.id] = i; wbRefresh(b, '[data-wb-panel]'); }
+      return;
+    }
+    const wbDoneBtn = t.closest('[data-wb-done]');
+    if (wbDoneBtn) {
+      const b = findBlock(wbDoneBtn.dataset.wbDone), i = Number(wbDoneBtn.dataset.i);
+      const st = state.self[b.id] || (state.self[b.id] = { d: [] });
+      st.d = st.d || [];
+      if (!st.d.includes(i)) st.d.push(i);
+      delete wbOpen[b.id];
+      wbRefresh(b, `[data-wb-tile="${i}"]`);
+      return;
+    }
+    const wbClose = t.closest('[data-wb-close]');
+    if (wbClose) {
+      const b = findBlock(wbClose.dataset.wbClose), i = Number(wbClose.dataset.i);
+      delete wbOpen[b.id];
+      wbRefresh(b, `[data-wb-tile="${i}"]`);
+      return;
+    }
+    // Regal: Ergebniskarte schließen (bei richtiger Wahl weiter zur nächsten Seite) oder wieder zeigen
+    const rgClose = t.closest('[data-regal-close]');
+    if (rgClose) {
+      const id = rgClose.dataset.regalClose, box = rgClose.closest('[data-quiz]');
+      regalClosed.add(id);
+      const r = box && box.querySelector('[data-regal-result]'); if (r) r.hidden = true;
+      if (rgClose.dataset.regalGo === '1' && state.current < pages.length - 1 && !blockedHere()) return go(nextIndex());
+      const sh = box && box.querySelector('[data-regal-show]'); if (sh) sh.focus();
+      return;
+    }
+    const rgShow = t.closest('[data-regal-show]');
+    if (rgShow) {
+      regalClosed.delete(rgShow.dataset.regalShow);
+      const r = rgShow.closest('[data-quiz]').querySelector('[data-regal-result]');
+      if (r) { r.hidden = false; const c = r.querySelector('.kp-regal-card'); if (c) c.focus(); }
+      return;
+    }
+    // Mappe öffnen oder schließen: wer sie einmal geöffnet hat, hat die Unterlage gesehen (blockDone)
+    const mpBtn = t.closest('[data-mappe-open]');
+    if (mpBtn) {
+      const b = findBlock(mpBtn.dataset.mappeOpen);
+      const st = state.self[b.id] = Object.assign({}, state.self[b.id]);
+      st.o = !st.o; if (st.o) { st.r = true; uiSound('aufdecken'); }
+      refreshBlock(mpBtn.closest('[data-mappe]'), renderMappe(b));
+      const f = root.querySelector(st.o ? `[data-mappe="${b.id}"] .kp-mappe-doc` : `[data-mappe-open="${b.id}"]`); if (f) f.focus();
+      report(); updateConditions(); renderFooter();
+      return;
+    }
+    // Videopaar: Clip abspielen (eigener Knopf) oder Szene wählen; erst danach stehen Haken, Kreuz und Erklärung da
+    const vpPlay = t.closest('[data-vp-play]');
+    if (vpPlay) {
+      const v = vpPlay.closest('.kp-vp-media').querySelector('video');
+      if (v) { root.querySelectorAll('video').forEach(x => { if (x !== v) x.pause(); }); if (v.paused) v.play().catch(() => {}); else v.pause(); }
+      return;
+    }
+    const vpPick = t.closest('[data-vp-pick]');
+    if (vpPick) {
+      const el = vpPick.closest('[data-vp]'), b = findBlock(el.dataset.vp);
+      state.self[b.id] = Object.assign({}, state.self[b.id], { v: Number(vpPick.dataset.vpPick) });
+      const good = (b.items || [])[state.self[b.id].v] || {};
+      uiSound(good.good ? 'richtig' : 'falsch');
+      refreshBlock(el, renderVideopaar(b));
+      const f = root.querySelector(`[data-vp="${b.id}"] [data-vp-fb]`); if (f) f.focus();
+      report(); updateConditions(); renderFooter();
+      return;
+    }
+    // Merkkarte umdrehen: sie landet im Kartenstapel
+    const mkcFlip = t.closest('[data-mkc-flip]');
+    if (mkcFlip) {
+      const b = findBlock(mkcFlip.dataset.mkcFlip);
+      state.self[b.id] = Object.assign({}, state.self[b.id], { o: true });
+      uiSound('aufdecken');
+      refreshBlock(mkcFlip.closest('[data-mkc]'), renderMerkkarte(b));
+      const f = root.querySelector(`[data-mkc="${b.id}"] .kp-mkc-back`); if (f) f.focus();
+      report(); updateConditions(); renderFooter();
+      return;
+    }
+    // Kartenstapel: starten, umdrehen, gewusst/noch nicht, neu
+    const deckBtn = t.closest('[data-deck-start], [data-deck-flip], [data-deck-rate], [data-deck-restart]');
+    if (deckBtn) {
+      const el = deckBtn.closest('[data-deck]'), b = findBlock(el.dataset.deck);
+      let st = state.self[b.id] || (state.self[b.id] = {});
+      let focus = '.kp-mkc-front';
+      if (deckBtn.hasAttribute('data-deck-start')) Object.assign(st, { q: deckCards(b).map(c => c.id), r: {}, seen: [], flip: false, done: false });
+      else if (deckBtn.hasAttribute('data-deck-flip')) { st.flip = true; focus = '.kp-mkc-back'; }
+      else if (deckBtn.hasAttribute('data-deck-restart')) { st = state.self[b.id] = {}; focus = '[data-deck-start]'; }
+      else {
+        const v = Number(deckBtn.dataset.deckRate), id = st.q.shift();
+        if (st.r[id] == null) st.r[id] = v;
+        st.seen = [id].concat((st.seen || []).filter(x => x !== id));
+        if (v === 0) st.q.push(id);
+        st.flip = false;
+        if (!st.q.length) { st.done = true; focus = '.kp-deck-done'; }
+      }
+      refreshBlock(el, renderKartenstapel(b));
+      const f = root.querySelector(`[data-deck="${b.id}"] ${focus}`); if (f) f.focus();
+      report(); updateConditions(); renderFooter();
+      return;
+    }
+    // Formular: Kopfzeile füllt die Zeile und zeigt die Erklärung
+    const formRow = t.closest('[data-form-row]');
+    if (formRow) {
+      const b = findBlock(formRow.dataset.block), i = Number(formRow.dataset.formRow);
+      const st = state.self[b.id] || (state.self[b.id] = { f: [] });
+      st.f = st.f || [];
+      if (!st.f.includes(i)) st.f.push(i);
+      st.last = i;
+      refreshBlock(formRow.closest('[data-form]'), renderFormular(b));
+      const f = root.querySelector(`[data-form="${b.id}"] [data-form-row="${i}"]`); if (f) f.focus();
+      report(); updateConditions(); renderFooter();
+      return;
+    }
+    const formPrint = t.closest('[data-form-print]');
+    if (formPrint) {
+      const b = findBlock(formPrint.dataset.formPrint);
+      printWindow(plainText(b.docTitle) || plainText(b.title) || T('formDrucken'), `body { font-family: ${theme.font || 'Segoe UI, sans-serif'}; color: #1d2530; max-width: 760px; margin: 30px auto; padding: 0 20px; }
+        table { width: 100%; border-collapse: collapse; } caption { text-align: left; font-size: 20px; font-weight: 700; margin-bottom: 10px; } .kp-form-meta { display: block; font-size: 13px; font-weight: 400; color: #555; }
+        th, td { text-align: left; vertical-align: top; border: 1px solid #c9ced6; padding: 8px 10px; } th { width: 30%; background: #f3f5f8; } p { margin: 0 0 4px; }`, formTable(b, true));
+      return;
+    }
+    // Stellen im Text finden
+    const mkS = t.closest('[data-mk-s]');
+    if (mkS) {
+      const b = findBlock(mkS.dataset.block);
+      const st = state.self[b.id] || (state.self[b.id] = { m: [] });
+      st.m = st.m || [];
+      const i = Number(mkS.dataset.mkS), k = st.m.indexOf(i);
+      if (k >= 0) st.m.splice(k, 1); else st.m.push(i);
+      mkS.classList.toggle('is-on', k < 0); mkS.setAttribute('aria-pressed', k < 0 ? 'true' : 'false');
+      const c = mkS.closest('[data-markieren]').querySelector('[data-mk-count]');
+      if (c) c.textContent = mkCount(b);
+      report(); updateConditions(); renderFooter();
+      return;
+    }
+    const mkDone = t.closest('[data-mk-done]');
+    if (mkDone) {
+      const b = findBlock(mkDone.dataset.mkDone);
+      const st = state.self[b.id] || (state.self[b.id] = { m: [] });
+      st.done = true; report();
+      refreshBlock(mkDone.closest('[data-markieren]'), renderMarkieren(b));
+      const f = root.querySelector(`[data-markieren="${b.id}"] .kp-mk-after`); if (f) { f.tabIndex = -1; f.focus(); }
+      return;
+    }
+    const ftSpot = t.closest('[data-ft-spot]');
+    if (ftSpot) {
+      const b = findBlock(ftSpot.dataset.block);
+      const st = state.self[b.id] || (state.self[b.id] = { hit: [] });
+      const i = Number(ftSpot.dataset.ftSpot);
+      if (!st.hit.includes(i)) st.hit.push(i);
+      report();
+      return refreshBlock(ftSpot.closest('[data-findtext]'), renderFindText(b));
+    }
+    const ftReset = t.closest('[data-ft-reset]');
+    if (ftReset) {
+      const b = findBlock(ftReset.dataset.ftReset);
+      state.self[b.id] = { hit: [] };
+      report();
+      return refreshBlock(ftReset.closest('[data-findtext]'), renderFindText(b));
+    }
+    // Anfrage aufbauen
+    const pbAdd = t.closest('[data-pb-add]');
+    if (pbAdd) {
+      const b = findBlock(pbAdd.dataset.block);
+      const st = state.self[b.id] || (state.self[b.id] = { taken: [] });
+      const i = Number(pbAdd.dataset.pbAdd);
+      if (!st.taken.includes(i)) st.taken.push(i);
+      report();
+      return refreshBlock(pbAdd.closest('[data-promptbuild]'), renderPromptBuild(b));
+    }
+    const pbReset = t.closest('[data-pb-reset]');
+    if (pbReset) {
+      const b = findBlock(pbReset.dataset.pbReset);
+      state.self[b.id] = { taken: [] };
+      report();
+      return refreshBlock(pbReset.closest('[data-promptbuild]'), renderPromptBuild(b));
+    }
+    // Fragen an die Figur: Frage stellen, die Antwort erscheint im Verlauf, der Fokus springt auf sie
+    const askQ = t.closest('[data-ask-q]');
+    if (askQ) {
+      const b = findBlock(askQ.dataset.block);
+      const st = state.self[b.id] || (state.self[b.id] = { asked: [] });
+      st.asked = st.asked || [];
+      const i = Number(askQ.dataset.askQ);
+      if (!st.asked.includes(i)) st.asked.push(i);
+      refreshBlock(askQ.closest('[data-fragen]'), renderFragen(b));
+      const box = root.querySelector(`[data-fragen="${b.id}"]`);
+      const log = box && box.querySelector('.kp-ask-log');
+      if (log) log.scrollTop = log.scrollHeight;
+      const neu = box && box.querySelector('[data-ask-last]');
+      if (neu) { neu.tabIndex = -1; neu.focus({ preventScroll: true }); }
+      return;
+    }
+    // Chat: Antwort wählen; ein Fehlversuch (retry) zeigt die Reaktion und lässt neu wählen
+    const chatPick = t.closest('[data-chat-pick]');
+    if (chatPick) {
+      const b = findBlock(chatPick.dataset.block);
+      const st = state.self[b.id] || (state.self[b.id] = { n: 0, pick: {}, tried: {} });
+      st.pick = st.pick || {}; st.tried = st.tried || {};
+      const n = Number(st.n) || 0, i = Number(chatPick.dataset.chatPick);
+      const o = (((b.turns || [])[n] || {}).options || [])[i] || {};
+      if (o.retry) (st.tried[n] = st.tried[n] || []).push(i);
+      else { st.pick[n] = i; st.n = n + 1; }
+      chatFresh = b.id;
+      refreshBlock(chatPick.closest('[data-chat]'), renderChat(b));
+      chatFresh = null;
+      const log = root.querySelector(`[data-chat="${b.id}"] .kp-chat-log`);
+      if (log) log.scrollTop = log.scrollHeight;
+      return;
+    }
+    // Stimme in der Begleitfigur-Karte: Play/Pause, Balken fuellen sich mit der Zeit
+    const gaPlay = t.closest('[data-ga-play]');
+    if (gaPlay) {
+      const box = gaPlay.closest('[data-guide-audio]');
+      const media = box.querySelector('audio');
+      if (!media.paused) { media.pause(); return; }
+      root.querySelectorAll('[data-guide-audio] audio').forEach(a => { if (a !== media) a.pause(); });
+      stopSound();
+      media.volume = audioPrefs.vol; media.playbackRate = audioPrefs.rate;
+      media.play().catch(() => {});
+      return;
+    }
+    // Flipcard-Karussell: blaettern, ohne den Block neu zu zeichnen (umgedrehte Karten bleiben umgedreht)
+    // Team als Karussell: Pfeil, Punkt oder Nachbarkarte bewegen die Spur, ohne neu zu zeichnen
+    const tcStep = t.closest('[data-tc-step], [data-tc-go]');
+    if (tcStep && (tcStep.dataset.team || tcStep.dataset.tcStep)) {
+      const id = tcStep.dataset.team || tcStep.dataset.tcStep, box = tcStep.closest('[data-team-car]');
+      const cards = [...box.querySelectorAll('.kp-tc-card')];
+      const st = state.self[id] = state.self[id] || {};
+      const cur = Math.max(0, Math.min(cards.length - 1, Number(st.at) || 0));
+      const want = tcStep.dataset.tcStep ? cur + Number(tcStep.dataset.dir) : Number(tcStep.dataset.tcGo);
+      const at = Math.max(0, Math.min(cards.length - 1, want));
+      if (at === cur && !tcStep.dataset.tcStep) return;
+      st.at = at; st.seen = st.seen || []; if (!st.seen.includes(at)) st.seen.push(at);
+      box.querySelector('.kp-tc-track').style.setProperty('--at', at);
+      cards.forEach((c, i) => { c.classList.toggle('on', i === at); if (i === at) c.removeAttribute('aria-hidden'); else c.setAttribute('aria-hidden', 'true'); });
+      box.querySelectorAll('.kp-tc-dot').forEach((d, i) => { if (i === at) d.setAttribute('aria-current', 'true'); else d.removeAttribute('aria-current'); });
+      box.querySelectorAll('[data-tc-step]').forEach(x => { x.disabled = x.dataset.dir === '-1' ? at === 0 : at >= cards.length - 1; });
+      const pos = box.querySelector('[data-tc-pos]'); if (pos) pos.textContent = `${at + 1} ${T('von')} ${cards.length}`;
+      if (tcStep.disabled) { const other = box.querySelector(`[data-tc-step]:not(:disabled)`); if (other) other.focus({ preventScroll: true }); }
+      updateConditions(); renderFooter(); report();
+      return;
+    }
+    const fcStep = t.closest('[data-fc-step]');
+    if (fcStep) {
+      const b = findBlock(fcStep.dataset.fcStep);
+      const box = fcStep.closest('[data-flipcar]');
+      const cards = [...box.querySelectorAll('.kp-flip')];
+      const st = state.self[b.id] || (state.self[b.id] = {});
+      const at = Math.max(0, Math.min(cards.length - 1, (Number(st.at) || 0) + Number(fcStep.dataset.dir)));
+      st.at = at;
+      cards.forEach((c, i) => c.classList.toggle('on', i === at));
+      const pos = box.querySelector('[data-fc-pos]'); if (pos) pos.textContent = `${at + 1} ${T('von')} ${cards.length}`;
+      const bar = box.querySelector('.kp-flipcar-bar b'); if (bar) bar.style.width = Math.round((at + 1) / cards.length * 100) + '%';
+      box.querySelectorAll('[data-fc-step]').forEach(x => { x.disabled = x.dataset.dir === '-1' ? at === 0 : at >= cards.length - 1; });
+      cards[at].focus({ preventScroll: true });
+      return;
+    }
+    const chatReset = t.closest('[data-chat-reset]');
+    if (chatReset) {
+      const b = findBlock(chatReset.dataset.chatReset);
+      state.self[b.id] = { n: 0, pick: {}, tried: {} };
+      chatSeen.delete(b.id);
+      return refreshBlock(chatReset.closest('[data-chat]'), renderChat(b));
+    }
+    // Matrix: Begriff wählen, dann in die Fläche klicken oder ein Feld per Knopf wählen (Weg ohne Maus)
+    const mxBox = t.closest('[data-matrix]');
+    if (mxBox) {
+      const b = findBlock(mxBox.dataset.matrix);
+      const st = state.self[b.id] || (state.self[b.id] = { p: {} });
+      st.p = st.p || {};
+      const items = b.items || [];
+      const next = () => { const k = items.findIndex((x, i) => !st.p[i]); st.sel = k >= 0 ? k : null; };
+      const redraw = () => refreshBlock(mxBox, renderMatrix(b));
+      const selBtn = t.closest('[data-mx-sel]');
+      if (selBtn) { st.sel = Number(selBtn.dataset.mxSel); return redraw(); }
+      const dotBtn = t.closest('[data-mx-dot]');
+      if (dotBtn) { if (mxDragged) { mxDragged = false; return; } st.sel = Number(dotBtn.dataset.mxDot); redraw(); const f = root.querySelector(`[data-matrix="${b.id}"] [data-mx-dot="${st.sel}"]`); if (f) f.focus(); return; }
+      if (t.closest('[data-mx-cmp]')) { st.cmp = true; return redraw(); }
+      if (t.closest('[data-mx-reset]')) { state.self[b.id] = { p: {}, sel: 0 }; return redraw(); }
+      const cur = st.sel != null && items[st.sel] ? st.sel : items.findIndex((x, i) => !st.p[i]);
+      const qBtn = t.closest('[data-mx-q]');
+      if (qBtn && cur >= 0 && !st.cmp) {
+        const c = MX_Q[Number(qBtn.dataset.mxQ)], j = ((cur % 3) - 1) * 7;
+        st.p[cur] = [c[0] + j, c[1] - j];
+        next(); return redraw();
+      }
+      const field = t.closest('[data-mx-field]');
+      if (field && cur >= 0 && !st.cmp) {
+        const r = field.getBoundingClientRect();
+        const x = Math.round(Math.max(2, Math.min(98, (e.clientX - r.left) / r.width * 100)));
+        const y = Math.round(Math.max(2, Math.min(98, 100 - (e.clientY - r.top) / r.height * 100)));
+        st.p[cur] = [x, y];
+        next(); return redraw();
+      }
+    }
+    // Stück für Stück entscheiden
+    const triPick = t.closest('[data-tri-pick]');
+    if (triPick) {
+      const b = findBlock(triPick.dataset.block);
+      const st = state.self[b.id] || (state.self[b.id] = { d: {}, cur: 0 });
+      st.cur = Number(triPick.dataset.triPick);
+      report();
+      return refreshBlock(triPick.closest('[data-triage]'), renderTriage(b));
+    }
+    const triGo = t.closest('[data-tri-go]');
+    if (triGo) {
+      const b = findBlock(triGo.dataset.block);
+      const st = state.self[b.id] || (state.self[b.id] = { d: {}, cur: 0 });
+      const val = triGo.dataset.triGo;
+      st.d[Number(triGo.dataset.i)] = /^\d+$/.test(val) ? Number(val) : val; // Index bei mehreren Möglichkeiten, sonst j/n
+      st.cur = Number(triGo.dataset.i);
+      report();
+      return refreshBlock(triGo.closest('[data-triage]'), renderTriage(b));
+    }
+    const triNext = t.closest('[data-tri-next]');
+    if (triNext) {
+      const b = findBlock(triNext.dataset.triNext);
+      const st = state.self[b.id] || (state.self[b.id] = { d: {}, cur: 0 });
+      const offen = (b.items || []).map((x, i) => i).filter(i => st.d[i] == null);
+      st.cur = offen.length ? offen[0] : null;
+      report();
+      return refreshBlock(triNext.closest('[data-triage]'), renderTriage(b));
+    }
+    const triReset = t.closest('[data-tri-reset]');
+    if (triReset) {
+      const b = findBlock(triReset.dataset.triReset);
+      state.self[b.id] = { d: {}, cur: 0 };
+      report();
+      return refreshBlock(triReset.closest('[data-triage]'), renderTriage(b));
+    }
+    const aiBtn = t.closest('[data-ai-toggle]');
+    if (aiBtn) {
+      const box = root.querySelector('#kp-ai-text');
+      const auf = aiBtn.getAttribute('aria-expanded') === 'true';
+      aiBtn.setAttribute('aria-expanded', auf ? 'false' : 'true');
+      if (box) box.hidden = auf;
+      return;
+    }
+    const nextBtn = t.closest('[data-next]');
+    if (nextBtn) return nextBtn.disabled || blockedHere() ? undefined : go(nextIndex());
+    if (t.closest('[data-back]')) {
+      const prev = state.history.length ? state.history.pop() : state.current - 1;
+      if (prev >= 0) { state.current = prev; pageTransition(() => render(true), true); }
+      return;
+    }
+    const goto = t.closest('[data-goto]');
+    if (goto) {
+      closeDrawer();
+      if (goto.dataset.focusBlock) opts.focusBlock = goto.dataset.focusBlock;
+      const target = Number(goto.dataset.goto);
+      if (goto.dataset.focusBlock && target === state.current) {
+        const el = root.querySelector(`[data-block="${goto.dataset.focusBlock}"]`);
+        if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+      opts.startPage = target;
+      return go(target);
+    }
+    // Fallsammlung und Trainer-Modus
+    const cbo = t.closest('[data-cb-open]');
+    if (cbo) return cbShow(findBlock(cbo.closest('[data-casebank]').dataset.casebank), cbo.dataset.cbOpen);
+    const cbf = t.closest('[data-cb-filter]');
+    if (cbf) {
+      const box = cbf.closest('[data-casebank]'), b = findBlock(box.dataset.casebank);
+      cbState(b).f = cbf.dataset.cbFilter;
+      return refreshBlock(box, renderCasebank(b));
+    }
+    const cbm = t.closest('[data-cb-ml]');
+    if (cbm) return cbShowMl(cbm.dataset.cbMl);
+    const cbp = t.closest('[data-cb-print]');
+    if (cbp) return cbPrint(cbp.dataset.cbPrint);
+    if (t.closest('[data-cb-close]')) return cbClose();
+    if (cbOpen && t.closest('.kp-cb-case')) {
+      const b = findBlock(cbOpen.bid), c = (b.cases || []).find(x => x.id === cbOpen.cid);
+      const pn = t.closest('[data-cb-panel]');
+      if (pn) { cbOpen.panel = cbOpen.panel === pn.dataset.cbPanel ? null : pn.dataset.cbPanel; return cbShow(b, c.id); }
+      const pk = t.closest('[data-cb-pick]');
+      if (pk) { const x = cbCase(b, c); x.p = Number(pk.dataset.cbPick); x.r = 1; cbOpen.rev = true; report(); return cbShow(b, c.id); }
+      if (t.closest('[data-cb-reset]')) { const x = cbCase(b, c); delete x.p; delete x.r; cbOpen.rev = false; cbOpen.panel = 'mc'; report(); return cbShow(b, c.id); }
+      if (t.closest('[data-cb-reveal]')) { cbOpen.rev = !cbOpen.rev; if (cbOpen.rev) { cbCase(b, c).r = 1; report(); } return cbShow(b, c.id); }
+      if (t.closest('[data-cb-anek]')) { cbOpen.anek = !cbOpen.anek; return cbShow(b, c.id); }
+      if (t.closest('[data-cb-next]')) return cbStep(1);
+      return;
+    }
+    const cpb = t.closest('[data-copy]');
+    if (cpb) {
+      const cb = findBlock(cpb.dataset.copy), box = cpb.closest('.kp-copy'), st = box && box.querySelector('[data-copy-status]');
+      const txt = cb ? echoPlain(String(cb.copy || '')) : '';
+      const ok = () => { if (st) st.textContent = T('promptKopiert'); state.self[cb.id] = Object.assign({}, state.self[cb.id], { cp: 1 }); report(); uiSound('klick'); };
+      const fallback = () => { const ta = document.createElement('textarea'); ta.value = txt; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); ok(); } catch (e) { if (st) st.textContent = T('promptMarkieren'); } ta.remove(); cpb.focus(); };
+      if (cb && navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, fallback); else if (cb) fallback();
+      return;
+    }
+    if (t.closest('[data-tr-copy]')) {
+      const txt = trainerExport(), st = root.querySelector('[data-tr-status]');
+      const ok = () => { if (st) st.textContent = T('trKopiert'); };
+      const fallback = () => { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); ok(); } catch (e) { /* ohne Zwischenablage */ } ta.remove(); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, fallback); else fallback();
+      return;
+    }
+    if (t.closest('[data-tr-save]')) {
+      saveTextFile('Notizen-' + String(course.title || 'Kurs').replace(/[^\wäöüÄÖÜß-]+/g, '-').slice(0, 50) + '.txt', trainerExport());
+      const st = root.querySelector('[data-tr-status]');
+      if (st) st.textContent = T('trGespeichert');
+      return;
+    }
+    if (t.closest('[data-tr-solve]')) { if (confirm(T('trLoesenFrage'))) solveAll(); return; }
+
+    const drawer = t.closest('[data-drawer]');
+    if (drawer && drawer.hasAttribute('data-dz-menu') && root.querySelector('#kp-drawer.open')) return closeDrawer();
+    if (drawer) return openDrawer(drawer.dataset.drawer);
+    if (t.closest('[data-fullscreen]')) return toggleFullscreen();
+    const sb = t.closest('[data-sounds]');
+    if (sb) {
+      const on = !soundsOn(); setSoundsOn(on);
+      sb.setAttribute('aria-pressed', String(on)); sb.innerHTML = `${icon(on ? 'volume' : 'mute')} ${T(on ? 'klangAn' : 'klangAus')}`;
+      if (on) { klangLast = 0; uiSound('klick'); }
+      return;
+    }
+    if (t.closest('[data-nav-toggle]')) return toggleNav();
+    const cpre = t.closest('[data-conf-pre]');
+    if (cpre) {
+      const found = findQuestion(cpre.dataset.confPre);
+      if (!found) return;
+      state.conf[found.q.id] = Number(cpre.dataset.v);
+      report();
+      refreshBlock(cpre.closest('[data-quiz]'), renderQuiz(found.q, found.graded));
+      const first = root.querySelector(`[data-quiz="${found.q.id}"] input, [data-quiz="${found.q.id}"] select, [data-quiz="${found.q.id}"] textarea`);
+      if (first) try { first.focus({ preventScroll: true }); } catch (e) { /* alter Browser */ }
+      return;
+    }
+    if (t.closest('[data-close-drawer]')) return closeDrawer();
+    if (t.closest('[data-print]')) return printSummary();
+
+    const check = t.closest('[data-check]');
+    if (check) {
+      const found = findQuestion(check.dataset.check);
+      const box = check.closest('[data-quiz]');
+      if (!found) return;
+      const a = collectAnswer(found.q, box);
+      // Regal: genau k Teile, sonst ein Hinweis statt einer Auswertung
+      if (found.q.kind === 'multiple' && found.q.look === 'regal' && (a || []).length !== regalPick(found.q)) {
+        const c = box.querySelector('[data-regal-count]'); if (c) c.textContent = T('regalGenau').replace('{n}', regalPick(found.q));
+        return;
+      }
+      if (a == null || needsConf(found.q, box)) return;
+      const whyEl = box.querySelector(`[data-why="${found.q.id}"]`);
+      if (whyEl) {
+        const v = whyEl.value.trim();
+        if (v.split(/\s+/).filter(Boolean).length < 3) { const m = box.querySelector('.kp-why-missing'); if (m) m.hidden = false; whyEl.focus(); return; }
+        saveText(found.q.id + '~why', v);
+      }
+      return answer(found.q, a, box);
+    }
+    const retry = t.closest('[data-retry-one]');
+    if (retry) {
+      const found = findQuestion(retry.dataset.retryOne);
+      delete state.answers[found.q.id];
+      delete state.conf[found.q.id];
+      state.seen[found.q.id] = Date.now();
+      return refreshBlock(retry.closest('[data-quiz]'), renderQuiz(found.q, found.graded));
+    }
+    if (t.closest('[data-retry-all]')) {
+      const last = score();
+      state.self.prev = { pct: last.pct, got: last.got, max: last.max, n: ((state.self.prev || {}).n || 0) + 1 };
+      graded().forEach(it => {
+        delete state.answers[it.id]; delete state.tries[it.id]; delete state.conf[it.id]; if (it.branch) delete state.branch[it.id];
+        if (it.play && (it.play.type === 'simulation' || it.play.type === 'interaktion')) delete state.self[it.id];
+        else if (it.play && state.self.mm) delete state.self.mm[it.id];
+      });
+      pages.forEach(p => (p.blocks || []).forEach(b => { if (b.type === 'pool' || b.type === 'review') delete state.pools[b.id]; }));
+      drawPools(false);
+      buildItems();
+      const first = graded()[0];
+      state.history = [];
+      state.current = first ? first.pageIndex : 0;
+      return render(true);
+    }
+    const skip = t.closest('[data-skip]');
+    if (skip) {
+      const b = findBlock(skip.dataset.skip);
+      const target = pageIndexById(b.skipTo);
+      for (let i = state.current + 1; i < target; i++) state.visited.add(i);
+      return go(target);
+    }
+    // Sprechertext
+    // Selbstcheck
+    const se = t.closest('[data-self-eval]');
+    if (se) {
+      const box = se.closest('[data-self]');
+      const b = findBlock(se.dataset.selfEval);
+      const prev = (state.self[b.id] || {}).a || [];
+      const a = (b.statements || []).map((s, i) => { if (b.mode === 'regler') return prev[i] == null ? null : Number(prev[i]); const c = box.querySelector(`input[name="sc-${b.id}-${i}"]:checked`); return c ? Number(c.value) : null; });
+      if (a.some(v => v === null)) {
+        box.querySelector('.kp-sc-rows').classList.add('kp-sc-missing');
+        if (b.mode === 'regler') box.querySelectorAll('.kp-sc-rg:not(.is-set)').forEach(x => x.classList.add('is-missing'));
+        return;
+      }
+      state.self[b.id] = { a, done: true };
+      refreshBlock(box, renderSelfcheck(b));
+      updateConditions();
+      return;
+    }
+    // Denkpause: erst selbst überlegen, dann auflösen
+    const pg = t.closest('[data-predict-go]');
+    if (pg) {
+      const box = pg.closest('[data-predict]');
+      const b = findBlock(pg.dataset.predictGo);
+      let v;
+      if (b.mode === 'choice') { const c = box.querySelector('input:checked'); if (!c) { box.querySelector('.kp-answers').classList.add('kp-sc-missing'); return; } v = Number(c.value); }
+      else if (b.mode === 'range') { const r = [...box.querySelectorAll('[data-pr-range]')].map(x => Number(x.value)); v = [Math.min(...r), Math.max(...r)]; }
+      else if (b.mode === 'slider') v = Number(box.querySelector('[data-pr-range]').value);
+      else v = box.querySelector('textarea').value.trim();
+      state.self[b.id] = { v, done: true };
+      return refreshBlock(box, renderPredict(b));
+    }
+    // Klickpfad: Stufe wählen, Zielstelle treffen oder daneben klicken
+    const simEl = t.closest('[data-sim]');
+    if (simEl) {
+      const b = findBlock(simEl.dataset.sim);
+      // Neu zeichnen; der Fokus springt auf die Rückmeldung oder die neue Anweisung (Screenreader lesen sie vor)
+      const redraw = () => {
+        refreshBlock(simEl, renderSimulation(b));
+        const fresh = root.querySelector(`[data-sim="${b.id}"]`);
+        const target = fresh && (fresh.querySelector('.kp-sim-msg .kp-feedback, .kp-sim > .kp-feedback') || fresh.querySelector('.kp-sim-task'));
+        if (target) { target.setAttribute('tabindex', '-1'); target.focus({ preventScroll: true }); }
+      };
+      const mode = t.closest('[data-sim-mode]');
+      if (mode) { simAct(b, 'mode', mode.dataset.simMode); return redraw(); }
+      if (t.closest('[data-sim-reset]')) { simAct(b, 'reset'); return redraw(); }
+      const goBtn = t.closest('[data-sim-go]');
+      if (goBtn) { simAct(b, 'go', Number(goBtn.dataset.i)); return redraw(); }
+      if (t.closest('[data-sim-show]')) { simAct(b, 'show'); return redraw(); }
+      if (t.closest('[data-sim-hit]')) { simAct(b, 'hit'); return redraw(); }
+      if (t.closest('[data-sim-stage]')) { if (simAct(b, 'miss')) redraw(); return; }
+    }
+    // Sortieren: Karte einer Spalte zuordnen
+    // Memory: zwei Karten aufdecken, Paar bleibt offen, sonst nach kurzer Zeit wieder zu
+    const mem = t.closest('[data-mem]');
+    if (mem) {
+      const b = findBlock(mem.dataset.gqOf);
+      const st = state.self[b.id];
+      const pairs = drawnPairs(b);
+      const k = Number(mem.dataset.mem);
+      if (!st || st.open.length >= 2 || st.open.includes(k)) return;
+      st.open.push(k);
+      if (st.open.length === 2) {
+        st.moves++;
+        const [a, c] = st.open;
+        const pairOf = x => x % pairs.length;
+        const match = pairOf(a) === pairOf(c) && (a < pairs.length) !== (c < pairs.length);
+        if (match) { st.found.push(pairOf(a)); st.open = []; }
+        else {
+          refreshBlock(mem.closest('.kp-gq'), renderMemory(b, pairs));
+          setTimeout(() => {
+            st.open = [];
+            const now = root.querySelector(`[data-gq="${b.id}"]`);
+            if (now) refreshBlock(now, renderMemory(b, pairs));
+          }, 900);
+          return;
+        }
+      }
+      return refreshBlock(mem.closest('.kp-gq'), renderMemory(b, pairs));
+    }
+    const memReset = t.closest('[data-mem-reset]');
+    if (memReset) {
+      const b = findBlock(memReset.dataset.memReset);
+      delete state.self[b.id];
+      return refreshBlock(memReset.closest('.kp-gq'), renderMemory(b, drawnPairs(b)));
+    }
+    // Zuordnen per Ziehen: Kärtchen über die Nummerntasten setzen
+    // Postfach: App auf dem Startbildschirm öffnen, Figur mit dem Pfeil schließen
+    const mailOpen = t.closest('[data-mail-open]');
+    if (mailOpen) {
+      const wrap = mailOpen.closest('[data-mdd]'), st = mailState(mailOpen.dataset.mailOpen);
+      st.open = true; uiSound('klick');
+      const desk = wrap.querySelector('[data-mail-desk]'); if (desk) desk.remove();
+      const app = wrap.querySelector('.kp-mail-app'); if (app) app.hidden = false;
+      const found = findQuestion(mailOpen.dataset.mailOpen), m = (found && found.q.mail) || {};
+      if (!st.intro) mailCoachShow(wrap, { kind: 'intro', text: plainText(m.hint) || T('postfachHinweis'), pose: m.pose || 'think' });
+      return;
+    }
+    const mailNext = t.closest('[data-mail-next]');
+    if (mailNext) { mailCoachClose(mailNext.closest('[data-mdd]')); return; }
+    const mddTo = t.closest('[data-mdd-to]');
+    if (mddTo) {
+      mddPlace(mddTo.dataset.quiz, mddTo.dataset.card, mddTo.dataset.mddTo);
+      return;
+    }
+    const sortTo = t.closest('[data-sort-to]');
+    if (sortTo) {
+      const b = findBlock(sortTo.dataset.block);
+      const st = state.self[b.id] || { place: {}, done: false };
+      st.place[Number(sortTo.dataset.item)] = Number(sortTo.dataset.sortTo);
+      state.self[b.id] = st;
+      return refreshBlock(sortTo.closest('[data-sortcats]'), renderSort(b));
+    }
+    const sortCheck = t.closest('[data-sort-check]');
+    if (sortCheck) {
+      const b = findBlock(sortCheck.dataset.sortCheck);
+      state.self[b.id] = Object.assign({ place: {} }, state.self[b.id], { done: true });
+      return refreshBlock(sortCheck.closest('[data-sortcats]'), renderSort(b));
+    }
+    const sortReset = t.closest('[data-sort-reset]');
+    if (sortReset) {
+      const b = findBlock(sortReset.dataset.sortReset);
+      state.self[b.id] = { place: {}, done: false };
+      state.pools['sort-' + b.id] = shuffleIds((b.items || []).map((x, i) => i));
+      return refreshBlock(sortReset.closest('[data-sortcats]'), renderSort(b));
+    }
+    // Auswahlrad drehen
+    const dial = t.closest('[data-dial]');
+    if (dial) {
+      const b = findBlock(dial.dataset.dial);
+      state.self[b.id] = { v: Number(dial.dataset.i) };
+      return refreshBlock(dial.closest('[data-dialblock]'), renderDial(b));
+    }
+    // Motion-Zeitleiste abspielen oder alles zeigen
+    const mp = t.closest('[data-motion-play]') || t.closest('[data-motion-all]');
+    if (mp) {
+      const box = mp.closest('[data-motion]');
+      const all = !!mp.dataset.motionAll;
+      const steps = [...box.querySelectorAll('.kp-motion-step')];
+      const bar = box.querySelector('.kp-motion-bar i');
+      if (box.dataset.playing === '1' && !all) { stopMotion(box); return; }
+      steps.forEach(s => s.classList.remove('on'));
+      if (all || reducedMotion()) {
+        steps.forEach(s => s.classList.add('on'));
+        if (bar) bar.style.width = '100%';
+        return;
+      }
+      box.dataset.playing = '1';
+      mp.textContent = '⏸ ' + T('pause');
+      const total = Number(box.dataset.total) || steps.length * 3;
+      let t0 = Date.now();
+      const timer = setInterval(() => {
+        const sec = (Date.now() - t0) / 1000;
+        steps.forEach(s => { if (sec >= Number(s.dataset.at)) s.classList.add('on'); });
+        if (bar) bar.style.width = Math.min(100, sec / total * 100) + '%';
+        if (sec >= total) { stopMotion(box); }
+      }, 100);
+      mediaTimers.push(timer);
+      box.__timer = timer;
+      return;
+    }
+    // Prozess: Schritt wählen
+    const proc = t.closest('[data-proc-go]');
+    if (proc) {
+      const b = findBlock(proc.dataset.procGo);
+      state.dlg[b.id] = Number(proc.dataset.i);
+      return refreshBlock(proc.closest('[data-process]'), renderProcess(b));
+    }
+    // Weiter-Sperre öffnen
+    const gateBtn = t.closest('[data-gate]');
+    if (gateBtn) {
+      const b = findBlock(gateBtn.dataset.gate);
+      state.self[b.id] = { done: true };
+      render();
+      const el = root.querySelector(`[data-block="${b.id}"]`);
+      if (el && el.nextElementSibling) el.nextElementSibling.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+    // Videoszene weiterschalten
+    const vn = t.closest('[data-vscene-next]') || t.closest('[data-vscene-back]');
+    if (vn) {
+      const id = vn.dataset.vsceneNext || vn.dataset.vsceneBack;
+      const b = findBlock(id);
+      const dir = vn.dataset.vsceneNext ? 1 : -1;
+      state.dlg[id] = Math.max(0, Math.min((state.dlg[id] || 0) + dir, (b.steps || []).length - 1));
+      return refreshBlock(vn.closest('[data-vscene]'), renderVscene(b));
+    }
+    // Punkt im Bild öffnen oder schließen
+    const hsDot = t.closest('[data-hs]');
+    if (hsDot) {
+      const b = findBlock(hsDot.dataset.hs);
+      const i = Number(hsDot.dataset.i);
+      const st0 = state.self[b.id] || {};
+      const door = (hsRound(b, st0).list[i] || {}).target;
+      if (door && hsDot.getAttribute('aria-disabled') === 'true') { toast(T('ortGesperrtHinweis'), 'lock'); return; }
+      if (door) { const d = pageIndexById(door); if (d >= 0) return go(d); }
+      state.self[b.id] = hsMarkSeen(b, st0, i, st0.v === i ? undefined : i);
+      updateConditions(); renderFooter(); report();
+      return refreshBlock(hsDot.closest('[data-hotspots]'), renderHotspots(b));
+    }
+    // Suchbild-Runden: nächste Runde
+    const nextRound = t.closest('[data-hs-next-round]');
+    if (nextRound) {
+      const b = findBlock(nextRound.dataset.hsNextRound);
+      const st = state.self[b.id] || {};
+      state.self[b.id] = { r: hsRound(b, st).r + 1, rs: st.rs, v: undefined };
+      return refreshBlock(nextRound.closest('[data-hotspots]'), renderHotspots(b));
+    }
+    // Vor und zurück in der geöffneten Karte
+    const step = t.closest('[data-hs-step]');
+    if (step) {
+      const b = findBlock(step.dataset.hsStep);
+      const st = state.self[b.id] || {};
+      const list = hsRound(b, st).list;
+      const stops = list.map((pt, i) => i).filter(i => !list[i].target);
+      const at = stops.indexOf(st.v);
+      const next = stops[(at + Number(step.dataset.dir) + stops.length) % stops.length];
+      state.self[b.id] = hsMarkSeen(b, st, next, next);
+      return refreshBlock(step.closest('[data-hotspots]'), renderHotspots(b));
+    }
+    // Führung: der Reihe nach durch alle Punkte
+    const tour = t.closest('[data-hs-tour]');
+    if (tour) {
+      const b = findBlock(tour.dataset.hsTour);
+      const st = state.self[b.id] || {};
+      const list = hsRound(b, st).list;
+      // Türen (Punkte mit Zielseite) lässt die Führung aus, sonst verlässt sie mitten in der Tour die Seite
+      let next = st.v == null ? 0 : (st.v + 1) % list.length;
+      for (let n = 0; n < list.length && list[next] && list[next].target; n++) next = (next + 1) % list.length;
+      state.self[b.id] = hsMarkSeen(b, st, next, next);
+      return refreshBlock(tour.closest('[data-hotspots]'), renderHotspots(b));
+    }
+    // Schichten ein- und ausblenden
+    const rvTo = t.closest('[data-rv-to]');
+    if (rvTo) { rvApply(findBlock(rvTo.dataset.block), rvTo.closest('[data-reveal]'), rvTo.dataset.rvTo); return; }
+    const layer = t.closest('[data-layer]');
+    if (layer) {
+      const b = findBlock(layer.dataset.layer);
+      const i = Number(layer.dataset.i);
+      const st = state.self[b.id] || { on: {} };
+      const on = Object.assign({}, st.on);
+      if (on[i]) delete on[i]; else on[i] = true;
+      state.self[b.id] = { on };
+      return refreshBlock(layer.closest('[data-layers]'), renderLayers(b));
+    }
+    // Video der Person neben der Frage: Klick spielt und hält an, ohne die Frage neu zu zeichnen
+    const qpp = t.closest('[data-qp-play]');
+    if (qpp) {
+      const v = qpp.parentElement.querySelector('[data-qp-video]');
+      if (v) {
+        if (v.paused) { stopSound(); root.querySelectorAll('[data-qp-video]').forEach(o => { if (o !== v) o.pause(); }); v.play().catch(() => {}); } else v.pause();
+        if (!v.dataset.wired) {
+          v.dataset.wired = '1';
+          const sync = () => { const on = !v.paused && !v.ended; qpp.setAttribute('aria-pressed', on ? 'true' : 'false'); qpp.classList.toggle('on', on); qpp.closest('.kp-qp-media').classList.toggle('kp-qp-playing', on); };
+          ['play', 'pause', 'ended'].forEach(ev => v.addEventListener(ev, sync));
+        }
+      }
+      return;
+    }
+    // Personenkarte umdrehen
+    const person = t.closest('.kp-person-flip');
+    if (person) { person.classList.toggle('flipped'); return; }
+    const tk = t.closest('[data-tk-print]');
+    if (tk) return printTakeaways(findBlock(tk.dataset.tkPrint));
+    const fn = t.closest('[data-fn]');
+    if (fn) {
+      const src = root.querySelector('#kp-src-' + fn.dataset.fn);
+      if (src) { const det = src.closest('details'); if (det) det.open = true; src.scrollIntoView({ behavior: 'smooth', block: 'center' }); src.classList.add('kp-flash'); setTimeout(() => src.classList.remove('kp-flash'), 1600); src.focus({ preventScroll: true }); }
+      return;
+    }
+    const zoom = t.closest('[data-zoom]') || (t.matches('.kp-fig-frame img') ? t : null);
+    if (zoom) {
+      const fig = zoom.closest('figure');
+      const img = fig.querySelector('img');
+      const cap = fig.querySelector('figcaption');
+      return openLightbox(img.src, img.alt, cap ? cap.textContent : '');
+    }
+    const sr = t.closest('[data-self-reset]');
+    if (sr) {
+      const b = findBlock(sr.dataset.selfReset);
+      state.self[b.id] = { a: (state.self[b.id] || {}).a || [], done: false };
+      refreshBlock(sr.closest('[data-self]'), renderSelfcheck(b));
+      updateConditions();
+      return;
+    }
+    // Untertitel zum Sprechertext ein- und ausschalten
+    const ccBtn = t.closest('[data-narr-cc]');
+    if (ccBtn) {
+      const on = ccBtn.getAttribute('aria-pressed') !== 'true';
+      ccBtn.setAttribute('aria-pressed', String(on));
+      ccBtn.classList.toggle('on', on);
+      const out = root.querySelector(`[data-narr-cc-text="${ccBtn.dataset.narrCc}"]`);
+      if (out) { out.hidden = !on; if (!on) out.textContent = ''; }
+      return;
+    }
+    // Regler für Lautstärke und Tempo
+    const setBtn = t.closest('[data-narr-set]');
+    if (setBtn) {
+      const panel = setBtn.parentElement.querySelector('.kp-narr-panel');
+      const open = panel.hidden;
+      panel.hidden = !open;
+      setBtn.setAttribute('aria-expanded', String(open));
+      return;
+    }
+    const narr = t.closest('[data-narr]');
+    if (narr) {
+      if (narr.classList.contains('playing')) { stopSound(); narr.classList.remove('playing'); narr.textContent = '▶ ' + T('anhoeren'); return; }
+      const b = findBlock(narr.dataset.narr);
+      root.querySelectorAll('[data-narr].playing').forEach(x => { x.classList.remove('playing'); x.textContent = '▶ ' + T('anhoeren'); });
+      narr.classList.add('playing');
+      narr.textContent = '■ ' + T('stopp');
+      const out = root.querySelector(`[data-narr-cc-text="${b.id}"]`);
+      const reset = () => {
+        narr.classList.remove('playing');
+        narr.textContent = '▶ ' + T('anhoeren');
+        if (out) out.textContent = '';
+      };
+      const ctl = playSound(b.narration, b.tts, reset);
+      if (!ctl) return reset();
+      // Lässt der Browser den Ton nicht zu, steht der Knopf wieder auf „Anhören“ statt auf „Stopp“
+      if (ctl.started) ctl.started.then(ok => { if (ok !== true && sound !== ctl) reset(); });
+      // Untertitel mitlaufen lassen: aus der VTT-Datei zeitgenau, sonst der vorgelesene Text am Stück
+      if (out && !out.hidden) {
+        const cues = narrationCues(b);
+        if (cues.length && ctl.media) {
+          const show = () => {
+            const at = ctl.media.currentTime;
+            const cue = cues.find(c => at >= c.from && at < c.to);
+            out.textContent = cue ? cue.text : '';
+          };
+          ctl.media.addEventListener('timeupdate', show);
+          show();
+        } else {
+          out.textContent = plainText(b.tts) || '';
+        }
+      }
+      return;
+    }
+    // Aufgabe am Bildschirm: Punkt am Gerät öffnet den Bildschirm, Vorlesen schaltet den Mentor an und aus
+    const bo = t.closest('[data-bs-open]');
+    if (bo) {
+      const b = findBlock(bo.dataset.bsOpen);
+      (state.self[b.id] = state.self[b.id] || {}).v = 1;
+      if (!reducedMotion()) bsZoom = b.id;
+      stopSound(); bsRefresh(b, '[data-bs-input]'); report();
+      return;
+    }
+    const bv = t.closest('[data-bs-voice]');
+    if (bv) {
+      const b = findBlock(bv.dataset.bsVoice);
+      if (sound) { stopSound(); bsVoice(b, false); return; }
+      return bsSay(b);
+    }
+    // Große Szene: Vorlesen anhalten oder die aktuelle Zeile noch einmal vorlesen; Ton aus und an
+    const gv = t.closest('[data-gs-voice]');
+    if (gv) {
+      const b = findBlock(gv.dataset.gsVoice);
+      if (sound) { stopSound(); filmAuto.delete(b.id); clearTimeout(dlgTimer); grossVoice(b, false); return; }
+      const n = state.dlg[b.id] || 0, line = (b.lines || [])[n - 1];
+      if (!line) { if (dialogAuto(b)) filmAuto.add(b.id); return dialogStep(b); }
+      const ctl = playSound(line.audio, line.text, () => grossVoice(b, false), dlgVoiceIndex(b, line));
+      if (ctl) grossVoice(b, true);
+      return;
+    }
+    const gm = t.closest('[data-gs-mute]');
+    if (gm) {
+      if (audioPrefs.vol > 0) { grossPrevVol = audioPrefs.vol; audioPrefs.vol = 0; stopSound(); } else audioPrefs.vol = grossPrevVol || 1;
+      saveAudioPrefs(); applyAudioPrefs();
+      const on = audioPrefs.vol > 0;
+      root.querySelectorAll('[data-gs-mute]').forEach(x => { x.setAttribute('aria-pressed', String(!on)); x.setAttribute('aria-label', T(on ? 'tonAus' : 'tonAn')); x.title = T(on ? 'tonAus' : 'tonAn'); x.innerHTML = GROSS_SOUND(on); });
+      root.querySelectorAll('[data-narr-vol]').forEach(x => { x.value = audioPrefs.vol; });
+      if (!on) root.querySelectorAll('[data-gs-voice]').forEach(x => { const id = x.dataset.gsVoice; grossVoice(findBlock(id), false); });
+      if (!on) root.querySelectorAll('[data-bs-voice]').forEach(x => bsVoice(findBlock(x.dataset.bsVoice), false));
+      return;
+    }
+    // Comic-Dialog
+    const dn = t.closest('[data-dlg-next]');
+    if (dn) {
+      const b = findBlock(dn.dataset.dlgNext);
+      if (!(state.dlg[b.id] || 0) && dialogAuto(b)) filmAuto.add(b.id); // „Szene starten“: ab hier läuft die Szene von selbst
+      return dialogStep(b);
+    }
+    const da = t.closest('[data-dlg-all]');
+    if (da) { const b = findBlock(da.dataset.dlgAll); filmAuto.delete(b.id); return dialogStep(b, true); }
+    const dr = t.closest('[data-dlg-restart]');
+    if (dr) {
+      const b = findBlock(dr.dataset.dlgRestart);
+      state.dlg[b.id] = 0;
+      if ((b.stage && b.stage.film) || dialogAuto(b)) filmAuto.add(b.id);
+      return dialogStep(b);
+    }
+    const fp = t.closest('[data-film-play]');
+    if (fp) {
+      const b = findBlock(fp.dataset.filmPlay);
+      if (filmAuto.has(b.id)) { filmAuto.delete(b.id); clearTimeout(dlgTimer); refreshBlock(root.querySelector(`[data-dialog="${b.id}"]`), renderDialog(b)); return; }
+      filmAuto.add(b.id);
+      if ((state.dlg[b.id] || 0) >= (b.lines || []).length) state.dlg[b.id] = 0;
+      return dialogStep(b);
+    }
+    const fc = t.closest('[data-film-cc]');
+    if (fc) {
+      const b = findBlock(fc.dataset.filmCc);
+      if (filmCc.has(b.id)) filmCc.delete(b.id); else filmCc.add(b.id);
+      const w = root.querySelector(`[data-dialog="${b.id}"] .kp-stage-wrap`);
+      if (w) w.classList.toggle('kp-cc-off', filmCc.has(b.id));
+      fc.setAttribute('aria-pressed', String(!filmCc.has(b.id)));
+      return;
+    }
+    const ff = t.closest('[data-film-full]');
+    if (ff) {
+      const w = root.querySelector(`[data-dialog="${ff.dataset.filmFull}"]`);
+      if (!w) return;
+      if (document.fullscreenElement) document.exitFullscreen(); else if (w.requestFullscreen) w.requestFullscreen();
+      return;
+    }
+    // Klick ins Bild: nächste Zeile, wie ein Tipp aufs Video (nicht auf Knöpfen, nicht bei offener Entscheidung, nicht vor dem Start)
+    const fs = t.closest('[data-film-stage]');
+    if (fs && !t.closest('button, a, [data-branch]') && !fs.classList.contains('kp-choosing') && !fs.classList.contains('kp-film-idle')) {
+      const b = findBlock(fs.dataset.filmStage);
+      if ((state.dlg[b.id] || 0) < (b.lines || []).length) return dialogStep(b);
+      return;
+    }
+    // Interaktives Video
+    const vidFull = t.closest('[data-vid-full]');
+    if (vidFull) { videoFullscreen(vidFull.closest('[data-vid]') && vidFull.closest('[data-vid]').querySelector('video')); return; }
+    const vfull = t.closest('[data-iv-full]');
+    if (vfull) {
+      const box = vfull.closest('.kp-iv');
+      if (fsActive()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      else if (box) (box.requestFullscreen || box.webkitRequestFullscreen).call(box);
+      return;
+    }
+    const vc = t.closest('[data-vcontinue]');
+    if (vc && !vc.disabled) return videoCtl[vc.dataset.vcontinue] && videoCtl[vc.dataset.vcontinue].resume();
+    const vj = t.closest('[data-vjump]');
+    if (vj) return videoCtl[vj.dataset.vjump] && videoCtl[vj.dataset.vjump].jump(Number(vj.dataset.t) || 0);
+    const vs = t.closest('[data-vseek]');
+    if (vs) {
+      const wrap = vs.closest('[data-ivideo]');
+      const ctl = wrap && videoCtl[wrap.dataset.ivideo];
+      if (ctl) ctl.seek(Number(vs.dataset.vseek) || 0);
+      return;
+    }
+    const cr = t.closest('input[data-crit-item]');
+    if (cr) {
+      const box = cr.closest('[data-crit]');
+      const b = findBlock(box.dataset.crit);
+      const st = state.self[b.id] = state.self[b.id] || {};
+      const i = Number(cr.dataset.critItem);
+      st.crit = (st.crit || []).filter(x => x !== i);
+      if (cr.checked) st.crit.push(i);
+      cr.closest('label').classList.toggle('done', cr.checked);
+      cr.closest('label').classList.toggle('kp-just', cr.checked);
+      const s = box.querySelector('[data-crit-status]'); if (s) s.outerHTML = critStatus(b);
+      report();
+      return;
+    }
+    const ci = t.closest('input[data-check-item]');
+    if (ci) {
+      const box = ci.closest('[data-checklist]');
+      const b = findBlock(box.dataset.checklist);
+      const st = state.self[b.id] || (state.self[b.id] = { c: [] });
+      const i = Number(ci.dataset.checkItem);
+      st.c = (st.c || []).filter(x => x !== i).concat(ci.checked ? [i] : []).sort((a, z) => a - z);
+      ci.closest('label').classList.toggle('done', ci.checked);
+      ci.closest('label').classList.toggle('kp-just', ci.checked);
+      const s = box.querySelector('[data-cl-status]'); if (s) s.outerHTML = clStatus(b);
+      report();
+      return;
+    }
+    const choose = t.closest('[data-choose]');
+    if (choose) {
+      const box = choose.closest('[data-branch]');
+      const b = findBlock(box.dataset.branch);
+      const pick = Number(choose.dataset.choose), o = (b.options || [])[pick] || {};
+      // Nochmal versuchen: Rückmeldung zeigen, die Entscheidung bleibt offen
+      if (o.retry) {
+        uiSound('falsch');
+        const tries = ((state.self[b.id] || {}).tries || []).concat(pick).filter((x, k, arr) => arr.indexOf(x) === k);
+        state.self[b.id] = Object.assign({}, state.self[b.id], { tried: pick, tries });
+        const staged = box.closest('.kp-staged');
+        if (staged) refreshBlock(staged, renderDialog(findBlock(staged.dataset.dialog)));
+        else refreshBlock(box, renderBranch(b));
+        const fb = root.querySelector(`[data-branch="${b.id}"] [data-retry-fb]`); if (fb) fb.focus();
+        return;
+      }
+      state.branch[b.id] = pick;
+      uiSound('klick');
+      // Auf der Bühne wandert die Entscheidung nach der Wahl aus dem Bild unter die Szene
+      const staged = box.closest('.kp-staged');
+      if (staged) refreshBlock(staged, renderDialog(findBlock(staged.dataset.dialog)));
+      else refreshBlock(box, renderBranch(b));
+      updateConditions();
+      return;
+    }
+    // Folgekarte schließen: zurück zur Frage
+    const cb = t.closest('[data-conseq-back]');
+    if (cb) {
+      const box = cb.closest('[data-branch]');
+      const b = findBlock(cb.dataset.conseqBack);
+      const st = Object.assign({}, state.self[b.id]); delete st.tried; state.self[b.id] = st;
+      const staged = box.closest('.kp-staged');
+      if (staged) refreshBlock(staged, renderDialog(findBlock(staged.dataset.dialog)));
+      else refreshBlock(box, renderBranch(b));
+      const first = root.querySelector(`[data-branch="${b.id}"] [data-choose]`); if (first) first.focus();
+      return;
+    }
+    // Hilfe holen: Figur oder Arbeitshilfe an der Entscheidung
+    const ho = t.closest('[data-help-open]');
+    if (ho) {
+      const box = ho.closest('[data-branch]');
+      const b = findBlock(ho.dataset.helpOpen);
+      if (helpOpen.has(b.id)) helpOpen.delete(b.id); else { helpOpen.add(b.id); state.self[b.id] = Object.assign({}, state.self[b.id], { helped: true }); report(); }
+      const staged = box.closest('.kp-staged');
+      if (staged) refreshBlock(staged, renderDialog(findBlock(staged.dataset.dialog)));
+      else refreshBlock(box, renderBranch(b));
+      const panel = root.querySelector(`[data-help="${b.id}"]`); if (panel) { panel.setAttribute('tabindex', '-1'); panel.focus({ preventScroll: true }); }
+      return;
+    }
+    // Begründung zur Entscheidung speichern, dann erst die Rückmeldung zeigen
+    const ws = t.closest('[data-why-save]');
+    if (ws) {
+      const box = ws.closest('[data-branch]');
+      const b = findBlock(box.dataset.branch);
+      const ta = box.querySelector(`[data-why="${b.id}"]`);
+      const v = ta ? ta.value.trim() : '';
+      if (v.split(/\s+/).filter(Boolean).length < 3) { const m = box.querySelector('.kp-why-missing'); if (m) m.hidden = false; if (ta) ta.focus(); return; }
+      saveText(b.id + '~why', v);
+      const staged = box.closest('.kp-staged');
+      if (staged) refreshBlock(staged, renderDialog(findBlock(staged.dataset.dialog)));
+      else refreshBlock(box, renderBranch(b));
+      const fb = root.querySelector(`[data-branch="${b.id}"] .kp-feedback`); if (fb) { fb.setAttribute('tabindex', '-1'); fb.focus({ preventScroll: true }); }
+      updateConditions();
+      return;
+    }
+    // Mehr Text hinter dem runden „+“
+    const moreBtn = t.closest('[data-more]');
+    if (moreBtn) {
+      const body = root.querySelector('#' + moreBtn.dataset.more);
+      if (body) { const open = body.hidden; body.hidden = !open; moreBtn.setAttribute('aria-expanded', String(open)); moreBtn.setAttribute('aria-label', T(open ? 'wenigerLesen' : 'mehrLesen')); }
+      return;
+    }
+    // Aufdeckzeile unter einer Karte
+    const crv = t.closest('[data-card-rv]');
+    if (crv) {
+      const box = crv.closest('[data-cards]');
+      const b = findBlock(box.dataset.cards);
+      const st = state.self[b.id] || { open: [] };
+      const i = Number(crv.dataset.cardRv);
+      if (!(st.open || []).includes(i)) st.open = [...(st.open || []), i];
+      state.self[b.id] = st;
+      uiSound('aufdecken');
+      const tmp = document.createElement('div'); tmp.innerHTML = cardRvHtml(b, b.items[i], i, true);
+      const shown = tmp.firstElementChild, kc = crv.closest('.kp-card-kreis');
+      if (kc) { crv.remove(); kc.appendChild(shown); } else crv.replaceWith(shown);
+      shown.focus({ preventScroll: true });
+      const rv = cardsRv(b);
+      const stat = root.querySelector(`[data-block="${b.id}"] [data-cards-status] b`); if (stat) stat.textContent = T('aufgedeckt').replace('{n}', rv.filter(k => st.open.includes(k)).length).replace('{z}', rv.length);
+      updateConditions(); renderFooter(); report();
+      return;
+    }
+    // Pyramide: Stufe öffnen (nur Klassen und Infokasten tauschen, kein refreshBlock, damit der Fokus bleibt)
+    const pyl = t.closest('[data-pyr-level]');
+    if (pyl) {
+      const box = pyl.closest('[data-pyr]'), b = findBlock(box.dataset.pyr), i = Number(pyl.dataset.pyrLevel);
+      const st = state.self[b.id] || { open: [] };
+      if (!(st.open || []).includes(i)) st.open = [...(st.open || []), i];
+      st.sel = i; state.self[b.id] = st;
+      box.querySelectorAll('[data-pyr-level]').forEach(el => { el.classList.toggle('is-sel', el === pyl); el.setAttribute('aria-expanded', String(el === pyl)); });
+      pyl.classList.add('is-open');
+      const info = box.querySelector('.kp-pyr-info'); if (info) info.innerHTML = pyrLevelHtml(b, i);
+      const stat = box.querySelector('[data-pyr-status]'); if (stat) stat.textContent = T('aufgedeckt').replace('{n}', st.open.length).replace('{z}', (b.levels || []).length);
+      updateConditions(); renderFooter(); report();
+      return;
+    }
+    // Schnittmengen: Kreis oder Mitte öffnen
+    const vnc = t.closest('[data-venn-c], [data-venn-mid]');
+    if (vnc) {
+      const box = vnc.closest('[data-venn]'), b = findBlock(box.dataset.venn);
+      const i = vnc.hasAttribute('data-venn-mid') ? 'mid' : Number(vnc.dataset.vennC);
+      const st = state.self[b.id] || { open: [] };
+      if (i !== 'mid' && !(st.open || []).includes(i)) st.open = [...(st.open || []), i];
+      st.sel = i; state.self[b.id] = st;
+      box.querySelectorAll('[data-venn-c], [data-venn-mid]').forEach(el => { el.classList.toggle('is-sel', el === vnc); el.setAttribute('aria-expanded', String(el === vnc)); });
+      if (i !== 'mid') vnc.classList.add('is-open');
+      const info = box.querySelector('.kp-venn-info'); if (info) info.innerHTML = vennInfoHtml(b, i);
+      const stat = box.querySelector('[data-venn-status]'); if (stat) stat.textContent = T('aufgedeckt').replace('{n}', (st.open || []).length).replace('{z}', Math.min(3, (b.circles || []).length));
+      updateConditions(); renderFooter(); report();
+      return;
+    }
+    // Kernaussage aufdecken
+    const tko = t.closest('[data-tk-open]');
+    if (tko) {
+      const box = tko.closest('[data-takeaways]');
+      const b = findBlock(box.dataset.takeaways);
+      const st = state.self[b.id] || { open: [] };
+      const i = Number(tko.dataset.tkOpen);
+      if (!(st.open || []).includes(i)) st.open = [...(st.open || []), i];
+      state.self[b.id] = st;
+      uiSound('aufdecken');
+      const li = tko.closest('li');
+      li.classList.remove('kp-tk-closed');
+      const it = (b.items || [])[i] || {};
+      tko.outerHTML = `<div class="kp-text kp-tk-in" tabindex="-1">${res(it.html)}</div>`;
+      const shown = li.querySelector('.kp-tk-in'); if (shown) shown.focus({ preventScroll: true });
+      const h = li.querySelector('h3'); if (h) setTimeout(() => notate(h, 'underline', { padding: 2 }), 60);
+      const stat = box.querySelector('[data-tk-status] b'); if (stat) stat.textContent = T('aufgedeckt').replace('{n}', st.open.length).replace('{z}', (b.items || []).length);
+      updateConditions(); renderFooter(); report();
+      return;
+    }
+    // Denkpause mit Uhr (reflection.timer in Sekunden): zählt herunter, sperrt nichts, am Ende Hinweis und Fokus ins Feld
+    const tms = t.closest('[data-timer-start]');
+    if (tms) {
+      const box = tms.closest('[data-timer]'), left = box.querySelector('[data-timer-left]'), b = findBlock(tms.dataset.timerStart);
+      let rest = Math.max(5, Number(b.timer) || 120);
+      tms.disabled = true; left.setAttribute('aria-live', 'off'); left.textContent = fmtClock(rest);
+      const iv = setInterval(() => {
+        rest--; if (rest > 0) { left.textContent = fmtClock(rest); return; }
+        clearInterval(iv); box.classList.add('is-over'); left.setAttribute('aria-live', 'polite'); left.textContent = T('denkpauseEnde');
+        const ta = root.querySelector(`[data-reflect="${b.id}"] [data-reflect-text]`); if (ta) ta.focus();
+      }, 1000);
+      mediaTimers.push(iv);
+      return;
+    }
+    // Links im Text auf Kursseiten (#seite-<id>) und ins Lernbuch (#lernbuch)
+    const inLink = t.closest('a[href^="#seite-"], a[href="#lernbuch"]');
+    if (inLink) {
+      e.preventDefault();
+      const h = inLink.getAttribute('href');
+      if (h === '#lernbuch') { if (hasLernbuch()) openDrawer('lernbuch'); return; }
+      const idx = pages.findIndex(p => p.id === h.slice(7));
+      if (idx >= 0) { closeDrawer(); return go(idx); }
+      return;
+    }
+    const tcs = t.closest('[data-tc-save]');
+    if (tcs) {
+      const b = findBlock(tcs.dataset.tcSave), box = tcs.closest('[data-tc]'), v = (box.querySelector('input[type=radio]:checked') || {}).value;
+      if (!v) { const o = box.querySelector('.kp-tc-opts'); o.classList.add('is-missing'); box.querySelector('input[type=radio]').focus(); return; }
+      const s0 = state.self[b.id] = state.self[b.id] || {}, now = new Date();
+      s0.tc = { v, d: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}` };
+      const txt = box.querySelector('[data-tc-text]').value.trim(); if (txt) saveText(b.id + '~check', txt);
+      box.outerHTML = transferCheckHtml(b);
+      const m = root.querySelector(`[data-tc="${b.id}"] .kp-tc-msg`); if (m) m.focus();
+      report(); return;
+    }
+    const ics = t.closest('[data-cert-ics]');
+    if (ics) { saveTextFile('Wiederholung-' + String(course.title || 'Kurs').replace(/[^\wäöüÄÖÜß-]+/g, '-').slice(0, 50) + '.ics', calendarIcs(findBlock(ics.dataset.certIcs)), 'text/calendar'); return; }
+    if (t.closest('[data-follow]')) return go(nextIndex());
+    if (t.closest('[data-tour]')) { startTour(); return; }
+    const ovInfo = t.closest('[data-ov-info]');
+    if (ovInfo) { const tip = root.querySelector('#' + CSS.escape(ovInfo.getAttribute('aria-controls'))); if (tip) { tip.hidden = !tip.hidden; ovInfo.setAttribute('aria-expanded', String(!tip.hidden)); } return; }
+    // Kurz gefragt als Sprechblase: schließen (bleibt als Knopf „Kurz gefragt“, solange unbeantwortet) und wieder öffnen
+    const kfClose = t.closest('[data-kf-close]');
+    if (kfClose) { kfOpen = null; kfDraw(); kfPops(); const chip = root.querySelector('[data-kf-open]'); (chip || root.querySelector('#kp-main')).focus({ preventScroll: true }); return; }
+    const kfOpenBtn = t.closest('[data-kf-open]');
+    if (kfOpenBtn) { kfOpen = kfOpenBtn.dataset.kfOpen; kfDraw(); const f = root.querySelector('.kp-kf-pop [data-kf-pick]'); if (f) f.focus(); return; }
+    // Kurz gefragt: Antwort wählen (änderbar), dann freiwillig erzählen
+    const bnOk = t.closest('[data-bn-ok]');
+    if (bnOk) {
+      const box = bnOk.closest('[data-bn-ask]'), b = findBlock(bnOk.dataset.bnOk);
+      const sel = box.querySelector('input:checked'); if (!sel) return;
+      (state.self[b.id] = state.self[b.id] || {}).v = Number(sel.value);
+      const big = box.closest('.kp-bignum');
+      refreshBlock(big, renderBignumber(b));
+      const r = root.querySelector(`[data-bn-ask="${b.id}"] [data-bn-reply]`);
+      if (r) { r.tabIndex = -1; r.focus({ preventScroll: true }); }
+      updateConditions(); renderFooter(); report();
+      return;
+    }
+    const kfPick = t.closest('[data-kf-pick]');
+    if (kfPick) {
+      const b = findBlock(kfPick.dataset.block);
+      (state.self[b.id] = state.self[b.id] || {}).v = Number(kfPick.dataset.kfPick);
+      refreshBlock(kfPick.closest('[data-kf]'), renderKurzfrage(b, !!kfPick.closest('.kp-kf-pop')));
+      const r = root.querySelector(`[data-kf="${b.id}"] [data-kf-reply]`);
+      if (r) { r.tabIndex = -1; r.focus({ preventScroll: true }); }
+      return;
+    }
+    const kfSave = t.closest('[data-kf-save]');
+    if (kfSave) {
+      const box = kfSave.closest('[data-kf]');
+      const b = findBlock(kfSave.dataset.kfSave);
+      const v = box.querySelector('[data-kf-text]').value.trim();
+      if (!v) return box.querySelector('[data-kf-text]').focus();
+      saveText(b.id + '~text', v);
+      return refreshBlock(box, renderKurzfrage(b, !!box.closest('.kp-kf-pop')));
+    }
+    // Über dich: speichern (Lage, Ziel, Fall) oder noch einmal ändern
+    const udSave = t.closest('[data-ud-save]');
+    if (udSave) {
+      const box = udSave.closest('[data-ud]');
+      const b = findBlock(udSave.dataset.udSave);
+      const pick = box.querySelector(`input[name="ud-${b.id}"]:checked`);
+      const val = k => { const el = box.querySelector(`[data-ud-text="${k}"]`); return el ? el.value.trim() : null; };
+      const roles = (b.roles || []).filter(x => String(x || '').trim());
+      const gpick = box.querySelector(`input[name="udg-${b.id}"]:checked`);
+      const missing = (roles.length && !pick) || (udGuides(b).length && !gpick) || [['ziel', b.goalQ], ['fall', b.caseQ]].some(([k, q]) => q && udWords(val(k)) < 3);
+      if (missing) { const m = box.querySelector('[data-ud-missing]'); m.hidden = false; m.setAttribute('role', 'alert'); return; }
+      const st = state.self[b.id] = state.self[b.id] || {};
+      if (pick) st.r = Number(pick.value);
+      if (gpick) st.g = gpick.value;
+      if (b.goalQ) saveText(b.id + '~ziel', val('ziel'));
+      if (b.caseQ) saveText(b.id + '~fall', val('fall'));
+      st.done = true;
+      if (gpick) { report(); render(); const el = root.querySelector(`[data-ud="${b.id}"] .kp-saved`); if (el) { el.tabIndex = -1; el.focus(); } return; } // andere Bausteine der Seite zeigen jetzt die gewählte Figur
+      return refreshBlock(box, renderUeberdich(b));
+    }
+    const udEdit = t.closest('[data-ud-edit]');
+    if (udEdit) {
+      const b = findBlock(udEdit.dataset.udEdit);
+      refreshBlock(udEdit.closest('[data-ud]'), renderUeberdich(b, true));
+      const f = root.querySelector(`[data-ud="${b.id}"] textarea, [data-ud="${b.id}"] input`);
+      if (f) f.focus();
+      return;
+    }
+    if (t.closest('[data-lb-print]')) return printLernbuch();
+    if (t.closest('[data-lb-save]')) return saveTextFile((plainTitle(course.title || 'kurs').replace(/[^\wäöüÄÖÜß-]+/g, '-') || 'kurs') + '-lernbuch.txt', lernbuchText(), 'text/plain');
+    const rs = t.closest('[data-reflect-save]');
+    if (rs) {
+      const box = rs.closest('[data-reflect]');
+      const b = findBlock(rs.dataset.reflectSave);
+      const v = box.querySelector('[data-reflect-text]').value.trim();
+      if (!v) return box.querySelector('[data-reflect-text]').focus();
+      saveText(b.id, v);
+      return refreshBlock(box, renderReflection(b));
+    }
+    const ps = t.closest('[data-plan-save]');
+    if (ps) {
+      const box = ps.closest('[data-plan]');
+      const b = findBlock(ps.dataset.planSave);
+      saveText(b.id, Array.from(box.querySelectorAll('[data-plan-field]')).map(x => x.value));
+      return refreshBlock(box, renderPlan(b));
+    }
+    const pp = t.closest('[data-plan-print]');
+    if (pp) {
+      const box = pp.closest('[data-plan]');
+      const b = findBlock(pp.dataset.planPrint);
+      saveText(b.id, Array.from(box.querySelectorAll('[data-plan-field]')).map(x => x.value));
+      refreshBlock(box, renderPlan(b));
+      return printPlan(b);
+    }
+    const sv = t.closest('[data-survey-send]');
+    if (sv) {
+      const box = sv.closest('[data-survey]');
+      const b = findBlock(sv.dataset.surveySend);
+      const r = (b.statements || []).map((st, i) => { const c = box.querySelector(`input[name="s-${b.id}-${i}"]:checked`); return c ? Number(c.value) : 0; });
+      if (!r.some(Boolean)) return;
+      const cm = box.querySelector('[data-survey-comment]');
+      state.survey[b.id] = { r, c: cm ? cm.value.slice(0, 500) : '' };
+      return refreshBlock(box, renderSurvey(b));
+    }
+    const cert = t.closest('[data-cert-open]');
+    if (cert) {
+      const nameInput = root.querySelector('[data-cert-name]');
+      if (nameInput) {
+        if (!nameInput.value.trim()) { nameInput.focus(); return; }
+        state.name = nameInput.value.trim();
+      }
+      return openCertificate(findBlock(cert.dataset.certOpen));
+    }
+    // Kommentarmodus
+    if (t.closest('[data-review-toggle]')) { const pnl = root.querySelector('[data-review-panel]'); pnl.hidden = !pnl.hidden; return; }
+    if (t.closest('[data-review-save]')) {
+      const text = root.querySelector('[data-review-text]').value.trim();
+      const name = root.querySelector('[data-review-name]').value.trim() || 'Ohne Namen';
+      if (!text) return;
+      try { localStorage.setItem('kurs-review-name', name); } catch (e) { /* kein Speicher */ }
+      const list = reviewList();
+      list.push({ pageId: pages[state.current].id, pageTitle: pages[state.current].title, name, text, date: new Date().toISOString() });
+      try { localStorage.setItem(reviewKey, JSON.stringify(list)); } catch (e) { /* kein Speicher */ }
+      render();
+      root.querySelector('[data-review-panel]').hidden = false;
+      return;
+    }
+    if (t.closest('[data-review-export]')) {
+      return download('kommentare-' + String(course.title).toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.json', JSON.stringify({ courseId: course.id, courseTitle: course.title, comments: reviewList() }, null, 2));
+    }
+    // Nummern ins Bild: Nummer wählen, dann ein Ziel anklicken; ein Klick auf ein besetztes Ziel nimmt dessen Nummer auf
+    const pinSel = t.closest('[data-pin-sel]'), pinT = t.closest('[data-pin-target]');
+    if (pinSel || pinT) {
+      const qid = (pinSel || pinT).dataset.quiz, found = findQuestion(qid);
+      if (found) {
+        const q = found.q || found;
+        const at = pinsAt[qid] || (pinsAt[qid] = (q.pins || []).map(() => -1));
+        let focusSel = '';
+        if (pinSel) { const i = Number(pinSel.dataset.pinSel); pinsSel[qid] = pinsSel[qid] === i ? undefined : i; focusSel = `[data-pin-sel="${i}"]`; }
+        else {
+          const tg = Number(pinT.dataset.pinTarget), h = at.indexOf(tg), s = pinsSel[qid];
+          if (s != null) { if (h >= 0) at[h] = -1; at[s] = tg; pinsSel[qid] = undefined; }
+          else if (h >= 0) pinsSel[qid] = h;
+          focusSel = `[data-pin-target="${tg}"]`;
+        }
+        pinsRefresh(qid, q, focusSel);
+      }
+      return;
+    }
+    // Reihenfolge per Knopf
+    const up = t.closest('[data-up]'), down = t.closest('[data-down]');
+    if (up || down) {
+      const item = t.closest('.kp-order-item');
+      const list = item.parentElement;
+      if (up && item.previousElementSibling) list.insertBefore(item, item.previousElementSibling);
+      if (down && item.nextElementSibling) list.insertBefore(item.nextElementSibling, item);
+      (up || down).focus();
+      return;
+    }
+    // Stelle im Bild
+    const hs = t.closest('[data-hotspot]');
+    if (hs) {
+      const found = findQuestion(hs.dataset.hotspot);
+      if (!found || state.answers[found.q.id] != null) return;
+      const box = hs.closest('[data-quiz]');
+      if (needsConf(found.q, box)) return;
+      const r = hs.querySelector('img').getBoundingClientRect();
+      return answer(found.q, [Math.round((e.clientX - r.left) / r.width * 1000) / 10, Math.round((e.clientY - r.top) / r.height * 1000) / 10], box);
+    }
+  });
+
+  // Team „aufklappen“: aufgeklappte Personen merken (toggle steigt nicht auf, deshalb Capture), nichts neu zeichnen
+  root.addEventListener('toggle', e => {
+    const d = e.target && e.target.closest ? e.target.closest('details[data-person-open][data-team]') : null;
+    if (!d || !d.open) return;
+    const id = d.dataset.team, i = Number(d.dataset.personOpen);
+    const st = state.self[id] = state.self[id] || {};
+    st.open = st.open || [];
+    if (st.open.includes(i)) return;
+    st.open.push(i);
+    updateConditions(); renderFooter(); report();
+  }, true);
+  // Sprache umschalten
+  root.addEventListener('change', e => {
+    if (e.target.matches && e.target.matches('.kp-answer input, input[data-check-item], input[data-crit-item]')) uiSound('klick');
+    const anl = e.target.closest && e.target.closest('[data-cert-anlass]');
+    if (anl) {
+      const b = findBlock(anl.dataset.certAnlass), s0 = state.self[b.id] = state.self[b.id] || {};
+      s0.anlass = /^\d{4}-\d{2}-\d{2}$/.test(anl.value) ? anl.value : '';
+      const lead = root.querySelector(`[data-cert-lead="${b.id}"]`); if (lead) lead.href = certLeadMailto(b);
+      report(); return;
+    }
+    const bnIn = e.target.closest && e.target.closest('[data-bn-ask]');
+    if (bnIn) { const ok = bnIn.querySelector('[data-bn-ok]'); if (ok) ok.disabled = !bnIn.querySelector('input:checked'); return; }
+    const sel = e.target.closest && e.target.closest('[data-lang]');
+    if (!sel) return;
+    state.lang = applyLang(sel.value);
+    try { localStorage.setItem('kurs-sprache-' + (course.id || 'kurs'), state.lang); } catch (err) { /* kein Speicher */ }
+    const resPage = pages.find(p => p.result);
+    if (resPage) resPage.title = T('ergebnis');
+    render();
+    root.querySelector('[data-lang]')?.focus();
+    report();
+  });
+
+  // Aufgabe am Bildschirm: Eingabe prüfen (Enter oder Pfeil); die Regeln unter dem Feld ziehen beim Tippen mit, ohne neu zu zeichnen
+  root.addEventListener('submit', e => {
+    const f = e.target.closest && e.target.closest('[data-bs-form]');
+    if (!f) return;
+    e.preventDefault();
+    const inp = f.querySelector('[data-bs-input]');
+    bsSubmit(findBlock(f.dataset.bsForm), inp ? inp.value : '');
+  });
+  root.addEventListener('input', e => {
+    const inp = e.target.closest && e.target.closest('[data-bs-input]');
+    if (!inp) return;
+    const b = findBlock(inp.dataset.bsInput);
+    bsDraft[b.id] = inp.value;
+    const ul = inp.closest('[data-bs]').querySelector('[data-bs-rules]');
+    if (ul) ul.outerHTML = bsRules(b, inp.value);
+  });
+  // Lautstärke und Tempo: wirken sofort und gelten für den ganzen Kurs
+  // Regler zum Aufdecken: Stufe wechseln, ohne den Block neu zu zeichnen
+  root.addEventListener('input', e => {
+    const r = e.target.closest && e.target.closest('[data-rv]');
+    if (!r) return;
+    rvApply(findBlock(r.dataset.rv), r.closest('[data-reveal]'), r.value);
+  });
+  root.addEventListener('input', e => {
+    const vol = e.target.closest && e.target.closest('[data-narr-vol]');
+    const rate = e.target.closest && e.target.closest('[data-narr-rate]');
+    if (!vol && !rate) return;
+    if (vol) audioPrefs.vol = Number(vol.value);
+    if (rate) {
+      audioPrefs.rate = Number(rate.value);
+      const out = rate.parentElement.querySelector('output');
+      if (out) out.textContent = audioPrefs.rate + '×';
+    }
+    saveAudioPrefs();
+    applyAudioPrefs();
+    // die übrigen Regler im Kurs nachziehen, damit überall derselbe Wert steht
+    root.querySelectorAll('[data-narr-vol]').forEach(x => { x.value = audioPrefs.vol; });
+    root.querySelectorAll('[data-narr-rate]').forEach(x => {
+      x.value = audioPrefs.rate;
+      const o = x.parentElement.querySelector('output');
+      if (o) o.textContent = audioPrefs.rate + '×';
+    });
+  });
+
+  // Folgen-Regler: Wert und Ergebnis live, ohne den Block neu zu zeichnen (sonst verliert der Regler den Fokus)
+  root.addEventListener('input', e => {
+    const r = e.target.closest && e.target.closest('[data-lev]');
+    if (!r) return;
+    const box = r.closest('[data-levers]');
+    const b = findBlock(box.dataset.levers);
+    const st = state.self[b.id] || (state.self[b.id] = { v: {}, t: [] });
+    st.v = st.v || {}; st.t = st.t || [];
+    const i = Number(r.dataset.lev), s = (b.sliders || [])[i] || {};
+    st.v[i] = Number(r.value);
+    if (!st.t.includes(i)) st.t.push(i);
+    box.querySelector(`[data-lev-out="${i}"]`).textContent = r.value + (s.unit ? ' ' + s.unit : '');
+    box.querySelector('[data-lev-result]').innerHTML = leversResultHtml(b, st);
+    const hint = box.querySelector('[data-lev-hint]');
+    if (hint && st.t.length >= (b.sliders || []).length) hint.remove();
+  });
+  root.addEventListener('change', e => {
+    if (!(e.target.closest && e.target.closest('[data-lev]'))) return;
+    updateConditions(); renderFooter(); report();
+  });
+
+  // Regler der Selbsteinschätzung: Wert merken, ohne den Block neu zu zeichnen (sonst verliert der Regler den Fokus)
+  // Auch Klick oder Taste ohne Wertänderung zählt (wer „gar nicht sicher“ meint, lässt den Punkt links stehen)
+  const scSet = e => {
+    const r = e.target.closest && e.target.closest('[data-sc-r]');
+    if (!r || r.disabled || (e.type === 'keyup' && !/^(Arrow|Home|End| )/.test(e.key))) return;
+    const b = findBlock(r.closest('[data-self]').dataset.self);
+    const st = state.self[b.id] || (state.self[b.id] = { a: [], done: false });
+    st.a = st.a || [];
+    st.a[Number(r.dataset.scR)] = Number(r.value);
+    r.setAttribute('aria-valuetext', scValText(b, Number(r.value)));
+    r.closest('.kp-sc-rg').classList.add('is-set');
+    r.closest('.kp-sc-rg').classList.remove('is-missing');
+  };
+  ['input', 'click', 'keyup'].forEach(ev => root.addEventListener(ev, scSet));
+
+  // Schätzwert der Denkpause live anzeigen
+  root.addEventListener('input', e => {
+    const r = e.target.closest && e.target.closest('[data-pr-range]');
+    if (!r) return;
+    const b = findBlock(r.closest('[data-predict]').dataset.predict);
+    r.parentElement.querySelector('output').textContent = r.value + (b && b.unit ? ' ' + b.unit : '');
+  });
+
+  // Zuordnen per Ziehen: ein Kärtchen je Begriff; das bisherige wandert zurück in den Vorrat
+  function mddPlace(quizId, cardIdx, rowIdx, quiet) {
+    const wrap = root.querySelector(`[data-mdd="${quizId}"]`);
+    if (!wrap) return;
+    const card = wrap.querySelector(`[data-mdd-card="${cardIdx}"]`);
+    if (!card || card.classList.contains('kp-right')) return;
+    const pool = wrap.querySelector('[data-mdd-pool]');
+    const target = rowIdx == null ? pool : wrap.querySelector(`[data-mdd-drop="${rowIdx}"]`);
+    if (!target) return;
+    const live = wrap.hasAttribute('data-mail-live');
+    if (live && rowIdx != null && target.querySelector('.kp-right')) return; // belegte Stelle bleibt belegt
+    if (rowIdx != null) {
+      const old = target.querySelector('[data-mdd-card]');
+      if (old && old !== card) pool.appendChild(old);
+    }
+    target.querySelectorAll('.kp-sort-empty').forEach(x => x.remove());
+    const from = card.parentElement;
+    target.appendChild(card);
+    if (from !== pool && from.matches('[data-mdd-drop]') && !from.children.length) from.innerHTML = '';
+    if (pool !== target && !pool.querySelector('[data-mdd-card]') && !wrap.classList.contains('kp-mail')) pool.innerHTML = `<li class="kp-sort-empty">${T('allesZugeordnet')}</li>`;
+    if (pool === target) pool.querySelectorAll('.kp-sort-empty').forEach(x => x.remove());
+    if (!quiet) card.focus({ preventScroll: true });
+    if (live && rowIdx != null) mailLivePlace(wrap, card, rowIdx);
+  }
+  // Zuordnen mit Linien: Linien aus data-to der linken Begriffe als SVG über dem Raster zeichnen (nach Klick, Größenänderung, Zeichnen)
+  function drawMatchLines(wrap) {
+    const svg = wrap.querySelector('.kp-ml-svg'), grid = wrap.querySelector('.kp-ml-grid');
+    if (!svg || !grid) return;
+    const g = grid.getBoundingClientRect();
+    svg.setAttribute('viewBox', `0 0 ${Math.max(1, g.width)} ${Math.max(1, g.height)}`);
+    const done = wrap.classList.contains('kp-ml-done');
+    svg.innerHTML = Array.from(wrap.querySelectorAll('[data-ml-left]')).map(l => {
+      const to = Number(l.dataset.to); if (to < 0) return '';
+      const r = wrap.querySelector(`[data-ml-right="${to}"]`); if (!r) return '';
+      const a = l.getBoundingClientRect(), b = r.getBoundingClientRect();
+      const x1 = a.right - g.left, y1 = a.top + a.height / 2 - g.top, x2 = b.left - g.left, y2 = b.top + b.height / 2 - g.top, mx = (x1 + x2) / 2;
+      const cls = done ? (Number(l.dataset.mlLeft) === to ? 'kp-ml-ok' : 'kp-ml-no') : '';
+      return `<path class="${cls}" d="M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}"/>`;
+    }).join('');
+  }
+  root.addEventListener('click', e => {
+    const el = e.target.closest && (e.target.closest('[data-ml-left]') || e.target.closest('[data-ml-right]'));
+    const wrap = el && el.closest('[data-ml]');
+    if (!el || !wrap || el.disabled) return;
+    const pick = wrap.querySelector('.kp-ml-pick');
+    if (el.dataset.mlLeft != null) {
+      // zweiter Klick auf einen verbundenen Begriff löst die Linie; sonst wird er gewählt
+      if (pick === el) { el.classList.remove('kp-ml-pick'); el.removeAttribute('aria-pressed'); return; }
+      if (!pick && Number(el.dataset.to) >= 0) { el.dataset.to = -1; drawMatchLines(wrap); return; }
+      if (pick) { pick.classList.remove('kp-ml-pick'); pick.removeAttribute('aria-pressed'); }
+      el.classList.add('kp-ml-pick'); el.setAttribute('aria-pressed', 'true');
+      return;
+    }
+    const to = Number(el.dataset.mlRight);
+    if (!pick) { // rechts zuerst: Linie dieser Zuordnung lösen, falls vorhanden
+      const owner = wrap.querySelector(`[data-ml-left][data-to="${to}"]`); if (owner) { owner.dataset.to = -1; drawMatchLines(wrap); } return;
+    }
+    // eine Zuordnung gehört nur zu einem Begriff
+    wrap.querySelectorAll(`[data-ml-left][data-to="${to}"]`).forEach(o => { o.dataset.to = -1; });
+    pick.dataset.to = to; pick.classList.remove('kp-ml-pick'); pick.removeAttribute('aria-pressed');
+    drawMatchLines(wrap);
+    const next = Array.from(wrap.querySelectorAll('[data-ml-left]')).find(l => Number(l.dataset.to) < 0);
+    (next || el).focus({ preventScroll: true });
+  });
+  // Regal: Escape schließt die Ergebniskarte, der Fokus geht auf „Ergebnis ansehen“
+  root.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const r = e.target.closest && e.target.closest('[data-regal-result]');
+    if (!r || r.hidden) return;
+    e.stopPropagation(); regalClosed.add(r.dataset.regalResult); r.hidden = true;
+    const sh = r.closest('[data-quiz]').querySelector('[data-regal-show]'); if (sh) sh.focus();
+  });
+  // Regal: höchstens k Teile; ein weiteres Teil springt zurück und der Zähler sagt warum. Prüfen erst bei genau k.
+  root.addEventListener('change', e => {
+    const inp = e.target.closest && e.target.closest('.kp-regal-shelf input');
+    if (!inp) return;
+    const box = inp.closest('[data-quiz]'), found = findQuestion(box.dataset.quiz);
+    if (!found) return;
+    const k = regalPick(found.q), all = [...box.querySelectorAll('.kp-regal-shelf input')];
+    let n = all.filter(x => x.checked).length;
+    const c = box.querySelector('[data-regal-count]');
+    if (n > k) { inp.checked = false; n--; if (c) c.textContent = T('regalVoll').replace('{n}', k); }
+    else if (c) c.textContent = T('regalStand').replace('{k}', n).replace('{n}', k);
+    const btn = box.querySelector('[data-regal-check]'); if (btn) btn.disabled = n !== k;
+  });
+  // „Weiß ich nicht“ schließt die anderen Antworten aus (und umgekehrt), auch bei Mehrfachauswahl
+  root.addEventListener('change', e => {
+    const inp = e.target.closest && e.target.closest('.kp-has-dk input');
+    if (!inp || !inp.checked) return;
+    const all = inp.closest('.kp-has-dk').querySelectorAll('input');
+    if (inp.hasAttribute('data-dk')) all.forEach(x => { if (x !== inp) x.checked = false; });
+    else all.forEach(x => { if (x.hasAttribute('data-dk')) x.checked = false; });
+  });
+  // Nummern ins Bild per Ziehen: Nummer aus der Liste oder aus einem Ziel auf ein Ziel ziehen, zurück auf die Liste legt sie ab
+  root.addEventListener('dragstart', e => {
+    const el = e.target.closest && (e.target.closest('[data-pin-drag]') || e.target.closest('[data-pin-sel]'));
+    const box = el && el.closest('[data-pins]');
+    if (!el || !box) return;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', 'pin:' + box.dataset.pins + ':' + (el.dataset.pinDrag != null ? el.dataset.pinDrag : el.dataset.pinSel));
+  });
+  root.addEventListener('dragover', e => {
+    const tg = e.target.closest && (e.target.closest('[data-pin-target]') || e.target.closest('.kp-pins-side'));
+    if (!tg || !tg.closest('[data-pins]')) return;
+    e.preventDefault();
+  });
+  root.addEventListener('drop', e => {
+    const tg = e.target.closest && (e.target.closest('[data-pin-target]') || e.target.closest('.kp-pins-side'));
+    const box = tg && tg.closest('[data-pins]');
+    const m = /^pin:(.+):(\d+)$/.exec(e.dataTransfer.getData('text/plain') || '');
+    if (!box || !m || m[1] !== box.dataset.pins) return;
+    e.preventDefault();
+    const qid = m[1], i = Number(m[2]), found = findQuestion(qid);
+    if (!found) return;
+    const at = pinsAt[qid] || (pinsAt[qid] = (found.q.pins || []).map(() => -1));
+    if (tg.dataset.pinTarget != null) { const t = Number(tg.dataset.pinTarget), h = at.indexOf(t); if (h >= 0 && h !== i) at[h] = at[i]; at[i] = t; }
+    else at[i] = -1;
+    pinsSel[qid] = undefined;
+    pinsRefresh(qid, found.q, '');
+  });
+  root.addEventListener('dragstart', e => {
+    const card = e.target.closest && e.target.closest('[data-mdd-card]');
+    if (!card) return;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', 'mdd:' + card.dataset.quiz + ':' + card.dataset.mddCard);
+    card.classList.add('kp-dragging');
+  });
+  root.addEventListener('dragend', e => {
+    const card = e.target.closest && e.target.closest('[data-mdd-card]');
+    if (card) card.classList.remove('kp-dragging');
+  });
+  root.addEventListener('dragover', e => {
+    const box = e.target.closest && (e.target.closest('[data-mdd-drop]') || e.target.closest('[data-mdd-pool]'));
+    if (!box) return;
+    e.preventDefault();
+    box.classList.add('kp-over');
+  });
+  root.addEventListener('dragleave', e => {
+    const box = e.target.closest && (e.target.closest('[data-mdd-drop]') || e.target.closest('[data-mdd-pool]'));
+    if (box) box.classList.remove('kp-over');
+  });
+  root.addEventListener('drop', e => {
+    const box = e.target.closest && (e.target.closest('[data-mdd-drop]') || e.target.closest('[data-mdd-pool]'));
+    if (!box) return;
+    const parts = String(e.dataTransfer.getData('text/plain')).split(':');
+    if (parts[0] !== 'mdd') return;
+    e.preventDefault();
+    box.classList.remove('kp-over');
+    mddPlace(parts[1], parts[2], box.dataset.mddDrop == null ? null : box.dataset.mddDrop);
+  });
+  root.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !e.target.closest) return;
+    const box = e.target.closest('[data-mail-coach]');
+    if (box && !box.hidden) { e.preventDefault(); e.stopPropagation(); mailCoachClose(box.closest('[data-mdd]')); }
+  });
+  // Ohne Maus: Nummer des Begriffs am Kärtchen drücken
+  root.addEventListener('keydown', e => {
+    const card = e.target.closest && e.target.closest('[data-mdd-card]');
+    if (!card) return;
+    const rows = root.querySelectorAll(`[data-mdd="${card.dataset.quiz}"] [data-mdd-drop]`).length;
+    if (/^[1-9]$/.test(e.key) && Number(e.key) <= rows) {
+      e.preventDefault();
+      mddPlace(card.dataset.quiz, card.dataset.mddCard, String(Number(e.key) - 1));
+    } else if (e.key === 'Backspace' || e.key === 'Delete') {
+      e.preventDefault();
+      mddPlace(card.dataset.quiz, card.dataset.mddCard, null);
+    }
+  });
+
+  // Sortieren mit der Maus: ziehen und ablegen
+  root.addEventListener('dragstart', e => {
+    const item = e.target.closest && e.target.closest('[data-sort-item]');
+    if (!item) return;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', item.dataset.block + ':' + item.dataset.sortItem);
+    item.classList.add('kp-dragging');
+  });
+  root.addEventListener('dragend', e => {
+    const item = e.target.closest && e.target.closest('[data-sort-item]');
+    if (item) item.classList.remove('kp-dragging');
+  });
+  root.addEventListener('dragover', e => {
+    const box = e.target.closest && (e.target.closest('[data-sort-cat]') || e.target.closest('.kp-sort-pool'));
+    if (!box) return;
+    e.preventDefault();
+    box.classList.add('kp-over');
+  });
+  root.addEventListener('dragleave', e => {
+    const box = e.target.closest && (e.target.closest('[data-sort-cat]') || e.target.closest('.kp-sort-pool'));
+    if (box) box.classList.remove('kp-over');
+  });
+  root.addEventListener('drop', e => {
+    const box = e.target.closest && (e.target.closest('[data-sort-cat]') || e.target.closest('.kp-sort-pool'));
+    if (!box) return;
+    e.preventDefault();
+    box.classList.remove('kp-over');
+    const [id, idx] = String(e.dataTransfer.getData('text/plain')).split(':');
+    const b = findBlock(id);
+    if (!b) return;
+    const st = state.self[b.id] || { place: {}, done: false };
+    if (st.done) return;
+    if (box.dataset.sortCat != null) st.place[Number(idx)] = Number(box.dataset.sortCat);
+    else delete st.place[Number(idx)];
+    state.self[b.id] = st;
+    refreshBlock(box.closest('[data-sortcats]'), renderSort(b));
+  });
+
+  // Code-Schloss: eine Ziffer je Feld, der Fokus springt weiter; Pfeiltasten drehen die Stelle, Enter öffnet
+  root.addEventListener('input', e => {
+    const d = e.target.closest && e.target.closest('[data-lock-digit]');
+    if (!d) return;
+    const v = d.value.replace(/\D/g, '').slice(-1);
+    d.value = v;
+    if (v) { const next = d.closest('.kp-lock-dial').nextElementSibling; const n = next && next.querySelector('[data-lock-digit]'); if (n) { n.focus(); n.select(); } }
+  });
+  root.addEventListener('keydown', e => {
+    const d = e.target.closest && e.target.closest('[data-lock-digit], [data-lock-text]');
+    if (d) {
+      if (e.key === 'Enter') { e.preventDefault(); return lockTry(d.closest('[data-schloss]')); }
+      if (d.dataset.lockDigit == null) return;
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        const v = /^\d$/.test(d.value) ? Number(d.value) : (e.key === 'ArrowUp' ? -1 : 10);
+        d.value = String((v + (e.key === 'ArrowUp' ? 1 : -1) + 10) % 10);
+      } else if (e.key === 'Backspace' && !d.value) {
+        const prev = d.closest('.kp-lock-dial').previousElementSibling; const pv = prev && prev.querySelector('[data-lock-digit]');
+        if (pv) { e.preventDefault(); pv.value = ''; pv.focus(); }
+      }
+      return;
+    }
+    // Wahlbrett: Escape schließt die offene Aufgabe, der Fokus geht zurück auf die Kachel
+    const wp = e.key === 'Escape' && e.target.closest && e.target.closest('[data-wb-panel]');
+    if (wp) {
+      e.preventDefault(); e.stopPropagation();
+      const b = findBlock(wp.dataset.wbPanel), i = Number(wp.dataset.i);
+      delete wbOpen[b.id];
+      wbRefresh(b, `[data-wb-tile="${i}"]`);
+    }
+  });
+
+  // Tastatur: Sortierkarte mit Zifferntasten zuordnen (Alternative zum Ziehen, WCAG 2.5.7)
+  root.addEventListener('keydown', e => {
+    const item = e.target.closest && e.target.closest('[data-sort-item]');
+    if (!item) return;
+    const b = findBlock(item.dataset.block);
+    const st = state.self[b.id] || { place: {}, done: false };
+    if (!b || st.done) return;
+    if (/^[1-9]$/.test(e.key) && Number(e.key) <= (b.categories || []).length) {
+      e.preventDefault();
+      st.place[Number(item.dataset.sortItem)] = Number(e.key) - 1;
+    } else if (e.key === 'Backspace' || e.key === 'Delete') {
+      e.preventDefault();
+      delete st.place[Number(item.dataset.sortItem)];
+    } else return;
+    state.self[b.id] = st;
+    refreshBlock(item.closest('[data-sortcats]'), renderSort(b));
+  });
+
+  // Tastatur: Stelle im Bild mit Pfeiltasten wählen
+  root.addEventListener('keydown', e => {
+    const hs = e.target.closest && e.target.closest('[data-hotspot]');
+    if (!hs || e.target !== hs) return;
+    const found = findQuestion(hs.dataset.hotspot);
+    if (!found || state.answers[found.q.id] != null) return;
+    const c = state.cross[found.q.id] || [50, 50];
+    const step = e.shiftKey ? 1 : 4;
+    const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    if (moves[e.key]) {
+      e.preventDefault();
+      c[0] = Math.max(0, Math.min(100, c[0] + moves[e.key][0]));
+      c[1] = Math.max(0, Math.min(100, c[1] + moves[e.key][1]));
+      state.cross[found.q.id] = c;
+      const cross = hs.querySelector('.kp-cross');
+      cross.style.left = c[0] + '%';
+      cross.style.top = c[1] + '%';
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      const box = hs.closest('[data-quiz]');
+      if (needsConf(found.q, box)) return;
+      answer(found.q, [c[0], c[1]], box);
+    }
+  });
+
+  // Ziehen in Reihenfolge-Fragen
+  root.addEventListener('dragstart', e => {
+    const item = e.target.closest && e.target.closest('.kp-order-item');
+    if (!item) return;
+    item.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  root.addEventListener('dragend', e => { const it = e.target.closest && e.target.closest('.kp-order-item'); if (it) it.classList.remove('dragging'); });
+  root.addEventListener('dragover', e => {
+    const list = e.target.closest && e.target.closest('[data-order]');
+    const dragging = list && list.querySelector('.dragging');
+    if (!dragging) return;
+    e.preventDefault();
+    const over = e.target.closest('.kp-order-item');
+    if (!over || over === dragging) return;
+    const rect = over.getBoundingClientRect();
+    list.insertBefore(dragging, e.clientY < rect.top + rect.height / 2 ? over : over.nextSibling);
+  });
+
+  document.addEventListener('keydown', e => {
+    if (!e.target.matches || e.target.matches('input, textarea, select, [data-hotspot]')) return;
+    if (document.querySelector('.kp-lightbox')) return;
+    if (e.key === 'ArrowRight') root.querySelector('[data-footer] [data-next]:not(:disabled)')?.click();
+    if (e.key === 'ArrowLeft') root.querySelector('[data-footer] [data-back]:not(:disabled)')?.click();
+    if (e.key === 'Escape') closeDrawer();
+    if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.isContentEditable && fsEnabled()) { e.preventDefault(); toggleFullscreen(); }
+  });
+
+  function close() {
+    if (!lms || finished) return;
+    report();
+    finished = true;
+    try { lms.finish(); } catch (e) { /* Fenster wird geschlossen */ }
+  }
+  window.addEventListener('pagehide', close);
+  window.addEventListener('beforeunload', close);
+
+  // ---------- Start ----------
+  // Wiederholung beim Wiedereinstieg: ein paar Fragen aus dem, was schon gelernt wurde (Abstand hilft dem Behalten).
+  // Kopien mit eigener ID, damit die Antwort im Kurs selbst unberührt bleibt; sie zählen nie zur Bewertung.
+  const resumeCopies = {};
+  function resumeReviewQuestions(loc) {
+    const n = Number(set.resumeReview) || 0;
+    if (n <= 0) return [];
+    const before = allQuestionsBefore(loc, '');
+    // Zuerst, was zuletzt falsch war, dann das schon Beantwortete, zuletzt Unbekanntes
+    const pick = wrongFirst(before, true).map(q => q.id).slice(0, n);
+    const byId = {};
+    before.forEach(q => { byId[q.id] = q; });
+    return pick.map(id => {
+      const key = id + '~resume';
+      if (!resumeCopies[key]) resumeCopies[key] = Object.assign({}, byId[id], { id: key, attempts: 0, confidence: false });
+      return resumeCopies[key];
+    });
+  }
+  function showResume(loc) {
+    const rq = resumeReviewQuestions(loc);
+    rq.forEach(q => { if (!items.some(x => x.id === q.id)) items.push({ id: q.id, pageIndex: loc, q, graded: false, points: 0, objective: '' }); });
+    const box = document.createElement('div');
+    box.className = 'kp-resume' + (rq.length ? ' kp-resume-wide' : '');
+    box.innerHTML = `<div class="kp-resume-box" role="dialog" aria-modal="true" aria-label="${T('willkommenZurueck')}">
+      <h2 style="margin-top:0">${firstName() ? T('willkommenZurueckName').replace('{n}', esc(firstName())) : T('willkommenZurueck')}</h2>
+      <p>${T('zuletztAuf')} ${loc + 1}: „${esc(pages[loc].title)}“.</p>
+      ${lastOwnWords(loc)}${goalCard('kp-goal-resume')}
+      ${rq.length ? `<div class="kp-resume-review"><p class="kp-label">${T('kurzWiederholen')}</p><p class="kp-resume-hint">${T('kurzWiederholenHinweis')}</p>${rq.map(q => renderQuiz(q, false)).join('')}</div>` : ''}
+      <div class="kp-quiz-actions"><button class="kp-btn" data-resume="yes">${T('dortWeitermachen')}</button><button class="kp-btn kp-sec" data-resume="no">${T('vonVorn')}</button></div></div>`;
+    // Im Player-Wurzelelement, damit die Fragen darin über die normalen Klick-Handler laufen
+    root.appendChild(box);
+    box.querySelector(rq.length ? '.kp-resume-box' : '[data-resume="yes"]').focus({ preventScroll: true });
+    if (rq.length) activateComponents(box);
+    box.addEventListener('click', ev => {
+      const btn = ev.target.closest('[data-resume]');
+      if (!btn) return;
+      box.remove();
+      if (btn.dataset.resume === 'yes') { state.current = loc; render(true); }
+    });
+  }
+
+  (async function start() {
+    let saved = null;
+    let lmsActive = lms;
+    if (lms) {
+      saved = await lms.start();
+      if (!saved) lmsActive = null;
+    }
+    if (!lmsActive && lms) { /* Start im LMS fehlgeschlagen: Kurs läuft ohne Meldung weiter */ }
+    const useLms = !!lmsActive;
+    let resumeAt = 0;
+    if (useLms && saved) {
+      lmsName = saved.name || '';
+      if (saved.masteryScore != null && saved.masteryScore !== '') passScore = Math.round(Number(saved.masteryScore) * 100);
+      try {
+        const d = JSON.parse(saved.suspend || '{}');
+        (d.v || []).forEach(i => state.visited.add(i));
+        Object.assign(state.answers, d.a || {});
+        Object.assign(state.tries, d.t || {});
+        Object.assign(state.pools, d.p || {});
+        Object.assign(state.branch, d.b || {});
+        Object.assign(state.conf, d.c || {});
+        Object.assign(state.survey, d.s || {});
+        Object.assign(state.texts, d.x || {});
+        Object.assign(state.watched, d.w || {});
+        Object.assign(state.self, d.k || {});
+        if (d.l) state.lang = d.l;
+      } catch (e) { /* kein gespeicherter Stand */ }
+      resumeAt = parseInt(saved.location, 10) || 0;
+    }
+    // Sprache: gespeicherte Wahl, sonst Adresse (?sprache=en) oder die letzte Wahl in diesem Browser
+    if (langs.length) {
+      let want = state.lang || '';
+      try { want = want || new URLSearchParams(location.search).get('sprache') || localStorage.getItem('kurs-sprache-' + (course.id || 'kurs')) || ''; } catch (e) { /* kein Speicher */ }
+      state.lang = applyLang(want);
+    }
+    drawPools(false);
+    buildItems();
+    if (graded().length) pages.push({ id: '_result', title: T('ergebnis'), blocks: [], result: true });
+    if (!useLms) { finished = true; }
+    if (opts.startPage != null && opts.startPage >= 0 && opts.startPage < pages.length) state.current = opts.startPage;
+    render();
+    if (resumeAt > 0 && resumeAt < pages.length) {
+      // Mit Wiederholungsrunde erscheint das Fenster auch bei „automatisch weitermachen“
+      if (set.resume === 'auto' && !(Number(set.resumeReview) > 0)) { state.current = resumeAt; render(); }
+      else showResume(resumeAt);
+    }
+  })();
+}
