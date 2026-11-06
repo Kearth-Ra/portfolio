@@ -152,8 +152,8 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 .looks .frame { border-radius: var(--r); overflow: hidden; border: 1px solid var(--line); background: var(--sand); aspect-ratio: 4 / 3; }
 .looks img, .looks video { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0; transition: transform .8s var(--ease); }
 .looks figure:hover img, .looks figure:hover video { transform: scale(1.04); }
-.looks figcaption { display: flex; justify-content: space-between; gap: 12px; margin-top: 12px; font-size: 16px; color: var(--muted); }
-.looks figcaption b { color: var(--ink); font-size: 18px; font-stretch: 106%; }
+.looks figcaption { margin-top: 12px; font-size: 16px; color: var(--muted); }
+.looks figcaption b { display: block; color: var(--ink); font-size: 18px; font-stretch: 106%; }
 .looks + .looks { margin-top: 32px; }
 .row-name { grid-column: 1 / -1; display: flex; gap: 14px; align-items: baseline; font-size: 15px; font-weight: 600; color: var(--muted); }
 .row-name::after { content: ''; flex: 1; height: 1px; background: var(--line); }
@@ -232,19 +232,19 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 
 <section class="hero" aria-labelledby="h-hero">
   <div class="wrap">
-    <div class="tag"><b>KR Consulting</b>E-Learning · Erklärvideos · Lernkonzepte</div>
+    <div class="tag"><b>KR Consulting</b>Lernkonzepte und E-Learning für Führung und Personalentwicklung</div>
     <h1 id="h-hero"><span class="ln"><span>Lernen, das man</span></span><span class="ln"><span><em>nicht</em> wegklickt.</span></span></h1>
     <div class="hero-row">
       <div class="rv">
-        <p class="intro">Ich entwickle E-Learnings, Erklärvideos und Lernkonzepte für Führungskräfte und Fachleute. Ihre Mitarbeitenden entscheiden, üben am eigenen Fall und nehmen etwas mit, das am nächsten Arbeitstag hilft.</p>
+        <p class="intro">Viele E-Learnings werden durchgeklickt und sind am nächsten Tag vergessen. In meinen Kursen entscheiden Ihre Mitarbeitenden an Fällen aus ihrem Alltag und sehen, was daraus wird. Ich entwickle sie für Führungskräfte und Fachleute, vom Konzept bis zum fertigen Paket.</p>
         <div class="cta">
           <a class="btn" href="#kurse">Beispielkurse ansehen <span class="arr" aria-hidden="true">→</span></a>
-          <a class="btn line" href="#reel">Showreel</a>
+          <a class="btn line" href="#reel">Showreel ansehen</a>
         </div>
       </div>
       <figure class="portrait rv" style="--d:1">
         <img src="media/kerstin.jpg" alt="Kerstin Rafai im Workshop vor einem Flipchart" width="720" height="480" data-parallax>
-        <figcaption>Kerstin Rafai, Personal- und Führungskräfteentwicklung</figcaption>
+        <figcaption>Kerstin Rafai im Workshop</figcaption>
       </figure>
     </div>
   </div>
@@ -260,7 +260,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
   <div class="wrap">
     <div class="reel-head rv">
       <div><div class="tag"><b>(01)</b>Showreel · 78 Sekunden</div><h2 class="mid" id="h-reel">Kurz vorgestellt</h2></div>
-      <p>Aufnahmen aus meinen Kursen: Fälle mit Folgen, Übungen am eigenen Fall, ein 3D-Modell, Arbeitsblätter, Prompts zum Kopieren und die Begleitung online oder in Präsenz. Musik ohne Sprache.</p>
+      <p>Alles in diesem Video stammt aus echten Kursen: ein Gespräch, das kippt, ein Motor in 3D, ein Prompt zum Kopieren und Arbeitsblätter für das eigene Team. Es läuft mit Musik, ohne Sprecher.</p>
     </div>
     <div class="reel-box rv">
       <video controls playsinline preload="none" poster="media/kerstin-rafai-e-learning.jpg" data-reel aria-label="Showreel: E-Learning, das man zu Ende macht">
@@ -275,27 +275,27 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
   <div class="wrap">
     <div class="split rv">
       <div><div class="tag"><b>(02)</b>Angebot</div><h2 class="big" id="h-angebot">Was ich für Sie entwickle</h2></div>
-      <p class="intro">Einzeln oder kombiniert, vom Microlearning bis zum ganzen Programm. Konzept, Storyboard und Umsetzung aus einer Hand.</p>
+      <p class="intro">Sie können einen einzelnen Kurs beauftragen oder ein ganzes Programm. Konzept, Kurs und Videos mache ich selbst, Sie haben also eine Ansprechpartnerin für alles.</p>
     </div>
     <div class="bento">
       <article class="tile wide rv">
         <div class="tile-pic"><img src="media/offer-elearning.jpg" alt="Kursseite: Lernende sprechen im Chat mit Tarek und wählen ihre Antwort" loading="lazy"></div>
-        <div class="tile-body"><span class="tile-num">01 E-Learning</span><h3>E-Learnings, die man zu Ende macht</h3><p>Szenarien mit Folgen, Chats und Übungen am eigenen Fall. 10 bis 45 Minuten, als SCORM oder cmi5, am Rechner und am Handy.</p><div class="links"><a href="#kurse">Beispielkurse</a></div></div>
+        <div class="tile-body"><span class="tile-num">01 E-Learning</span><h3>E-Learnings, die man zu Ende macht</h3><p>Ihre Mitarbeitenden führen ein Gespräch im Chat, entscheiden in einer Szene und üben am eigenen Fall. Ein Kurs dauert 10 bis 45 Minuten und läuft in jedem gängigen Lernsystem, auch am Handy.</p><div class="links"><a href="#kurse">Beispielkurse</a></div></div>
       </article>
       <article class="tile narrow rv" style="--d:1">
         <div class="tile-pic"><video src="media/clip-erklaer.mp4" poster="media/clip-erklaer.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Erklärvideo"></video></div>
-        <div class="tile-body"><span class="tile-num">02 Erklärvideo</span><h3>Videos, die ein Thema greifbar machen</h3><p>Erklärvideo, Motion oder Scribble, mit Stimme und Untertiteln.</p><div class="links"><a href="#looks">Videoarten</a></div></div>
+        <div class="tile-body"><span class="tile-num">02 Erklärvideo</span><h3>Erklärvideos für Abläufe und Modelle</h3><p>Als flache Illustration, als Motion-Film oder als Scribble mit zeichnender Hand. Mit Sprecherstimme und Untertiteln.</p><div class="links"><a href="#looks">Videoarten</a></div></div>
       </article>
       <article class="tile narrow rv">
         <div class="tile-pic"><img src="media/offer-konzept.jpg" alt="Kursseite: zwei Menschen aus dem Fall erzählen, was bei ihnen getragen hat" loading="lazy"></div>
-        <div class="tile-body"><span class="tile-num">03 Konzept und Storyline</span><h3>Lernkonzepte mit einer Geschichte</h3><p>Lernziele, ein Fall mit Figuren als roter Faden, Storyboard zur Freigabe.</p><div class="links"><a href="#ablauf">So arbeite ich</a></div></div>
+        <div class="tile-body"><span class="tile-num">03 Konzept und Storyline</span><h3>Lernkonzepte mit einer Geschichte</h3><p>Ein Fall mit Figuren trägt durch den ganzen Kurs. Lernziele und Storyboard bekommen Sie vorab zur Freigabe, auch wenn Sie selbst umsetzen.</p><div class="links"><a href="#ablauf">So arbeite ich</a></div></div>
       </article>
       <article class="tile wide dark rv" style="--d:1">
         <div class="tile-pic"><img src="kurse/fmk-workslop.jpg" alt="Titelfolie der Einheit „Workslop erkennen und benennen“ aus dem Programm Führen mit KI" loading="lazy"></div>
-        <div class="tile-body"><span class="tile-num">04 Programm für Führungskräfte</span><h3>Führen mit KI</h3><p>Blended Learning über zehn Monate: 7 Live-Tage, 23 E-Learnings, Transfer ins Team und ein Nachweis je Person nach Art. 4 KI-Verordnung.</p><div class="links"><a href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht (PDF)</a><a href="#kurse" data-live="fmk-hebel">Einheit ausprobieren</a></div></div>
+        <div class="tile-body"><span class="tile-num">04 Programm für Führungskräfte</span><h3>Führen mit KI</h3><p>Ein Programm für Führungskräfte über zehn Monate. Zwischen sieben Live-Tagen liegen 23 kurze E-Learnings, und nach jedem Tag setzen die Führungskräfte etwas im eigenen Team um. Am Ende hat jede Person einen Nachweis nach Art. 4 KI-Verordnung.</p><div class="links"><a href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht (PDF)</a><a href="#kurse" data-live="fmk-hebel">Einheit ausprobieren</a></div></div>
       </article>
     </div>
-    <div class="facts rv"><span>Barrierearm geprüft</span><span>KI-gekennzeichnet nach Art. 50 KI-Verordnung</span><span>Ihre Farben, Schriften und Ihr Logo</span></div>
+    <div class="facts rv"><span>Kontrast und Tastaturbedienung geprüft</span><span>KI-Einsatz gekennzeichnet nach Art. 50 KI-Verordnung</span><span>Auf Wunsch in Ihrem Corporate Design</span></div>
   </div>
 </section>
 
@@ -303,7 +303,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
   <div class="wrap">
     <div class="split rv">
       <div><div class="tag"><b>(03)</b>Beispielkurse</div><h2 class="big" id="h-kurse">Zum Durchklicken</h2></div>
-      <p class="intro">Beispielkurse aus meinem Angebot, so wie sie in Ihrem Lernsystem laufen. Als Leseprobe sind jeweils die ersten fünf Folien offen.</p>
+      <p class="intro">Beispielkurse aus meinem Angebot, so wie sie in Ihrem Lernsystem laufen. Klicken Sie sich durch die ersten fünf Folien. Wie es weitergeht, zeige ich Ihnen gern im Gespräch.</p>
     </div>
     <div class="cases">
       <button class="case rv" type="button" aria-pressed="true" data-kurs="fmk-hebel" data-titel="Führen mit KI 0.4: Der Hebel bist du"><em class="chip">Führen mit KI</em><img src="kurse/fmk-hebel.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Einheit 0.4 · Microlearning</small><b>Der Hebel bist du</b></span><i aria-hidden="true">→</i></span></button>
@@ -329,7 +329,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
         </div>
       </div>
     </div>
-    <p class="note">Eigene Kurse ohne Kundeninhalte, Bilder von Pexels und Storyset. Ihre Antworten bleiben in Ihrem Browser.</p>
+    <p class="note">Alle Beispiele sind meine eigenen Kurse, ohne Inhalte von Kunden. Fotos von Pexels, Illustrationen von Storyset. Was Sie eingeben, bleibt in Ihrem Browser.</p>
   </div>
 </section>
 
@@ -337,19 +337,19 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
   <div class="wrap">
     <div class="split rv">
       <div><div class="tag"><b>(04)</b>Looks und Videoarten</div><h2 class="big" id="h-looks">So kann Ihr Kurs aussehen</h2></div>
-      <p class="intro">Drei Looks mit festen Regeln für Farbe, Schrift und Bild, dazu drei selbst produzierte Videoarten. Ihr Design setze ich auf Wunsch ein.</p>
+      <p class="intro">Jeder Look folgt festen Regeln, damit der Kurs von der ersten bis zur letzten Folie zusammenpasst. Ihre Farben und Ihr Logo baue ich ein. Die Videos produziere ich selbst.</p>
     </div>
     <div class="looks">
       <div class="row-name">Looks aus echten Kursen</div>
-      <figure class="rv"><div class="frame"><img src="media/look-foto.jpg" alt="Foto mit sechs Fragen als Punkte im Bild" loading="lazy"></div><figcaption><b>Foto</b>Echte Menschen, echte Orte</figcaption></figure>
-      <figure class="rv" style="--d:1"><div class="frame"><img src="media/look-comic.jpg" alt="Titelseite mit Illustration: Eine Veränderung führen, die du nicht entschieden hast" loading="lazy"></div><figcaption><b>Comic</b>Abstand für heikle Themen</figcaption></figure>
-      <figure class="rv" style="--d:2"><div class="frame"><img src="media/look-micro.jpg" alt="Titelfolie der Microlearning-Einheit Der Hebel bist du" loading="lazy"></div><figcaption><b>Microlearning</b>Ein Fall, ein Ziel</figcaption></figure>
+      <figure class="rv"><div class="frame"><img src="media/look-foto.jpg" alt="Foto mit sechs Fragen als Punkte im Bild" loading="lazy"></div><figcaption><b>Foto</b>Wenn sich Ihre Leute in der Situation wiedererkennen sollen.</figcaption></figure>
+      <figure class="rv" style="--d:1"><div class="frame"><img src="media/look-comic.jpg" alt="Titelseite mit Illustration: Eine Veränderung führen, die du nicht entschieden hast" loading="lazy"></div><figcaption><b>Comic und Illustration</b>Wenn ein Thema heikel ist und etwas Abstand braucht.</figcaption></figure>
+      <figure class="rv" style="--d:2"><div class="frame"><img src="media/look-micro.jpg" alt="Titelfolie der Microlearning-Einheit Der Hebel bist du" loading="lazy"></div><figcaption><b>Microlearning</b>Für Reihen über mehrere Wochen, je Einheit 10 bis 15 Minuten.</figcaption></figure>
     </div>
     <div class="looks">
       <div class="row-name">Videoarten, Ausschnitte ohne Ton</div>
-      <figure class="rv"><div class="frame"><video src="media/clip-erklaer.mp4" poster="media/clip-erklaer.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Erklärvideo"></video></div><figcaption><b>Erklärvideo</b>Abläufe und Begriffe</figcaption></figure>
-      <figure class="rv" style="--d:1"><div class="frame"><video src="media/clip-motion.mp4" poster="media/clip-motion.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Motion-Video"></video></div><figcaption><b>Motion</b>Räume in 2,5D</figcaption></figure>
-      <figure class="rv" style="--d:2"><div class="frame"><video src="media/clip-scribble.mp4" poster="media/clip-scribble.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Scribble-Video mit zeichnender Hand"></video></div><figcaption><b>Scribble</b>Modelle Strich für Strich</figcaption></figure>
+      <figure class="rv"><div class="frame"><video src="media/clip-erklaer.mp4" poster="media/clip-erklaer.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Erklärvideo"></video></div><figcaption><b>Erklärvideo</b>Für Abläufe und Begriffe.</figcaption></figure>
+      <figure class="rv" style="--d:1"><div class="frame"><video src="media/clip-motion.mp4" poster="media/clip-motion.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Motion-Video"></video></div><figcaption><b>Motion</b>Für Kampagnen und Sicherheitsthemen.</figcaption></figure>
+      <figure class="rv" style="--d:2"><div class="frame"><video src="media/clip-scribble.mp4" poster="media/clip-scribble.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Scribble-Video mit zeichnender Hand"></video></div><figcaption><b>Scribble</b>Für Modelle und Gesprächstechniken.</figcaption></figure>
     </div>
   </div>
 </section>
@@ -358,20 +358,20 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
   <div class="wrap">
     <div class="split rv">
       <div><div class="tag"><b>(05)</b>Ablauf</div><h2 class="big" id="h-ablauf">So arbeiten wir zusammen</h2></div>
-      <p class="intro">Fünf Schritte, klare Freigaben. Sie sehen den Kurs früh und kommentieren direkt darin.</p>
+      <p class="intro">Sie sehen den Kurs früh als klickbare Fassung und schreiben Ihre Anmerkungen direkt hinein. So wissen Sie bei jedem Schritt, woran wir sind.</p>
     </div>
     <div class="steps">
-      <div class="rv"><em>01</em><b>Erstgespräch</b><span>Ziel, Zielgruppe, Umfang und Lernsystem.</span></div>
-      <div class="rv" style="--d:1"><em>02</em><b>Konzept</b><span>Lernziele, Gliederung und Storyboard zur Freigabe.</span></div>
-      <div class="rv" style="--d:2"><em>03</em><b>Erstfassung</b><span>Klickbarer Kurs mit Kommentaren.</span></div>
-      <div class="rv" style="--d:3"><em>04</em><b>Feinschliff</b><span>Ihre Anmerkungen, Fachprüfung, Endkontrolle.</span></div>
-      <div class="rv" style="--d:4"><em>05</em><b>Lieferung</b><span>Fertiges Paket und Testlauf in Ihrem LMS.</span></div>
+      <div class="rv"><em>01</em><b>Erstgespräch</b><span>Wir klären, wer lernen soll und was danach anders sein soll.</span></div>
+      <div class="rv" style="--d:1"><em>02</em><b>Konzept</b><span>Sie bekommen Lernziele und Storyboard zur Freigabe.</span></div>
+      <div class="rv" style="--d:2"><em>03</em><b>Erstfassung</b><span>Ein klickbarer Kurs, in dem Sie direkt kommentieren.</span></div>
+      <div class="rv" style="--d:3"><em>04</em><b>Feinschliff</b><span>Ich arbeite Ihre Anmerkungen ein, Ihre Fachleute prüfen.</span></div>
+      <div class="rv" style="--d:4"><em>05</em><b>Lieferung</b><span>Wir testen das fertige Paket gemeinsam in Ihrem LMS.</span></div>
     </div>
     <div class="faq rv">
-      <details><summary>Was kostet ein Kurs oder ein Video?</summary><p>Das hängt von Umfang, Format und Ihren Inhalten ab. Nach dem Erstgespräch erhalten Sie ein Angebot mit Umfang, Preis und Zeitplan.</p></details>
-      <details><summary>Läuft der Kurs in unserem Lernsystem?</summary><p>Ja, als SCORM 1.2, SCORM 2004 oder cmi5. Abschluss, Testergebnisse und Lernziele gehen an Ihr LMS.</p></details>
-      <details><summary>Woher kommen die Inhalte?</summary><p>Aus Ihren Unterlagen und Gesprächen mit Ihren Fachleuten. Texte, Szenarien und Fragen stimme ich fachlich mit Ihnen ab.</p></details>
-      <details><summary>Setzen Sie KI ein?</summary><p>Ja, als Werkzeug. Jeden Inhalt prüfe und verantworte ich selbst, jeder Kurs ist nach Artikel 50 der KI-Verordnung gekennzeichnet.</p></details>
+      <details><summary>Was kostet ein Kurs oder ein Video?</summary><p>Das hängt vor allem von der Länge und der Zahl der Videos ab. Nach dem Erstgespräch bekommen Sie ein Angebot mit festem Preis.</p></details>
+      <details><summary>Läuft der Kurs in unserem Lernsystem?</summary><p>Ja. Ich liefere SCORM 1.2, SCORM 2004 oder cmi5, Ihr LMS bekommt Abschluss und Testergebnis. Vor der Übergabe testen wir das Paket zusammen.</p></details>
+      <details><summary>Woher kommen die Inhalte?</summary><p>Aus Ihren Unterlagen und aus Gesprächen mit Ihren Fachleuten. Ich schreibe die Texte und Fälle, Ihre Fachleute geben sie frei.</p></details>
+      <details><summary>Setzen Sie KI ein?</summary><p>Ja, als Werkzeug. Jeden Inhalt prüfe ich selbst und stehe dafür ein. Jeder Kurs ist nach Artikel 50 der KI-Verordnung gekennzeichnet.</p></details>
     </div>
   </div>
 </section>
@@ -383,7 +383,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
     <a class="mail rv" href="mailto:kerstinrafai@gmail.com">kerstinrafai@gmail.com</a>
     <div class="contact-grid">
       <div class="rv">
-        <p>In einem kurzen Erstgespräch klären wir Ziel, Umfang und Format. Danach erhalten Sie ein Angebot mit Preis und Zeitplan.</p>
+        <p>Erzählen Sie mir in einer halben Stunde, worum es geht und wer lernen soll. Danach schicke ich Ihnen ein Angebot mit Preis und Zeitplan.</p>
         <div class="me"><img src="media/kerstin.jpg" alt=""><div><b>Kerstin Rafai</b>KR Consulting</div></div>
       </div>
       <form class="ask rv" style="--d:1" data-ask>
