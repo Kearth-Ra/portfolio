@@ -377,6 +377,31 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 .logo::after { content: ''; position: absolute; right: -6px; bottom: -6px; width: 10px; height: 10px; background: #FD6E6E; }
 .brand:hover .logo { background: rgba(182,223,237,.12); }
 .brand .logo { color: #F3F9FB; }
+
+/* Preise in den Karten */
+.price { margin: 0 0 16px; padding-top: 12px; border-top: 1px solid var(--line); font-weight: 700; font-size: 18px; font-stretch: 106%; color: var(--ink); }
+.offer ul { margin-bottom: 14px; }
+
+/* Unterstützung */
+.helps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-top: 48px; border-top: 1px solid var(--line-night); }
+.help { padding: 28px 28px 30px 0; border-bottom: 1px solid var(--line-night); }
+.help:not(:nth-child(3n+1)) { padding-left: 28px; border-left: 1px solid var(--line-night); }
+.help em { display: block; font-style: normal; font-weight: 700; font-size: 15px; color: var(--coral); margin-bottom: 14px; font-variant-numeric: tabular-nums; }
+.help h3 { font-size: clamp(22px, 2vw, 26px); font-stretch: 108%; letter-spacing: -.015em; line-height: 1.15; margin-bottom: 10px; }
+.help p { margin: 0; color: var(--on-night-2); font-size: 17px; }
+@media (max-width: 900px) { .helps { grid-template-columns: 1fr 1fr; } .help, .help:not(:nth-child(3n+1)) { padding: 24px 20px 26px 0; border-left: 0; } .help:nth-child(2n) { padding-left: 20px; border-left: 1px solid var(--line-night); } }
+@media (max-width: 600px) { .helps { grid-template-columns: 1fr; } .help, .help:nth-child(2n) { padding: 22px 0; border-left: 0; } }
+
+/* Über mich */
+.about { background: var(--sand); color: var(--ink); }
+.helpsec { background: var(--night2); }
+.about .intro { color: var(--muted); margin-bottom: 16px; }
+.about .tag b { color: var(--ink); }
+.about-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: clamp(32px, 5vw, 80px); align-items: center; }
+.about-pic { margin: 0; }
+.about-pic img { width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; object-position: 60% 20%; border-radius: var(--r); }
+@media (max-width: 900px) { .about-grid { grid-template-columns: 1fr; } }
+.about :focus-visible { outline-color: var(--ink); }
 </style>
 </head>
 <body>
@@ -386,9 +411,9 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
     <a class="brand" href="#start" aria-label="Kerstin Rafai, zur Startseite"><span class="logo" aria-hidden="true">KR</span></a>
     <nav class="nav" aria-label="Bereiche">
       <a href="#angebot">Angebot</a>
+      <a href="#unterstuetzung">Unterstützung</a>
       <a href="#kurse">Beispielkurse</a>
-      <a href="#looks">Looks</a>
-      <a href="#videos">Videos</a>
+      <a href="#ueber-mich">Über mich</a>
       <a href="#ablauf">Ablauf</a>
     </nav>
     <a class="btn" href="#kontakt">Erstgespräch</a>
@@ -399,14 +424,14 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 
 <section class="hero" aria-labelledby="h-hero">
   <div class="wrap">
-    <div class="tag">Lernkonzepte und E-Learning für Führung und Personalentwicklung</div>
+    <div class="tag">E-Learning, Erklärvideos und Schulungsprogramme für Führung und Personalentwicklung</div>
     <h1 id="h-hero"><span class="ln"><span>Lernen, das man</span></span><span class="ln"><span><em>nicht</em> wegklickt.</span></span></h1>
     <div class="hero-row">
       <div class="rv">
-        <p class="intro">Viele E-Learnings werden durchgeklickt und sind am nächsten Tag vergessen. In meinen Kursen entscheiden Ihre Mitarbeitenden an Fällen aus ihrem Alltag und sehen, was daraus wird. Ich entwickle sie für Führungskräfte und Fachleute, vom Konzept bis zum fertigen Paket.</p>
+        <p class="intro">Sie haben ein Thema, aber keine Zeit oder kein Team, um daraus ein gutes Lernangebot zu machen? Ich übernehme so viel oder so wenig, wie Sie brauchen, und starte mit dem Material, das Sie schon haben. Ihre Mitarbeitenden entscheiden dann an Fällen aus ihrem Alltag, statt Folien durchzuklicken.</p>
         <div class="cta">
           <a class="btn" href="#kurse">Beispielkurse ansehen <span class="arr" aria-hidden="true">→</span></a>
-          <a class="btn line" href="#reel">Showreel ansehen</a>
+          <a class="btn line" href="#unterstuetzung">So unterstütze ich Sie</a>
         </div>
       </div>
       <figure class="portrait rv" style="--d:1">
@@ -416,8 +441,8 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
   </div>
   <div class="ticker" aria-hidden="true">
     <div class="ticker-in">
-      <span>E-Learning</span><span>Erklärvideo</span><span>Storyboard</span><span>Microlearning</span><span>Führen mit KI</span><span>SCORM und cmi5</span><span>Blended Learning</span>
-      <span>E-Learning</span><span>Erklärvideo</span><span>Storyboard</span><span>Microlearning</span><span>Führen mit KI</span><span>SCORM und cmi5</span><span>Blended Learning</span>
+      <span>E-Learning</span><span>Erklärvideo</span><span>Storyboard</span><span>Microlearning</span><span>Führen mit KI</span><span>Schulungsprogramme</span><span>Blended Learning</span>
+      <span>E-Learning</span><span>Erklärvideo</span><span>Storyboard</span><span>Microlearning</span><span>Führen mit KI</span><span>Schulungsprogramme</span><span>Blended Learning</span>
     </div>
   </div>
 </section>
@@ -440,7 +465,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
   <div class="wrap">
     <div class="split rv">
       <div><div class="tag"><b>(02)</b>Angebot</div><h2 class="big" id="h-angebot">Was ich für Sie entwickle</h2></div>
-      <p class="intro">Einzeln oder kombiniert, vom Microlearning bis zur ganzen Lernreihe mit Videos und Konzept.</p>
+      <p class="intro">Einzeln oder kombiniert, vom kurzen Microlearning bis zum ganzen Programm mit Live-Terminen.</p>
     </div>
     <div class="offers">
       <article class="offer rv">
@@ -448,7 +473,8 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
         <div class="offer-body">
           <span class="offer-num">01 · E-Learning</span>
           <h3>E-Learnings, die man zu Ende macht</h3>
-          <ul><li>Szenarien mit Folgen, Chats, Übungen am eigenen Fall</li><li>Microlearning ab 10 Minuten bis zum Kompaktkurs</li><li>SCORM 1.2, SCORM 2004 oder cmi5, am Rechner und am Handy</li></ul>
+          <ul><li>Fälle mit Folgen, Gespräche im Chat, Übungen am eigenen Fall</li><li>Vom Microlearning ab 10 Minuten bis zum Kompaktkurs</li><li>Läuft in Ihrem Lernsystem, am Rechner und am Handy</li></ul>
+          <p class="price">ab 1.500 €</p>
           <a class="more" href="#kurse">Beispielkurse ansehen <span aria-hidden="true">→</span></a>
         </div>
       </article>
@@ -457,17 +483,19 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
         <div class="offer-body">
           <span class="offer-num">02 · Erklärvideo</span>
           <h3>Erklärvideos für Abläufe und Modelle</h3>
-          <ul><li>Drei Videoarten: Erklärvideo, Motion und Scribble</li><li>Mit Sprecherstimme und Untertiteln</li><li>Für den Kurs, das Intranet oder den Kickoff</li></ul>
+          <ul><li>Drei Videoarten zur Wahl, je nach Thema</li><li>Mit Sprecherstimme und Untertiteln</li><li>Für den Kurs, das Intranet oder den Kickoff</li></ul>
+          <p class="price">750 bis 2.000 €</p>
           <a class="more" href="#videos">Videoarten ansehen <span aria-hidden="true">→</span></a>
         </div>
       </article>
       <article class="offer rv" style="--d:2">
         <div class="offer-pic"><img src="media/offer-konzept.jpg" alt="Kursseite: zwei Menschen aus dem Fall erzählen, was bei ihnen getragen hat" loading="lazy"></div>
         <div class="offer-body">
-          <span class="offer-num">03 · Konzept und Storyline</span>
-          <h3>Lernkonzepte mit einer Geschichte</h3>
-          <ul><li>Lernziele, Gliederung und Storyboard zur Freigabe</li><li>Ein Fall mit Figuren als roter Faden</li><li>Auch als Vorlage für Ihr eigenes Autorentool</li></ul>
-          <a class="more" href="#ablauf">So arbeite ich <span aria-hidden="true">→</span></a>
+          <span class="offer-num">03 · Schulungsprogramm</span>
+          <h3>Schulungsprogramme und Blended Learning</h3>
+          <ul><li>Live-Trainings online oder in Präsenz</li><li>Kurze E-Learnings zwischen den Terminen</li><li>Transfer ins Team, damit das Gelernte im Alltag ankommt</li></ul>
+          <p class="price">auf Anfrage</p>
+          <a class="more" href="#kontakt">Programm anfragen <span aria-hidden="true">→</span></a>
         </div>
       </article>
     </div>
@@ -483,14 +511,31 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
         <a class="special-try" href="#kurse" data-live="fmk-hebel">Eine Einheit ausprobieren</a>
       </div>
     </article>
-    <p class="facts rv">Kontrast und Tastaturbedienung geprüft <i aria-hidden="true">·</i> KI-Einsatz gekennzeichnet nach Art. 50 KI-Verordnung <i aria-hidden="true">·</i> Auf Wunsch in Ihrem Corporate Design</p>
+    <p class="facts rv">Preise sind Richtwerte, den festen Preis bekommen Sie nach dem Erstgespräch <i aria-hidden="true">·</i> Kontrast und Tastaturbedienung geprüft <i aria-hidden="true">·</i> KI-Einsatz gekennzeichnet nach Art. 50 KI-Verordnung <i aria-hidden="true">·</i> Auf Wunsch in Ihrem Corporate Design</p>
+  </div>
+</section>
+
+<section id="unterstuetzung" class="helpsec" aria-labelledby="h-hilfe">
+  <div class="wrap">
+    <div class="split rv">
+      <div><div class="tag"><b>(03)</b>Unterstützung</div><h2 class="big" id="h-hilfe">So viel oder so wenig, wie Sie brauchen</h2></div>
+      <p class="intro">Nicht jedes Thema braucht ein großes Projekt. Sie entscheiden, welchen Teil ich übernehme. Wir können auch klein anfangen und mit einem Pilot testen, bevor das ganze Programm steht.</p>
+    </div>
+    <div class="helps">
+      <article class="help rv"><em>01</em><h3>Komplett aus einer Hand</h3><p>Konzept, Storyboard, Kurs und Videos. Sie geben frei, ich kümmere mich um den Rest bis zum Testlauf in Ihrem Lernsystem.</p></article>
+      <article class="help rv" style="--d:1"><em>02</em><h3>Nur Konzept und Storyboard</h3><p>Lernziele, ein Fall als roter Faden und ein Storyboard, das Ihr Team selbst umsetzt, in Ihrem Autorentool.</p></article>
+      <article class="help rv" style="--d:2"><em>03</em><h3>Präsenz wird digital</h3><p>Aus Ihren Folien und Seminarunterlagen wird ein E-Learning oder ein Blended-Format, ohne dass der Inhalt verloren geht.</p></article>
+      <article class="help rv"><em>04</em><h3>Bestehende Kurse auffrischen</h3><p>Sie haben Kurse, die keiner zu Ende macht? Ich überarbeite sie mit Fällen und Übungen, statt alles neu zu bauen.</p></article>
+      <article class="help rv" style="--d:1"><em>05</em><h3>Beratung zum digitalen Lernen</h3><p>Welche Formate passen zu Ihrem Thema, und wie spielen Präsenz, online und E-Learning zusammen? Wir klären das, bevor Geld in die Umsetzung fließt.</p></article>
+      <article class="help rv" style="--d:2"><em>06</em><h3>Ihr Team befähigen</h3><p>Ich zeige Ihren Trainerinnen und Trainern, wie gute digitale Formate entstehen, damit Sie künftig mehr selbst machen können.</p></article>
+    </div>
   </div>
 </section>
 
 <section id="kurse" aria-labelledby="h-kurse">
   <div class="wrap">
     <div class="split rv">
-      <div><div class="tag"><b>(03)</b>Beispielkurse</div><h2 class="big" id="h-kurse">Zum Durchklicken</h2></div>
+      <div><div class="tag"><b>(04)</b>Beispielkurse</div><h2 class="big" id="h-kurse">Zum Durchklicken</h2></div>
       <p class="intro">Beispielkurse aus meinem Angebot, so wie sie in Ihrem Lernsystem laufen. Klicken Sie sich durch die ersten fünf Folien. Wie es weitergeht, zeige ich Ihnen gern im Gespräch.</p>
     </div>
     <div class="cases">
@@ -524,7 +569,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 <section id="looks" class="light" aria-labelledby="h-looks">
   <div class="wrap">
     <div class="split rv">
-      <div><div class="tag"><b>(04)</b>Looks</div><h2 class="big" id="h-looks">So kann Ihr Kurs aussehen</h2></div>
+      <div><div class="tag"><b>(05)</b>Looks</div><h2 class="big" id="h-looks">So kann Ihr Kurs aussehen</h2></div>
       <p class="intro">Jeder Look folgt festen Regeln, damit der Kurs von der ersten bis zur letzten Folie zusammenpasst. Ihre Farben und Ihr Logo baue ich ein.</p>
     </div>
     <div class="looks">
@@ -538,22 +583,34 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 <section id="videos" class="vids" aria-labelledby="h-videos">
   <div class="wrap">
     <div class="split rv">
-      <div><div class="tag"><b>(05)</b>Erklärvideos</div><h2 class="big" id="h-videos">Welche Videoart erzählt Ihr Thema?</h2></div>
+      <div><div class="tag"><b>(06)</b>Erklärvideos</div><h2 class="big" id="h-videos">Welche Videoart erzählt Ihr Thema?</h2></div>
       <p class="intro">Drei Videoarten, alle selbst produziert: mit Sprechtext, Storyboard, Untertiteln und lizenzfreien Bildern. Hier sehen Sie kurze Ausschnitte ohne Ton.</p>
     </div>
     <div class="vgrid">
-      <article class="vcard rv"><video src="media/clip-erklaer.mp4" poster="media/clip-erklaer.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Erklärvideo"></video><div><h3>Erklärvideo</h3><p>Flache Illustrationen, Figuren und Kamerafahrten. Für Abläufe, Begriffe und Werkzeuge.</p></div></article>
-      <article class="vcard rv" style="--d:1"><video src="media/clip-motion.mp4" poster="media/clip-motion.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Motion-Video"></video><div><h3>Motion</h3><p>Räume in 2,5D mit Licht, Tiefe und geteiltem Bild. Für Kampagnen und Sicherheitsthemen.</p></div></article>
+      <article class="vcard rv"><video src="media/clip-erklaer.mp4" poster="media/clip-erklaer.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Erklärvideo"></video><div><h3>Erklärvideo</h3><p>Flache Illustrationen mit Figuren, die durch einen Ablauf führen. Gut für Begriffe und Werkzeuge.</p></div></article>
+      <article class="vcard rv" style="--d:1"><video src="media/clip-motion.mp4" poster="media/clip-motion.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Motion-Video"></video><div><h3>Motion</h3><p>Räume mit Licht und Tiefe, durch die die Kamera fährt. Für Kampagnen und Sicherheitsthemen.</p></div></article>
       <article class="vcard rv" style="--d:2"><video src="media/clip-scribble.mp4" poster="media/clip-scribble.jpg" muted loop playsinline preload="metadata" data-auto aria-label="Ausschnitt aus einem Scribble-Video mit zeichnender Hand"></video><div><h3>Scribble</h3><p>Eine Hand zeichnet den Gedanken Strich für Strich. Für Modelle und Gesprächstechniken.</p></div></article>
     </div>
     <p class="vnote rv">Videos liefere ich als MP4 mit Untertiteldatei, im Kurs eingebunden oder für Intranet und Veranstaltungen. Längere Themen teile ich in Serien, kein Video wird länger als sechs bis sieben Minuten.</p>
   </div>
 </section>
 
+<section id="ueber-mich" class="about" aria-labelledby="h-about">
+  <div class="wrap about-grid">
+    <figure class="about-pic rv"><img src="media/kerstin-2.jpg" alt="Kerstin Rafai erklärt im Seminar" loading="lazy" width="1200" height="1013"></figure>
+    <div class="rv" style="--d:1">
+      <div class="tag"><b>(07)</b>Über mich</div>
+      <h2 class="big" id="h-about">Ich komme aus dem Seminarraum</h2>
+      <p class="intro">Seit rund zehn Jahren arbeite ich in der Personal- und Führungskräfteentwicklung. Ich habe Trainings geleitet, Programme für Führungskräfte konzipiert und baue die E-Learnings und Videos dazu selbst.</p>
+      <p class="intro">Deshalb weiß ich, was in einem Training funktioniert und was davon digital trägt. Und Sie haben eine Ansprechpartnerin für Konzept, Umsetzung und Live-Termine.</p>
+    </div>
+  </div>
+</section>
+
 <section id="ablauf" class="light" aria-labelledby="h-ablauf">
   <div class="wrap">
     <div class="split rv">
-      <div><div class="tag"><b>(06)</b>Ablauf</div><h2 class="big" id="h-ablauf">So arbeiten wir zusammen</h2></div>
+      <div><div class="tag"><b>(08)</b>Ablauf</div><h2 class="big" id="h-ablauf">So arbeiten wir zusammen</h2></div>
       <p class="intro">Sie sehen den Kurs früh als klickbare Fassung und schreiben Ihre Anmerkungen direkt hinein. So wissen Sie bei jedem Schritt, woran wir sind.</p>
     </div>
     <div class="steps">
@@ -564,7 +621,8 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       <div class="rv" style="--d:4"><em>05</em><b>Lieferung</b><span>Wir testen das fertige Paket gemeinsam in Ihrem LMS.</span></div>
     </div>
     <div class="faq rv">
-      <details><summary>Was kostet ein Kurs oder ein Video?</summary><p>Das hängt vor allem von der Länge und der Zahl der Videos ab. Nach dem Erstgespräch bekommen Sie ein Angebot mit festem Preis.</p></details>
+      <details><summary>Was kostet ein Kurs oder ein Video?</summary><p>Erklärvideos liegen je nach Länge und Videoart zwischen 750 und 2.000 €. E-Learnings starten bei 1.500 €. Schulungsprogramme biete ich auf Anfrage an, weil Umfang und Live-Anteil sehr verschieden sind. Nach dem Erstgespräch bekommen Sie ein Angebot mit festem Preis.</p></details>
+      <details><summary>Wir haben schon Folien und Unterlagen. Reicht das?</summary><p>Ja, damit starte ich am liebsten. Ich mache daraus Fälle und Übungen und zeige Ihnen früh eine klickbare Fassung, damit Sie sehen, wohin es geht.</p></details>
       <details><summary>Läuft der Kurs in unserem Lernsystem?</summary><p>Ja. Ich liefere SCORM 1.2, SCORM 2004 oder cmi5, Ihr LMS bekommt Abschluss und Testergebnis. Vor der Übergabe testen wir das Paket zusammen.</p></details>
       <details><summary>Woher kommen die Inhalte?</summary><p>Aus Ihren Unterlagen und aus Gesprächen mit Ihren Fachleuten. Ich schreibe die Texte und Fälle, Ihre Fachleute geben sie frei.</p></details>
       <details><summary>Setzen Sie KI ein?</summary><p>Ja, als Werkzeug. Jeden Inhalt prüfe ich selbst und stehe dafür ein. Jeder Kurs ist nach Artikel 50 der KI-Verordnung gekennzeichnet.</p></details>
@@ -574,13 +632,13 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 
 <section id="kontakt" class="contact" aria-labelledby="h-kontakt">
   <div class="wrap">
-    <div class="tag"><b>(07)</b>Kontakt</div>
+    <div class="tag"><b>(09)</b>Kontakt</div>
     <h2 id="h-kontakt" class="rv">Lassen Sie uns über Ihr Thema sprechen.</h2>
     <a class="mail rv" href="mailto:kerstinrafai@gmail.com">kerstinrafai@gmail.com</a>
     <div class="contact-grid">
       <div class="rv">
         <p>Erzählen Sie mir in einer halben Stunde, worum es geht und wer lernen soll. Danach schicke ich Ihnen ein Angebot mit Preis und Zeitplan.</p>
-        <figure class="me2"><img src="media/kerstin-2.jpg" alt="Kerstin Rafai erklärt im Seminar" loading="lazy" width="1200" height="1013"><figcaption><b>Kerstin Rafai</b>Personal- und Führungskräfteentwicklung</figcaption></figure>
+        <div class="me"><img src="media/kerstin.jpg" alt=""><div><b>Kerstin Rafai</b>Personal- und Führungskräfteentwicklung</div></div>
       </div>
       <form class="ask rv" style="--d:1" data-ask>
         <h3>Ihre Anfrage in einer Minute</h3>
@@ -588,7 +646,9 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
         <div class="choice" role="group" aria-labelledby="ask-was">
           <button type="button" aria-pressed="false">E-Learning</button>
           <button type="button" aria-pressed="false">Erklärvideo</button>
+          <button type="button" aria-pressed="false">Schulungsprogramm</button>
           <button type="button" aria-pressed="false">Konzept und Storyboard</button>
+          <button type="button" aria-pressed="false">Präsenz digital machen</button>
           <button type="button" aria-pressed="false">Programm „Führen mit KI“</button>
         </div>
         <label for="f-thema">Ihr Thema</label>
@@ -606,7 +666,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 
 <footer>
   <div class="wrap">
-    <nav class="foot-nav" aria-label="Fußzeile"><a href="#angebot">Angebot</a><a href="#kurse">Beispielkurse</a><a href="#videos">Videos</a><a href="#kontakt">Kontakt</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a><a href="#start">Nach oben ↑</a></nav>
+    <nav class="foot-nav" aria-label="Fußzeile"><a href="#angebot">Angebot</a><a href="#unterstuetzung">Unterstützung</a><a href="#kurse">Beispielkurse</a><a href="#videos">Videos</a><a href="#kontakt">Kontakt</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a><a href="#start">Nach oben ↑</a></nav>
     <span>© Kerstin Rafai</span>
     <span>Bilder in den Kursbeispielen: Pexels und Storyset (storyset.com). Erstellt mit KI-Unterstützung, von mir geprüft.</span>
   </div>
@@ -620,6 +680,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       <button type="button" data-kf="0">Sie werden nur durchgeklickt</button>
       <button type="button" data-kf="1">Im Team fehlen Zeit und Know-how</button>
       <button type="button" data-kf="2">Unsere Führungskräfte sollen mit KI arbeiten</button>
+      <button type="button" data-kf="3">Wir haben Material, aber nichts Digitales</button>
     </div>
     <div class="kf-reply" data-kf-reply hidden tabindex="-1"></div>
   </div>
@@ -681,8 +742,9 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
   var kf = $('[data-kf]'), kfo = $('[data-kf-open]');
   var REPLY = [
     'Das kenne ich. Dagegen helfen Entscheidungen mit Folgen statt Folien. <a href="#kurse">Probieren Sie es in einem Beispielkurs aus</a>.',
-    'Dann übernehme ich Konzept, Storyboard und Umsetzung, Sie geben frei. <a href="#ablauf">So arbeite ich</a>.',
-    'Dafür gibt es mein Programm „Führen mit KI“. <a href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht als PDF</a>.'
+    'Dann übernehme ich so viel, wie Sie brauchen, vom Storyboard bis zum fertigen Kurs. <a href="#unterstuetzung">So unterstütze ich Sie</a>.',
+    'Dafür gibt es mein Programm „Führen mit KI“. <a href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht als PDF</a>.',
+    'Damit starte ich am liebsten. Aus Ihren Folien und Unterlagen wird ein Kurs mit Fällen und Übungen. <a href="#unterstuetzung">So unterstütze ich Sie</a>.'
   ];
   function openKf() { kf.hidden = false; kfo.hidden = true; }
   function closeKf() { kf.hidden = true; kfo.hidden = false; kfo.focus(); }
