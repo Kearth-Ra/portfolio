@@ -378,7 +378,8 @@ footer { padding: 34px 0 30px; }
 .light :focus-visible, .contact :focus-visible, .ask :focus-visible, .kf :focus-visible { outline-color: var(--ink); }
 
 /* Aus dem Testlauf */
-video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offset: 3px; }
+video:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+iframe:focus, iframe:focus-visible { outline: none; }
 .foot-nav a { display: inline-block; padding: 8px 0; }
 .stage-new { display: inline-block; padding: 8px 4px; }
 
