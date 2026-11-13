@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kerstin Rafai · E-Learning, Erklärvideos, Schulungsprogramme</title>
 <meta name="description" content="E-Learnings, Erklärvideos und Schulungsprogramme für Führung und Personalentwicklung. Mit Beispielkursen zum Ausprobieren und dem Programm „Führen mit KI“.">
+<link rel="icon" type="image/svg+xml" href="media/favicon.svg">
 <link rel="canonical" href="https://kearth-ra.github.io/portfolio/">
 <meta property="og:type" content="website">
 <meta property="og:locale" content="de_DE">
@@ -39,7 +40,7 @@
   --paper: #EEF6F9; --ink: #002941; --muted: #3D5768; --line: #CFE3EC;
   --blue: #B6DFED; --blue-ink: #002941; --sand: #D7EBF3; --coral: #FD6E6E;
   --on-night: #F3F9FB; --on-night-2: rgba(243,249,251,.78); --line-night: rgba(182,223,237,.2);
-  --r: 14px; --maxw: 1320px; --side: clamp(18px, 4.5vw, 64px);
+  --r: 6px; --maxw: 1320px; --side: clamp(18px, 4.5vw, 64px);
   --ease: cubic-bezier(.2,.7,.2,1);
 }
 * { box-sizing: border-box; }
@@ -115,11 +116,6 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 @media (max-width: 900px) { .hero-row { grid-template-columns: 1fr; } }
 
 /* Laufband */
-.ticker { margin-top: clamp(56px, 7vw, 96px); border-top: 1px solid var(--line-night); border-bottom: 1px solid var(--line-night); overflow: hidden; }
-.ticker-in { display: flex; width: max-content; animation: run 38s linear infinite; }
-.ticker:hover .ticker-in { animation-play-state: paused; }
-.ticker span { display: flex; align-items: center; gap: 36px; padding: 22px 18px; font-size: clamp(22px, 2.6vw, 38px); font-weight: 600; font-stretch: 112%; letter-spacing: -.02em; white-space: nowrap; }
-.ticker span::after { content: ''; width: 12px; height: 12px; border-radius: 50%; background: var(--blue); }
 @keyframes run { to { transform: translateX(-50%); } }
 
 /* Showreel */
@@ -189,18 +185,9 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 
 /* Looks */
 .split { display: grid; grid-template-columns: 1.5fr 1fr; gap: 28px 64px; align-items: end; }
-.looks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 48px; }
-.looks figure { margin: 0; }
-.looks .frame { border-radius: var(--r); overflow: hidden; border: 1px solid var(--line); background: var(--sand); aspect-ratio: 4 / 3; }
-.looks img, .looks video { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0; transition: transform .8s var(--ease); }
-.looks figure:hover img, .looks figure:hover video { transform: scale(1.04); }
-.looks figcaption { margin-top: 12px; font-size: 16px; color: var(--muted); }
-.looks figcaption b { display: block; color: var(--ink); font-size: 18px; font-stretch: 106%; }
-.looks + .looks { margin-top: 32px; }
 .row-name { grid-column: 1 / -1; display: flex; gap: 14px; align-items: baseline; font-size: 15px; font-weight: 600; color: var(--muted); }
 .row-name::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
-@media (max-width: 700px) { .looks { grid-template-columns: 1fr; } }
 
 /* Ablauf */
 .steps { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 56px; border-top: 1px solid var(--line-night); }
@@ -232,7 +219,7 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 .ask { background: #fff; color: var(--ink); border-radius: var(--r); padding: 28px; }
 .ask h3 { font-size: 24px; font-stretch: 106%; letter-spacing: -.01em; }
 .ask label, .ask .lbl { display: block; font-weight: 600; font-size: 16px; margin: 16px 0 6px; }
-.ask input, .ask textarea { width: 100%; padding: 12px 14px; border: 1px solid #C9CCD2; border-radius: 10px; font: inherit; font-size: 17px; color: var(--ink); }
+.ask input, .ask textarea { width: 100%; padding: 12px 14px; border: 1px solid #C9CCD2; border-radius: var(--r); font: inherit; font-size: 17px; color: var(--ink); }
 .ask textarea { min-height: 92px; resize: vertical; }
 .choice { display: flex; flex-wrap: wrap; gap: 8px; }
 .choice button { padding: 8px 15px; border: 1px solid #C9CCD2; border-radius: 999px; background: #fff; font: inherit; font-size: 15.5px; cursor: pointer; color: var(--ink); }
@@ -250,7 +237,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .rv { opacity: 1; transform: none; transition: none; }
-  .hero h1 .ln > span, .ticker-in { animation: none; }
+  .hero h1 .ln > span { animation: none; }
   .portrait img { transform: none; }
 }
 
@@ -302,7 +289,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 .kf-x { position: absolute; top: 6px; right: 8px; width: 32px; height: 32px; border: 0; background: none; font-size: 17px; cursor: pointer; color: var(--muted); }
 .kf-bubble b { display: block; font-size: 17px; line-height: 1.35; margin: 0 24px 12px 0; }
 .kf-opts { display: grid; gap: 6px; }
-.kf-opts button { padding: 9px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); font: inherit; font-size: 15.5px; text-align: left; cursor: pointer; color: var(--ink); }
+.kf-opts button { padding: 9px 14px; border: 1px solid var(--line); border-radius: var(--r); background: var(--paper); font: inherit; font-size: 15.5px; text-align: left; cursor: pointer; color: var(--ink); }
 .kf-opts button:hover { border-color: var(--blue-ink); }
 .kf-reply { font-size: 16px; color: var(--muted); }
 .kf-reply a { font-weight: 700; color: var(--blue-ink); }
@@ -317,7 +304,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 @media (max-width: 1000px) { .offers { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 600px) { .offers { grid-template-columns: 1fr; } }
 .special { display: grid; grid-template-columns: 260px 1fr auto; gap: 28px; align-items: center; margin-top: 20px; padding: 14px 28px 14px 14px; border-radius: var(--r); background: var(--night); color: var(--on-night); }
-.special-pic { border-radius: 10px; overflow: hidden; aspect-ratio: 16 / 9; }
+.special-pic { border-radius: var(--r); overflow: hidden; aspect-ratio: 16 / 9; }
 .special-pic img { width: 100%; height: 100%; object-fit: cover; object-position: 0 0; }
 .special-tag { display: inline-block; padding: 4px 12px; border-radius: 999px; background: var(--blue-ink); color: #fff; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .special h3 { margin: 10px 0 6px; font-size: clamp(22px, 2vw, 28px); font-stretch: 108%; letter-spacing: -.02em; }
@@ -353,7 +340,6 @@ footer { padding: 34px 0 30px; }
 
 /* Farbkombi Midnight Navy, Soft Blue, Coral (Coral nur als kleiner Akzent) */
 .hero h1 em { color: var(--coral); }
-.ticker span::after { background: var(--coral); }
 .top.solid { background: rgba(0,41,65,.94); }
 .hero .cta .btn:first-child, .contact-cta { background: var(--coral); border-color: var(--coral); color: var(--ink); }
 .btn:hover, .hero .cta .btn:first-child:hover { background: var(--blue); border-color: var(--blue); color: var(--ink); }
@@ -422,12 +408,46 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 .about .intro { color: var(--muted); margin-bottom: 16px; }
 .about .big { margin-bottom: clamp(20px, 2.4vw, 32px); }
 .about .tag b { color: var(--ink); }
-.about-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: clamp(32px, 5vw, 80px); align-items: center; }
+.about-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: clamp(32px, 5vw, 80px); align-items: start; }
 .about-pic { margin: 0; }
 .about-pic img { width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; object-position: 60% 20%; border-radius: var(--r); }
 @media (max-width: 900px) { .about-grid { grid-template-columns: 1fr; } }
 .about :focus-visible { outline-color: var(--ink); }
 .price small { font-weight: 500; font-size: 14px; color: var(--muted); font-stretch: 100%; }
+
+/* Faktenzeile im Einstieg */
+.hfacts { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); margin: clamp(56px, 7vw, 96px) 0 0; padding: 0; border-top: 1px solid var(--line-night); border-bottom: 1px solid var(--line-night); }
+.hfacts li { padding: 26px 24px 28px 0; }
+.hfacts li + li { padding-left: 24px; border-left: 1px solid var(--line-night); }
+.hfacts b { display: block; white-space: nowrap; font-size: clamp(34px, 3.6vw, 56px); font-weight: 700; font-stretch: 112%; letter-spacing: -.02em; line-height: 1.1; margin-bottom: 8px; }
+.hfacts span { display: block; color: var(--on-night-2); font-size: 16px; line-height: 1.45; hyphens: auto; overflow-wrap: break-word; }
+@media (max-width: 900px) { .hfacts { grid-template-columns: 1fr 1fr; } .hfacts li, .hfacts li + li { padding: 20px 16px 22px 0; border-left: 0; } .hfacts li:nth-child(2n) { padding-left: 16px; border-left: 1px solid var(--line-night); } .hfacts li:nth-child(n+3) { border-top: 1px solid var(--line-night); } }
+.hero .intro strong { display: block; margin-bottom: 12px; color: var(--on-night); font-weight: 600; }
+
+/* Unterstützung auf hellem Grund */
+.light.helpsec { background: var(--paper); }
+.light .helps, .light .help, .light .help:not(:nth-child(3n+1)), .light .help:nth-child(2n) { border-color: var(--line); }
+.light .help em { color: var(--ink); }
+.light .help p { color: var(--muted); }
+.partner { display: grid; grid-template-columns: 1fr auto; gap: 20px 48px; align-items: center; margin-top: 40px; padding: 28px 32px; border-radius: var(--r); background: var(--night); color: var(--on-night); }
+.partner h3 { margin: 12px 0 8px; font-size: clamp(22px, 2vw, 28px); font-stretch: 108%; letter-spacing: -.02em; color: var(--on-night); }
+.partner p { margin: 0; max-width: 760px; color: var(--on-night-2); font-size: 17px; text-wrap: pretty; }
+.light .partner .btn { background: var(--on-night); border-color: var(--on-night); color: var(--ink); }
+.light .partner .btn:hover { background: var(--blue); border-color: var(--blue); color: var(--ink); }
+.light .partner :focus-visible { outline-color: var(--on-night); }
+@media (max-width: 800px) { .partner { grid-template-columns: 1fr; padding: 24px 20px 26px; } }
+
+/* Über mich: Fakten */
+.about-facts { margin: 22px 0 0; border-top: 1px solid rgba(0,41,65,.2); }
+.about-facts div { display: grid; grid-template-columns: 190px 1fr; gap: 6px 24px; padding: 14px 0; border-bottom: 1px solid rgba(0,41,65,.2); }
+.about-facts dt { font-weight: 700; font-stretch: 106%; color: var(--ink); }
+.about-facts dd { margin: 0; color: var(--muted); font-size: 17px; }
+@media (max-width: 600px) { .about-facts div { grid-template-columns: 1fr; } }
+
+/* Assistent: am Handy kleiner, beim Kontakt aus dem Weg */
+@media (max-width: 600px) { .kf-open { right: 12px; bottom: 12px; } .kf-open img { width: 46px; height: 46px; } }
+.kf-away .kf-open { opacity: 0; visibility: hidden; pointer-events: none; }
+.kf-open { transition: opacity .25s, visibility .25s; }
 </style>
 </head>
 <body>
@@ -437,8 +457,8 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
     <a class="brand" href="#start" aria-label="Kerstin Rafai, zur Startseite"><span class="logo" aria-hidden="true">KR</span></a>
     <nav class="nav" id="hauptnav" aria-label="Bereiche">
       <a href="#angebot">Angebot</a>
-      <a href="#unterstuetzung">Unterstützung</a>
       <a href="#kurse">Beispielkurse</a>
+      <a href="#unterstuetzung">Unterstützung</a>
       <a href="#ueber-mich">Über mich</a>
       <a href="#ablauf">Ablauf</a>
     </nav>
@@ -455,7 +475,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
     <h1 id="h-hero"><span class="ln"><span>Lernen, das man</span></span><span class="ln"><span><em>nicht</em> wegklickt.</span></span></h1>
     <div class="hero-row">
       <div class="rv">
-        <p class="intro">Sie haben ein Thema, das ein gutes Lernangebot verdient, aber im Alltag kommt ständig Dringenderes dazwischen? Ich übernehme so viel oder so wenig, wie Sie brauchen, und starte mit dem Material, das Sie schon haben. Ich unterstütze die Fachleute in Ihrem Learning-Team und kümmere mich als zusätzliche Kapazität um die Themen, die sonst liegen bleiben.</p>
+        <p class="intro"><strong>Sie haben ein Thema, das ein gutes Lernangebot verdient, aber im Alltag kommt ständig Dringenderes dazwischen?</strong> Ich unterstütze die Fachleute in Ihrem Learning-Team und kümmere mich als zusätzliche Kapazität um die Themen, die sonst liegen bleiben.</p>
         <div class="cta">
           <a class="btn" href="#kurse">Beispielkurse ansehen <span class="arr" aria-hidden="true">→</span></a>
           <a class="btn line" href="#unterstuetzung">So unterstütze ich Sie</a>
@@ -466,11 +486,13 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       </figure>
     </div>
   </div>
-  <div class="ticker" aria-hidden="true">
-    <div class="ticker-in">
-      <span>E-Learning</span><span>Erklärvideo</span><span>Storyboard</span><span>Microlearning</span><span>Führen mit KI</span><span>Schulungsprogramme</span><span>Blended Learning</span>
-      <span>E-Learning</span><span>Erklärvideo</span><span>Storyboard</span><span>Microlearning</span><span>Führen mit KI</span><span>Schulungsprogramme</span><span>Blended Learning</span>
-    </div>
+  <div class="wrap">
+    <ul class="hfacts rv">
+      <li><b>Rund 10</b><span>Jahre Personal- und Führungskräfteentwicklung</span></li>
+      <li><b>23</b><span>E-Learnings im Programm „Führen mit KI“</span></li>
+      <li><b>3</b><span>Videoarten, selbst produziert mit Sprecherstimme und Untertiteln</span></li>
+      <li><b>1</b><span>Ansprechpartnerin für Konzept, Umsetzung und Live-Termine</span></li>
+    </ul>
   </div>
 </section>
 
@@ -496,7 +518,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
     </div>
     <div class="offers">
       <article class="offer rv">
-        <div class="offer-pic"><img src="media/offer-elearning.jpg" alt="Kursseite: Lernende sprechen im Chat mit Tarek und wählen ihre Antwort" loading="lazy"></div>
+        <div class="offer-pic"><img src="media/offer-elearning.jpg" alt="Kursseite mit einer Entscheidungsfrage: Was würdest du an Mias Stelle tun?" loading="lazy"></div>
         <div class="offer-body">
           <span class="offer-num">01 · E-Learning</span>
           <h3>E-Learnings, die man zu Ende macht</h3>
@@ -516,7 +538,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
         </div>
       </article>
       <article class="offer rv" style="--d:2">
-        <div class="offer-pic"><img src="media/offer-konzept.jpg" alt="Kursseite: zwei Menschen aus dem Fall erzählen, was bei ihnen getragen hat" loading="lazy"></div>
+        <div class="offer-pic"><img src="media/offer-konzept.jpg" alt="Kursseite mit Teamfoto und den Lernzielen eines Trainings" loading="lazy"></div>
         <div class="offer-body">
           <span class="offer-num">03 · Schulungsprogramm</span>
           <h3>Schulungsprogramme und Blended Learning</h3>
@@ -527,7 +549,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       </article>
     </div>
     <article class="special rv">
-      <div class="special-pic"><img src="media/fuehren-mit-ki.jpg" alt="Titelfolie der Einheit „Workslop erkennen und benennen“ aus dem Programm Führen mit KI" loading="lazy"></div>
+      <div class="special-pic"><img src="media/fuehren-mit-ki.jpg" alt="Titelseite der Programmübersicht Führen mit KI" loading="lazy"></div>
       <div class="special-body">
         <span class="special-tag">Special · KI-Enablement</span>
         <h3>Schulungsprogramm „Führen mit KI“</h3>
@@ -541,27 +563,10 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
   </div>
 </section>
 
-<section id="unterstuetzung" class="helpsec" aria-labelledby="h-hilfe">
-  <div class="wrap">
-    <div class="split rv">
-      <div><div class="tag"><b>(03)</b>Mögliche Zusammenarbeitsthemen</div><h2 class="big" id="h-hilfe">Unterstützung</h2></div>
-      <p class="intro">Nicht jedes Thema braucht ein großes Projekt. Sie entscheiden, welchen Teil ich übernehme. Wir können auch klein anfangen und mit einem Pilot testen, bevor das ganze Programm steht.</p>
-    </div>
-    <div class="helps">
-      <article class="help rv"><em>01</em><h3>Komplett aus einer Hand</h3><p>Konzept, Storyboard, Kurs und Videos. Sie geben frei, ich kümmere mich um den Rest bis zum Testlauf in Ihrem Lernsystem.</p></article>
-      <article class="help rv" style="--d:1"><em>02</em><h3>Nur Konzept und Storyboard</h3><p>Lernziele, ein Fall als roter Faden und ein Storyboard, das Ihr Team selbst umsetzt, in Ihrem Autorentool.</p></article>
-      <article class="help rv" style="--d:2"><em>03</em><h3>Präsenz wird digital</h3><p>Aus Ihren Folien und Seminarunterlagen wird ein E-Learning oder ein Blended-Format, ohne dass der Inhalt verloren geht.</p></article>
-      <article class="help rv"><em>04</em><h3>Bestehende Kurse auffrischen</h3><p>Sie haben Kurse, die keiner zu Ende macht? Ich überarbeite sie mit Fällen und Übungen, statt alles neu zu bauen.</p></article>
-      <article class="help rv" style="--d:1"><em>05</em><h3>Beratung zum digitalen Lernen</h3><p>Welche Formate passen zu Ihrem Thema, und wie spielen Präsenz, online und E-Learning zusammen? Wir klären das, bevor Geld in die Umsetzung fließt.</p></article>
-      <article class="help rv" style="--d:2"><em>06</em><h3>Ihr Team befähigen</h3><p>Ich zeige Ihren Trainerinnen und Trainern, wie gute digitale Formate entstehen, damit Sie künftig mehr selbst machen können.</p></article>
-    </div>
-  </div>
-</section>
-
 <section id="kurse" aria-labelledby="h-kurse">
   <div class="wrap">
     <div class="split rv">
-      <div><div class="tag"><b>(04)</b>Ausprobieren</div><h2 class="big" id="h-kurse">Beispielkurse</h2></div>
+      <div><div class="tag"><b>(03)</b>Ausprobieren</div><h2 class="big" id="h-kurse">Beispielkurse</h2></div>
       <p class="intro">Beispielkurse aus meinem Angebot, so wie sie in Ihrem Lernsystem laufen. Klicken Sie sich durch die ersten fünf Folien. Wie es weitergeht, zeige ich Ihnen gern im Gespräch.</p>
     </div>
     <div class="cases">
@@ -589,24 +594,35 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
   </div>
 </section>
 
-<section id="looks" class="light" aria-labelledby="h-looks">
+<section id="unterstuetzung" class="light helpsec" aria-labelledby="h-hilfe">
   <div class="wrap">
     <div class="split rv">
-      <div><div class="tag"><b>(05)</b>Looks</div><h2 class="big" id="h-looks">So kann Ihr Kurs aussehen</h2></div>
-      <p class="intro">Jeder Look folgt festen Regeln, damit der Kurs von der ersten bis zur letzten Folie zusammenpasst. Ihre Farben und Ihr Logo baue ich ein.</p>
+      <div><div class="tag"><b>(04)</b>Mögliche Zusammenarbeitsthemen</div><h2 class="big" id="h-hilfe">Unterstützung</h2></div>
+      <p class="intro">Nicht jedes Thema braucht ein großes Projekt. Sie entscheiden, welchen Teil ich übernehme. Wir können auch klein anfangen und mit einem Pilot testen, bevor das ganze Programm steht.</p>
     </div>
-    <div class="looks">
-      <figure class="rv"><div class="frame"><img src="media/look-foto.jpg" alt="Foto mit sechs Fragen als Punkte im Bild" loading="lazy"></div><figcaption><b>Foto</b>Wenn sich Ihre Leute in der Situation wiedererkennen sollen.</figcaption></figure>
-      <figure class="rv" style="--d:1"><div class="frame"><img src="media/look-comic.jpg" alt="Comic-Szene mit Mia und Can im Büro aus dem Kurs KI Basiswissen" loading="lazy"></div><figcaption><b>Comic und Illustration</b>Wenn ein Thema heikel ist und etwas Abstand braucht.</figcaption></figure>
-      <figure class="rv" style="--d:2"><div class="frame"><img src="media/look-micro.jpg" alt="Titelfolie der Microlearning-Einheit Der Hebel bist du" loading="lazy"></div><figcaption><b>Microlearning</b>Für Reihen über mehrere Wochen, je Einheit 10 bis 15 Minuten.</figcaption></figure>
+    <div class="helps">
+      <article class="help rv"><em>01</em><h3>Komplett aus einer Hand</h3><p>Konzept, Storyboard, Kurs und Videos. Sie geben frei, ich kümmere mich um den Rest bis zum Testlauf in Ihrem Lernsystem.</p></article>
+      <article class="help rv" style="--d:1"><em>02</em><h3>Nur Konzept und Storyboard</h3><p>Lernziele, ein Fall als roter Faden und ein Storyboard, das Ihr Team selbst umsetzt, in Ihrem Autorentool.</p></article>
+      <article class="help rv" style="--d:2"><em>03</em><h3>Präsenz wird digital</h3><p>Aus Ihren Folien und Seminarunterlagen wird ein E-Learning oder ein Blended-Format, ohne dass der Inhalt verloren geht.</p></article>
+      <article class="help rv"><em>04</em><h3>Bestehende Kurse auffrischen</h3><p>Sie haben Kurse, die keiner zu Ende macht? Ich überarbeite sie mit Fällen und Übungen, statt alles neu zu bauen.</p></article>
+      <article class="help rv" style="--d:1"><em>05</em><h3>Beratung zum digitalen Lernen</h3><p>Welche Formate passen zu Ihrem Thema, und wie spielen Präsenz, online und E-Learning zusammen? Wir klären das, bevor Geld in die Umsetzung fließt.</p></article>
+      <article class="help rv" style="--d:2"><em>06</em><h3>Ihr Team befähigen</h3><p>Ich zeige Ihren Trainerinnen und Trainern, wie gute digitale Formate entstehen, damit Sie künftig mehr selbst machen können.</p></article>
     </div>
+    <article class="partner rv">
+      <div>
+        <span class="special-tag">Für Agenturen und Teams</span>
+        <h3>Als externe Projektpartnerin</h3>
+        <p>Ich steige flexibel und kurzfristig in Ihre Kundenprojekte ein und übernehme klar abgegrenzte Arbeitspakete eigenständig. So entlaste ich Ihr Team dort, wo Umsetzungskapazität fehlt, ohne langfristige Bindung und ohne lange Einarbeitung.</p>
+      </div>
+      <a class="btn" href="#kontakt">Projekt anfragen <span class="arr" aria-hidden="true">→</span></a>
+    </article>
   </div>
 </section>
 
 <section id="videos" class="vids" aria-labelledby="h-videos">
   <div class="wrap">
     <div class="split rv">
-      <div><div class="tag"><b>(06)</b>Erklärvideos</div><h2 class="big" id="h-videos">Welche Videoart erzählt Ihr Thema?</h2></div>
+      <div><div class="tag"><b>(05)</b>Erklärvideos</div><h2 class="big" id="h-videos">Welche Videoart erzählt Ihr Thema?</h2></div>
       <p class="intro">Drei Videoarten, alle selbst produziert: mit Sprechtext, Storyboard, Untertiteln und lizenzfreien Bildern. Hier sehen Sie kurze Ausschnitte ohne Ton.</p>
     </div>
     <div class="vgrid">
@@ -622,10 +638,14 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
   <div class="wrap about-grid">
     <figure class="about-pic rv"><img src="media/kerstin-2.jpg" alt="Kerstin Rafai erklärt im Seminar" loading="lazy" width="1200" height="1013"></figure>
     <div class="rv" style="--d:1">
-      <div class="tag"><b>(07)</b>Über mich</div>
+      <div class="tag"><b>(06)</b>Über mich</div>
       <h2 class="big" id="h-about">Ich komme aus dem Seminarraum</h2>
-      <p class="intro">Seit rund zehn Jahren arbeite ich in der Personal- und Führungskräfteentwicklung. Ich konzipiere und leite Trainings und Programme für Mitarbeitende und Führungskräfte und baue die E-Learnings und Videos dazu selbst.</p>
-      <p class="intro">Deshalb weiß ich, was in einem Training funktioniert und was davon digital trägt. Und Sie haben eine Ansprechpartnerin für Konzept, Umsetzung und Live-Termine.</p>
+      <p class="intro">Ich bringe rund zehn Jahre Erfahrung in der Personal- und Führungskräfteentwicklung mit. Ich konzipiere und leite Trainings und Programme für Mitarbeitende und Führungskräfte. Deshalb weiß ich, was in einem Training funktioniert und was davon digital trägt.</p>
+      <dl class="about-facts">
+        <div><dt>Digitale Lernangebote</dt><dd>Seit vielen Jahren konzipiere und produziere ich sie selbst: von der didaktischen Konzeption über Storyboards, Lernskripte und interaktive Module bis zu fertigen E-Learnings und Lernreisen.</dd></div>
+        <div><dt>Arbeiten mit KI</dt><dd>Ich arbeite intensiv mit KI, vor allem mit Copilot und Claude, und entwickle damit neue Lernformate und schnellere Produktionswege.</dd></div>
+        <div><dt>Zusammenarbeit</dt><dd>Freiberuflich, für Unternehmen direkt oder als externe Projektpartnerin für Ihr Team.</dd></div>
+      </dl>
     </div>
   </div>
 </section>
@@ -633,7 +653,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 <section id="ablauf" class="light" aria-labelledby="h-ablauf">
   <div class="wrap">
     <div class="split rv">
-      <div><div class="tag"><b>(08)</b>Ablauf</div><h2 class="big" id="h-ablauf">So arbeiten wir zusammen</h2></div>
+      <div><div class="tag"><b>(07)</b>Ablauf</div><h2 class="big" id="h-ablauf">So arbeiten wir zusammen</h2></div>
       <p class="intro">Sie sehen den Kurs früh als klickbare Fassung und schreiben Ihre Anmerkungen direkt hinein. So wissen Sie bei jedem Schritt, woran wir sind.</p>
     </div>
     <div class="steps">
@@ -655,7 +675,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 
 <section id="kontakt" class="contact" aria-labelledby="h-kontakt">
   <div class="wrap">
-    <div class="tag"><b>(09)</b>Kontakt</div>
+    <div class="tag"><b>(08)</b>Kontakt</div>
     <h2 id="h-kontakt" class="rv">Lassen Sie uns über Ihr Thema sprechen.</h2>
     <a class="mail rv" href="mailto:kerstinrafai@gmail.com">kerstinrafai@gmail.com</a>
     <div class="contact-grid">
@@ -689,7 +709,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 
 <footer>
   <div class="wrap">
-    <nav class="foot-nav" aria-label="Fußzeile"><a href="#angebot">Angebot</a><a href="#unterstuetzung">Unterstützung</a><a href="#kurse">Beispielkurse</a><a href="#videos">Videos</a><a href="#ueber-mich">Über mich</a><a href="#ablauf">Ablauf</a><a href="#kontakt">Kontakt</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a><a href="#start">Nach oben ↑</a></nav>
+    <nav class="foot-nav" aria-label="Fußzeile"><a href="#angebot">Angebot</a><a href="#kurse">Beispielkurse</a><a href="#unterstuetzung">Unterstützung</a><a href="#videos">Videos</a><a href="#ueber-mich">Über mich</a><a href="#ablauf">Ablauf</a><a href="#kontakt">Kontakt</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a><a href="#start">Nach oben ↑</a></nav>
     <span>© Kerstin Rafai</span>
     <span>Bilder in den Kursbeispielen: Pexels und Storyset (storyset.com). Erstellt mit KI-Unterstützung, von mir geprüft.</span>
   </div>
@@ -785,6 +805,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
     var rp = $('[data-kf-reply]', kf); rp.innerHTML = REPLY[+b.dataset.kf]; rp.hidden = false; $('[data-kf-opts]', kf).hidden = true; rp.focus();
   });
   $('[data-kf-reply]', kf).addEventListener('click', function (e) { if (e.target.closest('a')) { kf.hidden = true; kfo.hidden = false; } });
+  if ('IntersectionObserver' in window) new IntersectionObserver(function (es) { document.body.classList.toggle('kf-away', es[0].isIntersecting); }, { threshold: .15 }).observe($('#kontakt'));
   var seen = false; try { seen = sessionStorage.getItem('kr-kf') === '1'; } catch (e) {}
   if (!seen) setTimeout(function () { if (kf.hidden) openKf(); try { sessionStorage.setItem('kr-kf', '1'); } catch (e) {} }, 9000);
 
