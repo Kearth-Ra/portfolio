@@ -31,8 +31,12 @@ function kursLms(opts) {
       save(loc, data) { set('cmi.core.lesson_location', loc); set('cmi.suspend_data', clip(data, 4096)); },
       result(r) {
         if (r.pct != null) { set('cmi.core.score.min', 0); set('cmi.core.score.max', 100); set('cmi.core.score.raw', r.pct); }
+        // r.report (settings.lmsStatus): '' meldet bestanden/nicht bestanden, 'bestanden-offen' nie „failed“
+        // (manche LMS sperren danach weitere Versuche), 'abgeschlossen' nur abgeschlossen/unvollständig
         let status = 'incomplete';
-        if (r.completed) status = r.useSuccess && r.testDone ? (r.passed ? 'passed' : 'failed') : 'completed';
+        if (r.report === 'abgeschlossen') status = r.completed ? 'completed' : 'incomplete';
+        else if (r.report === 'bestanden-offen') status = r.completed && (!r.useSuccess || r.passed) ? 'passed' : 'incomplete';
+        else if (r.completed) status = r.useSuccess && r.testDone ? (r.passed ? 'passed' : 'failed') : 'completed';
         else if (r.useSuccess && r.testDone && !r.passed) status = 'failed';
         set('cmi.core.lesson_status', status);
         set('cmi.core.exit', r.completed ? '' : 'suspend');
@@ -76,7 +80,8 @@ function kursLms(opts) {
           set('cmi.score.scaled', (r.pct / 100).toFixed(2));
         }
         set('cmi.completion_status', r.completed ? 'completed' : 'incomplete');
-        set('cmi.success_status', r.useSuccess && r.testDone ? (r.passed ? 'passed' : 'failed') : 'unknown');
+        const succ = r.useSuccess && r.testDone ? (r.passed ? 'passed' : 'failed') : 'unknown';
+        set('cmi.success_status', r.report === 'abgeschlossen' || (r.report === 'bestanden-offen' && succ === 'failed') ? 'unknown' : succ);
         set('cmi.exit', r.completed ? 'normal' : 'suspend');
       },
       time(sec) { set('cmi.session_time', iso(sec)); },
@@ -163,10 +168,10 @@ function kursLms(opts) {
           sent.completed = true;
           send('completed', 'abgeschlossen', { moveOn: true, result: { completion: true, duration: duration() } });
         }
-        if (r.hasTest && r.testDone && !sent.passed) {
+        if (r.hasTest && r.testDone && !sent.passed && r.report !== 'abgeschlossen') {
           const result = { success: r.passed, score: { scaled: +(r.pct / 100).toFixed(2), raw: r.pct, min: 0, max: 100 }, duration: duration() };
           if (r.passed) { sent.passed = true; send('passed', 'bestanden', { moveOn: true, result }); }
-          else if (sent.failed !== r.pct) { sent.failed = r.pct; send('failed', 'nicht bestanden', { moveOn: true, result }); }
+          else if (sent.failed !== r.pct && r.report !== 'bestanden-offen') { sent.failed = r.pct; send('failed', 'nicht bestanden', { moveOn: true, result }); }
         }
       },
       time() { /* die Dauer steckt in den Statements */ },
@@ -201,11 +206,11 @@ function kursLms(opts) {
 }
 
 function kursZeit(pages) {
-  const SKIP = new Set(['id', 'libs', 'goalLinks', 'pick', 'shelfCols', 'short', 'bubble', 'good', 'deepLook', 'einflug', 'part', 'instant', 'noDesk', 'newMails', 'clock', 'sounds', 'mascotPose', 'shape', 'numbering', 'max', 'mapLook', 'mapLabels', 'labelSide', 'type', 'kind', 'code', 'scope', 'clue', 'hintAfter', 'impulses', 'transferCheck', 'sharesSource', 'factSource', 'height', 'mythOk', 'size', 'slot', 'arrange', 'figures', 'pattern', 'fillChoice', 'fillDistractors', 'tolerance', 'dontKnow', 'objectives', 'src', 'url', 'video', 'videoUrl', 'videoCredit', 'css', 'blockCss', 'customHtml', 'narration', 'narrationVtt', 'captions', 'captionsText', 'poster',
+  const SKIP = new Set(['id', 'doc', 'lib', 'captions', 'link', 'tint', 'fit', 'bright', 'contrast', 'sat', 'rotate', 'startCard', 'hang', 'idea', 'search', 'align', 'ratio', 'filter', 'ideaKind', 'format', 'libs', 'swipe', 'maxSec', 'sampleAudio', 'refs', 'guessSkip', 'budget', 'voice', 'goalLinks', 'pick', 'shelfCols', 'short', 'bubble', 'good', 'deepLook', 'einflug', 'part', 'instant', 'noDesk', 'newMails', 'clock', 'sounds', 'mascotPose', 'shape', 'numbering', 'max', 'mapLook', 'mapLabels', 'labelSide', 'type', 'kind', 'code', 'scope', 'clue', 'hintAfter', 'impulses', 'transferCheck', 'sharesSource', 'factSource', 'height', 'mythOk', 'size', 'slot', 'arrange', 'figures', 'pattern', 'fillChoice', 'fillDistractors', 'tolerance', 'dontKnow', 'objectives', 'src', 'url', 'video', 'videoUrl', 'videoCredit', 'css', 'blockCss', 'customHtml', 'narration', 'narrationVtt', 'captions', 'captionsText', 'poster',
     'design', 'showIf', 'objective', 'castId', 'char', 'look', 'pose', 'shot', 'audio', 'mechanic', 'spiel', 'style', 'layout', 'cardStyle', 'icon', 'decor',
     'focus', 'treat', 'frame', 'tone', 'credit', 'alt', 'person', 'blockName', 'lang', 'chapter', 'ref', 'target', 'after', 'orient', 'mosaic', 'cat', 'color', 'side', 'mode', 'source', 'image', 'bgImage', 'backImage', 'poses', 'film', 'stage', 'assets', 'consequence', 'help', 'stages', 'mood',
     // Verweise und Schalter mit Textwert (Ids, Namen von Symbolen und Varianten): kein Lesetext
-    'compareRef', 'planRef', 'page', 'skipTo', 'mapOrder', 'connect', 'marker', 'namePos', 'calloutIcon', 'icons', 'overlay', 'bgMotion', 'cover', 'anrede',
+    'compareRef', 'planRef', 'page', 'skipTo', 'pos', 'normal', 'orbit', 'animName', 'ar', 'autoRotate', 'tour', 'stageBg', 'mapOrder', 'connect', 'marker', 'namePos', 'calloutIcon', 'revealIcon', 'coverIcon', 'eyebrowIcon', 'certIcon', 'tagIcon', 'icons', 'overlay', 'bgMotion', 'cover', 'anrede',
     // Rückmeldungen und Begründungen liest man nur zur eigenen Wahl, Hinweise nur bei Bedarf: sie zählen nicht zur Lesezeit (die Zeit je Frage deckt sie ab)
     'feedback', 'feedbackCorrect', 'feedbackWrong', 'feedbackTrue', 'feedbackFalse', 'why', 'reply', 'hint', 'successText', 'placeholder']);
   const plain = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -233,7 +238,7 @@ function kursZeit(pages) {
       case 'pretest': return n('questions') * 40;
       case 'review': return (Number(b.draw) || 0) * 40;
       case 'glossquiz': return (Number(b.draw) || 0) * (b.mode === 'memory' ? 25 : 15);
-      case 'reflection': return 120; case 'actionplan': return 180; case 'survey': return 60; case 'branch': return 40; case 'predict': return 45;
+      case 'reflection': return 120; case 'sprechen': return Math.max(5, Math.min(180, Number(b.maxSec) || 60)) + 60; case 'actionplan': return 180; case 'survey': return 60; case 'branch': return 40; case 'predict': return 45;
       case 'selfcheck': case 'dialog': return 60 + (b.decision ? 40 : 0);
       case 'vscene': return n('steps') * 30 + (b.decision ? 40 : 0);
       case 'simulation': return n('steps') * 25 * Math.max(1, len(b.modes || ['zeigen', 'ueben', 'pruefen']) - 0.5);
@@ -248,14 +253,22 @@ function kursZeit(pages) {
       case 'casebank': { const c = n('cases') || 1, g = Math.min(c, Number(b.goal) || c); return g * 150 - words(b) * (1 - g / c) / 180 * 60; }
       case 'sequence': return 20 * n('steps'); case 'process': return 15 * n('steps');
       case 'cards': return 8 * (b.items || []).filter(x => x && x.reveal).length;
-      case 'accordion': case 'tabs': case 'flipcards': return 20 * n('items');
-      case 'hotspots': return 15 * n('points'); case 'aufdecken': return 8 * n('stops'); case 'sortcats': return 12 * n('items'); case 'checklist': return 30; case 'takeaways': return b.recall && b.look !== 'zeilen' ? 10 * n('items') : 0;
+      // je Eintrag mit Vermutung (guess) 8 s zum Überlegen
+      case 'accordion': case 'tabs': case 'flipcards': return 20 * n('items') + 8 * (b.items || []).filter(it => it && it.guess && String(it.guess.q || '').trim()).length;
+      case 'modell3d': return 20 + 12 * n('points') + (b.anim ? 15 : 0);
+      // Scribble: gesprochener Text im Sprechtempo des Videos plus Zeit zum Zeichnen je Szene
+      case 'scribble': { const d = b.doc || {}, sc = Array.isArray(d.scenes) ? d.scenes : [], wpm = Number((d.style || {}).wpm) >= 80 ? Number(d.style.wpm) : 158; return sc.reduce((s, x) => s + plain(x.narration).split(' ').filter(Boolean).length, 0) / wpm * 60 + 2 * sc.length; }
+      case 'hotspots': if (b.panorama && b.mode !== 'folge') return 20 + 10 * n('points') + 8 * (b.points || []).filter(pt => pt && !pt.target && pt.guess && String(pt.guess.q || '').trim()).length; if (b.mode === 'folge') { const rs = (b.rounds || []).filter(x => x && x.image && x.image.src); return 8 * rs.length + 15 * rs.filter(x => (x.points || []).length).length; } return 15 * n('points') + 8 * (b.points || []).filter(pt => pt && !pt.target && pt.guess && String(pt.guess.q || '').trim()).length; case 'aufdecken': return 8 * n('stops'); case 'sortcats': return 12 * n('items'); case 'checklist': return 30; case 'takeaways': return b.recall && b.look !== 'zeilen' ? 10 * n('items') : 0;
       case 'ivideo': return b.src || b.url ? 45 : 0; case 'media': return b.media && (b.media.kind === 'video' || b.media.kind === 'embed' || b.media.url) ? 45 : 0;
-      case 'linkcard': return 10; case 'table': return 10;
+      case 'linkcard': return 10; case 'table': return b.look === 'ausfuellen' ? 10 + 8 * (String(b.cells || '').match(/\[\[[\s\S]*?\]\]/g) || []).length : 10;
+      case 'debrief': return b.look === 'karte' ? 30 : 0;
       case 'ringe': return 8 * n('items'); case 'pyramide': return 10 + 8 * n('levels'); case 'venn': return 10 + 8 * n('circles');
       case 'team': return ['aufklappen', 'karussell', 'stimme'].includes(b.look) ? 10 * n('members') : 0;
       case 'vstatements': return 20 * n('items'); case 'compare': return 10 * n('steps'); case 'layers': return 8 * n('layers'); case 'album': return 10; case 'dial': return 5 * n('items');
       case 'bignumber': return b.ask && b.ask.question ? 15 : 0;
+      // Animation in Schritten: je Schritt Zeit zum Ansehen und Lesen des Satzes
+      case 'lottie': return 6 * (Array.isArray(b.steps) ? b.steps.length : 0);
+      case 'anim': return b.stepwise ? 5 * n('items') : 0;
       default: return 0;
     }
   };
@@ -279,6 +292,8 @@ function kursZeit(pages) {
       if (['triage', 'levers', 'chat', 'matrix', 'promptbuild', 'findtext'].includes(b.type)) practice += 1;
       if (['simulation', 'mission', 'game', 'interaktion'].includes(b.type) && b.graded) graded++;
       if (b.type === 'interaktion' && !b.graded) practice += 1;
+      if (b.type === 'table' && b.look === 'ausfuellen') { if (b.graded) graded++; else practice += 1; }
+      if (b.type === 'hotspots' && b.mode === 'folge') practice += 1;
     });
   });
   chapters.forEach(c => { c.minutes = Math.max(1, Math.round((c.words / 180 * 60 + c.seconds) / 60)); });
@@ -290,15 +305,19 @@ function kursPlayer(course, opts) {
   opts = opts || {};
   const root = document.getElementById('app');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const set = course.settings || {};
-  const theme = course.theme || {};
+  // Lektionen zum Scrollen als Wahl in jedem hellen Stil (settings.lessonScroll, Kerstin 01.11.2026): der Kurs behält Farben und Schriften,
+  // läuft aber mit der Leiste und den Lektionen des Scroll-Looks (intern Stil micro, sideLook scroll, Leiste links, ohne Bildschirmseiten)
+  const lessonScroll = !!((course.settings || {}).lessonScroll && (course.theme || {}).style !== 'micro' && (course.theme || {}).mode !== 'dunkel');
+  const set = lessonScroll ? Object.assign({}, course.settings, { layout: 'scroll', screen: false }) : (course.settings || {});
+  const theme = lessonScroll ? Object.assign({}, course.theme, { style: 'micro', sideLook: 'scroll', fromStyle: (course.theme || {}).style || 'klar' }) : (course.theme || {});
   let passScore = Number(course.passScore) || 0;
 
   // ---------- Sprachen ----------
   // Weitere Sprachen liegen als Übersetzungen (Pfad, Original, Text) in course.languages.
   // Beim Umschalten werden die Texte im Kurs ersetzt; das Original bleibt gemerkt.
   const UI_DE = {
-    inhalt: 'Inhalt', menue: 'Menü', duBistDran: 'Du bist dran', start: 'Start', ende: 'Ende', gehoertAn: 'gehört an Stelle', mlStatus: 'Abschlussstatus', mlInBearbeitung: 'in Bearbeitung', mlAbgeschlossen: 'abgeschlossen', mlMinuten: 'Minuten geschätzte Lernzeit', mlFortschritt: 'Fortschritt', mlErgebnis: 'Ergebnis', mlWeitere: 'Weitere Informationen', mlMedien: 'Mediennachweis', letzterVersuch: 'Letzter Versuch', besserAls: 'besser als beim letzten Mal', gleichWie: 'wie beim letzten Mal', unterLetztem: 'unter dem letzten Versuch', inFolge: 'richtig in Folge', runde: 'Runde', naechsteRunde: 'Nächste Runde', alleRunden: 'Alle Runden geschafft', vollbild: 'Vollbild', vollbildAus: 'Vollbild beenden', vollbildAnsehen: 'Im Vollbild ansehen', klangAn: 'Klänge an', klangAus: 'Klänge aus', lektionVon: 'Lektion {n} von {m}', thema: 'Thema', dieseFrage: 'die nächste Frage', wieGutVorher: 'Wie gut kennst du dich damit aus? Schätz dich ein, bevor du die Frage siehst.', kenne0: 'Kaum', kenne1: 'Etwas', kenne2: 'Gut', vorherUeber: 'Du hast gesagt, du kennst dich gut aus, aber die Antwort stimmt nicht. Hier hast du dich überschätzt: Genau das lohnt einen zweiten Blick.', vorherUnter: 'Du warst unsicher und lagst trotzdem richtig. Du weißt mehr, als du denkst.', selbsteinschaetzung: 'Deine Selbsteinschätzung', eingeschaetztPassend: 'Bei {n} von {m} Übungsfragen passte deine Einschätzung vorher.', ueberschaetzt: 'Überschätzt', unterschaetzt: 'Unterschätzt', iaFehlt: 'Hier erscheint die eigene Interaktion, sobald eine Datei hinterlegt ist.', iaTitel: 'Interaktive Übung', iaErledigt: 'Übung abgeschlossen', leisteZu: 'Leiste einklappen', leisteAuf: 'Leiste ausklappen', folgeLabel: 'Was daraus wird', nochmalEntscheiden: 'Nochmal entscheiden', fragHilfe: 'Frag {n}', hilfe: 'Hilfe holen', arbeitshilfe: 'Arbeitshilfe öffnen', triBewertung: 'Bewertung durch den Kunden', verlauf: 'Bisheriger Gesprächsverlauf', entscheidung: 'Wie reagierst du?', spielGeschafft: 'Geschafft. Du kannst das Spiel gern noch einmal spielen.', erzaehler: 'Erzähler',
+    kursinhalt: 'Kursinhalt', meineNotizen: 'Meine Notizen', zusammenfassungDrucken: 'Zusammenfassung drucken',
+    inhalt: 'Inhalt', menue: 'Menü', duBistDran: 'Du bist dran', start: 'Start', ende: 'Ende', gehoertAn: 'gehört an Stelle', mlStatus: 'Abschlussstatus', mlInBearbeitung: 'in Bearbeitung', mlAbgeschlossen: 'abgeschlossen', mlMinuten: 'Minuten geschätzte Lernzeit', mlFortschritt: 'Fortschritt', mlErgebnis: 'Ergebnis', mlWeitere: 'Weitere Informationen', mlMedien: 'Mediennachweis', letzterVersuch: 'Letzter Versuch', besserAls: 'besser als beim letzten Mal', gleichWie: 'wie beim letzten Mal', unterLetztem: 'unter dem letzten Versuch', inFolge: 'richtig in Folge', runde: 'Runde', naechsteRunde: 'Nächste Runde', alleRunden: 'Alle Runden geschafft', vollbild: 'Vollbild', vollbildAus: 'Vollbild beenden', tocEinstellungen: 'Einstellungen', klaenge: 'Klänge', an: 'an', aus: 'aus', vollbildAnsehen: 'Im Vollbild ansehen', klangAn: 'Klänge an', klangAus: 'Klänge aus', ruhigAus: 'Bewegung reduzieren', ruhigAn: 'Bewegung reduziert', ruhigAnHinweis: 'Animationen, Einblendungen und bewegte Bilder sind jetzt aus.', ruhigAusHinweis: 'Animationen sind wieder an.', kursBeenden: 'Kurs beenden', kursBeendet: 'Dein Stand ist gespeichert. Du kannst dieses Fenster jetzt schließen.', keineVersuche: 'Du hast alle {n} Versuche für den Test genutzt. Wende dich an die Kursverantwortlichen, wenn du ihn noch einmal machen möchtest.', versuchVon: 'Versuch {n} von {m}', lektionVon: 'Lektion {n} von {m}', naechsteLektion: 'Nächste Lektion', slSituation: 'Die Situation', slSchritt: 'Dein Schritt', slLektionen: '{n} Lektionen', slRund: 'Rund {n} Min.', slAbschluss: 'Abschlusscheck', poolBereit: 'Bereit, wenn du es bist', poolFragen: '{n} Fragen, Rückmeldung nach jeder', poolWiederholen: 'Beliebig oft wiederholen', poolBestehen: '{n} von {m} richtig', poolBestehenHint: 'zum Bestehen', poolPass: 'Bestanden', poolStart: 'Check starten', minAbk: 'Min.', vorigeLektion: 'Vorige Lektion', slAbgeschlossen: '{n} % abgeschlossen', zumErgebnis: 'Zum Ergebnis', thema: 'Thema', dieseFrage: 'die nächste Frage', wieGutVorher: 'Wie gut kennst du dich damit aus? Schätz dich ein, bevor du die Frage siehst.', kenne0: 'Kaum', kenne1: 'Etwas', kenne2: 'Gut', vorherUeber: 'Du hast gesagt, du kennst dich gut aus, aber die Antwort stimmt nicht. Hier hast du dich überschätzt: Genau das lohnt einen zweiten Blick.', vorherUnter: 'Du warst unsicher und lagst trotzdem richtig. Du weißt mehr, als du denkst.', selbsteinschaetzung: 'Deine Selbsteinschätzung', eingeschaetztPassend: 'Bei {n} von {m} Übungsfragen passte deine Einschätzung vorher.', ueberschaetzt: 'Überschätzt', unterschaetzt: 'Unterschätzt', iaFehlt: 'Hier erscheint die eigene Interaktion, sobald eine Datei hinterlegt ist.', iaTitel: 'Interaktive Übung', iaErledigt: 'Übung abgeschlossen', leisteZu: 'Leiste einklappen', leisteAuf: 'Leiste ausklappen', folgeLabel: 'Was daraus wird', nochmalEntscheiden: 'Nochmal entscheiden', fragHilfe: 'Frag {n}', hilfe: 'Hilfe holen', arbeitshilfe: 'Arbeitshilfe öffnen', triBewertung: 'Bewertung durch den Kunden', verlauf: 'Bisheriger Gesprächsverlauf', entscheidung: 'Wie reagierst du?', spielGeschafft: 'Geschafft. Du kannst das Spiel gern noch einmal spielen.', erzaehler: 'Erzähler',
     cbBereiche: 'Bereiche', cbAlle: 'Alle Fälle', cbFall: 'Fall', cbBesprochen: 'Besprochen', cbOffen: 'Noch offen', cbOeffnen: 'Öffnen',
     cbStand: '{n} von {z} nötigen Fällen besprochen · {m} stehen zur Auswahl', cbMl: 'Musterlösung', cbAnekdote: 'Beispiel aus der Praxis',
     cbUeberlegungen: 'Unsere Überlegungen', cbNotieren: 'Diskutieren und notieren', cbNotiert: 'notiert', cbVergleichen: 'Antworten vergleichen',
@@ -329,11 +348,30 @@ function kursPlayer(course, opts) {
     warteBausteine: 'Setze zuerst alle Bausteine ein. Danach geht es weiter.',
     warteStellen: 'Finde zuerst alle Stellen im Text. Danach geht es weiter.',
     warteKartenDrehen: 'Dreh zuerst alle Karten um. Danach geht es weiter.',
+    warteAufklappen: 'Öffne zuerst alle Einträge. Danach geht es weiter.',
+    tfZelle: 'Zeile {z}, Spalte {s}', tfWaehlen: 'wählen …', tfPruefen: 'Prüfen', tfErgebnis: '{r} von {n} Zellen richtig', tfFehlt: 'Wähle zuerst in jeder Lücke etwas aus. Noch offen: {n}.', tfRichtig: 'richtig', tfFalsch: 'falsch', tfDeineWahl: 'deine Wahl', tfLeer: 'nichts gewählt',
+    tfHinweis: 'Wähle in jeder leeren Zelle aus, was dorthin gehört. Dann prüfe die Tabelle.', warteTabelle: 'Füll zuerst die Tabelle aus und prüfe sie. Danach geht es weiter.',
+    hfBild: 'Bild {n} von {m}', hfKritisch: 'Hier wird es kritisch', hfZeigen: 'Tipp auf die Stelle im Bild, an der es gefährlich wird. Ohne Maus: mit Tab ein Feld wählen. Escape bricht ab.', hfAbbrechen: 'Doch nicht', hfHierZeigen: 'Hier zeigen: {f}',
+    hfFeldNamen: 'oben links|oben Mitte|oben rechts|Mitte links|Mitte|Mitte rechts|unten links|unten Mitte|unten rechts',
+    hfRichtig: 'Richtig erkannt.', hfRichtigSpaet: 'Im zweiten Versuch erkannt.', hfDaneben: 'Hier ist die Gefahr nicht. Schau noch einmal genau hin.', hfAufloesung: 'Auch das war nicht die Stelle. Hier ist die Gefahr.',
+    hfUebersehen: 'Hier hast du etwas übersehen.', hfFehlalarm: 'Hier ist noch nichts kritisch. Schau weiter.', hfAuswertung: 'Zur Auswertung',
+    hfErgebnis: '{n} von {m} Gefahren erkannt', hfEinFehlalarm: '1 Fehlalarm', hfFehlalarme: '{n} Fehlalarme', hfErkannt: 'Erkannt', hfSpaet: 'Im zweiten Versuch erkannt', hfUebersehenKurz: 'Übersehen',
+    hfLernbuch: 'Gefahren erkennen',
+    warteFolge: 'Geh zuerst die Bildfolge bis zum Ende durch. Danach geht es weiter.',
+    panoRolle: 'Rundgang', panoHilfe: 'Rundumblick. Zieh mit der Maus oder dem Finger, um dich umzusehen, oder nutz die Pfeiltasten links und rechts. Pos1 führt zur Startrichtung. Alle Punkte erreichst du auch über die Liste „Punkte im Raum“.',
+    panoDrehen: 'drehen', panoLinks: 'Nach links drehen', panoRechts: 'Nach rechts drehen', panoBlick: 'Blick: {g}°', panoImBlick: 'Im Blick: {p}.', panoKeinPunkt: 'Kein Punkt im Blick.',
+    panoPunkteImRaum: 'Punkte im Raum', panoPunkt: 'Punkt {n}', panoTuer: 'Tür in den nächsten Raum', panoGesehen: 'angesehen', panoStand: '{n} von {m} Punkten entdeckt',
+    panoOhneBild: 'Das Rundumfoto fehlt. Hier stehen alle Punkte mit ihren Erklärungen.', panoLadefehler: 'Das Rundumfoto lässt sich nicht laden. Hier stehen alle Punkte mit ihren Erklärungen.',
+    wischHinweis: 'Wische nach links oder rechts, oder nutze die Knöpfe.',
+    erstVermuten: 'Erst vermuten', vermutungFeld: 'Dein Stichwort', vermutungAufdecken: 'Aufdecken', vermutungFehlt: 'Schreib erst ein Stichwort.', vermutungStimmt: 'stimmt', vermutungAntwort: 'Die Antwort ist', alleAufdecken: 'Alle aufdecken',
+    stapelHinweis: 'Zieh die oberste Karte in den richtigen Behälter. Ohne Maus: Karte anwählen und die Nummer des Behälters drücken.', stapelRichtig: 'Richtig: „{k}“ gehört zu „{c}“.', stapelFalsch: 'Nicht ganz: „{k}“ gehört nicht zu „{c}“. Die Karte kommt später noch einmal.', stapelIn: 'In „{c}“ legen', leerAuswahl: 'Wähl zuerst eine Antwort aus.', leerLuecke: 'Füll zuerst eine Lücke aus.', leerZahl: 'Gib zuerst eine Zahl ein.', leerZuordnen: 'Ordne zuerst mindestens einen Begriff zu.', leerPins: 'Setz zuerst alle Nummern ins Bild.', leerAussagen: 'Beurteile zuerst jede Aussage.', stapelImBehaelter: '{n} Karten im Behälter', stapelRest: 'Noch {n} von {m} Karten', stapelFertig: 'Alle Karten sortiert.', stapelErgebnis: '{n} von {m} beim ersten Versuch richtig.', geoeffnet: '{n} von {z} geöffnet',
     warteFrage: 'Beantworte zuerst die Frage. Danach geht es weiter.',
     warteEntscheidung: 'Triff zuerst eine Entscheidung. Danach geht es weiter.',
     warteSelbstcheck: 'Beantworte zuerst den Selbstcheck. Danach geht es weiter.',
     scNicht: 'Nicht sicher', scEtwas: 'Etwas sicher', scSicher: 'Sicher', scOffen: 'noch nicht eingestellt',
-    seitenImKapitel: 'Seiten in diesem Kapitel', aufdecken: 'Aufdecken', ortGesperrt: 'noch gesperrt', ortErkundet: 'erkundet', ortNaechster: 'als Nächstes', ortGesperrtHinweis: 'Dieser Ort öffnet sich, sobald du den vorherigen erkundet hast.', orteErkundet: 'Orten erkundet', zurueckZurKarte: 'Zurück zur Karte', platzN: '{n}. Platz', ja: 'Ja', nein: 'Nein', weissNicht: 'Weiß ich nicht', mehrLesen: 'Mehr lesen', danke: 'Danke für deine Antwort.', punkteHinweis: 'Klick auf die Punkte in den Bildern.', wenigerLesen: 'Weniger anzeigen', weissNichtFb: 'Gut, dass du nicht rätst. Hier ist die Antwort mit Erklärung.', deineZahl: 'Deine Zahl', bis: 'bis', linieHinweis: 'Klick links einen Begriff und rechts, was dazu passt. Ein zweiter Klick löst die Linie.', linieWaehlen: 'Begriff wählen, dann rechts die Zuordnung', auswerten: 'Auswerten', pinNummer: 'Nummer {n}', pinGesetzt: 'gesetzt', pinStelle: 'Stelle {n}', pinRichtig: 'Richtige Nummer an dieser Stelle', pinHinweis: 'Zieh jede Nummer auf die passende Stelle im Bild. Ohne Maus: Nummer wählen, dann die Stelle.', nachLinks: 'nach links', nachRechts: 'nach rechts', scAbsenden: 'Absenden', scAendern: 'Neu einschätzen', deinProfil: 'Dein Profil',
+    m3dHinweis: 'Dreh das Modell mit Maus oder Finger, zoom mit dem Mausrad oder zwei Fingern. Klick auf die Nummern.', m3dStart: 'Klick auf eine Nummer am Modell oder in der Liste.', m3dTeile: '{n} von {z} Teilen angesehen', m3dVor: 'Nächstes Teil', m3dZurueck: 'Voriges Teil', m3dAnimStart: 'Bewegung abspielen', m3dAnimStop: 'Bewegung anhalten', m3dReset: 'Ansicht zurücksetzen', m3dAr: 'In deinem Raum ansehen', m3dOhne: 'Das 3D-Modell lässt sich hier nicht anzeigen. Alle Teile stehen in der Liste.', m3dLaden: 'Modell wird geladen …', m3dTeil: 'Teil {n}', m3dModell: '3D-Modell', warteModell: 'Sieh dir zuerst alle Teile des Modells an. Danach geht es weiter.', scrStart: 'Video starten', scrLaden: 'Das Video wird vorbereitet …', scrAbspielen: 'Abspielen', scrPause: 'Anhalten', scrVorige: 'Vorige Szene', scrNaechste: 'Nächste Szene', scrStelle: 'Stelle im Video', scrSzene: 'Szene {n} von {m}', scrUntertitel: 'Untertitel', scrNachlesen: 'Zum Nachlesen', scrBild: 'Gezeichnetes Erklärvideo. Den gesprochenen Text findest du unter „Zum Nachlesen“.', scrOhne: 'Das Video lässt sich hier nicht abspielen. Der Text steht unter „Zum Nachlesen“.', scrFolgt: 'Scribble-Video folgt: Datei im Formular unter „Scribble-Datei laden“ wählen.', warteScribble: 'Sieh dir das Video bis zum Ende an oder lies den Text unter „Zum Nachlesen“. Danach geht es weiter.',
+    schritte: 'Schritte', sbSchritt: 'Schritt {n} von {z}', sbAbspielen: 'Abspielen', sbWiederholen: 'Wiederholen', sbListe: 'Die Animation lässt sich hier nicht zeigen. Die Schritte stehen als Liste da.', warteSchritte: 'Sieh dir zuerst alle Schritte an. Danach geht es weiter.', lottieAnhalten: 'Animation anhalten', lottieAbspielen: 'Animation abspielen',
+    seitenImKapitel: 'Seiten in diesem Kapitel', aufdecken: 'Aufdecken', ortGesperrt: 'noch gesperrt', ortErkundet: 'erkundet', ortNaechster: 'als Nächstes', ortGesperrtHinweis: 'Dieser Ort öffnet sich, sobald du den vorherigen erkundet hast.', orteErkundet: 'Orten erkundet', mapStart: 'Wähl einen Ort auf der Karte. Ich begleite dich.', playbookNeu: 'Playbook-Seite hinzugefügt', playbookPraxis: 'Im Alltag', urteil_richtig: 'Richtig', urteil_teilweise: 'Teilweise', urteil_falsch: 'Daneben', duWaehltest: 'Du hast {x} gewählt', dieFolge: 'Die Folge', zurueckspulen: 'Zurückspulen und neu entscheiden', wahlFolgen: 'Wähl eine Antwort. Deine Wahl verändert, was als Nächstes passiert.', situationVon: 'Situation {n} von {z}', festlegen: 'Festlegen', deinZug: 'Dein Zug', textNachricht: 'Nachricht', nachrichtAn: 'Nachricht in {c}', notizMarkieren: 'Zum Markieren antippen', markierungenPruefen: 'Markierungen prüfen', notizMarkiert: 'markiert', wochenablauf: 'Wochenablauf', mapWeiter: 'Als Nächstes: {ort}.', mapFertig: 'Du hast alle Orte erkundet. Gut gemacht.', mapGeschafft: '{ort} ist erkundet.', mgZeigen: 'Hinweis zeigen', mgZu: 'Hinweis ausblenden', mapStand: 'Stand der Karte', zurueckZurKarte: 'Zurück zur Karte', platzN: '{n}. Platz', ja: 'Ja', nein: 'Nein', weissNicht: 'Weiß ich nicht', mehrLesen: 'Mehr lesen', danke: 'Danke für deine Antwort.', punkteHinweis: 'Klick auf die Punkte in den Bildern.', wenigerLesen: 'Weniger anzeigen', weissNichtFb: 'Gut, dass du nicht rätst. Hier ist die Antwort mit Erklärung.', deineZahl: 'Deine Zahl', bis: 'bis', linieHinweis: 'Klick links einen Begriff und rechts, was dazu passt. Ein zweiter Klick löst die Linie.', linieWaehlen: 'Begriff wählen, dann rechts die Zuordnung', auswerten: 'Auswerten', pinNummer: 'Nummer {n}', pinGesetzt: 'gesetzt', pinStelle: 'Stelle {n}', pinRichtig: 'Richtige Nummer an dieser Stelle', pinHinweis: 'Zieh jede Nummer auf die passende Stelle im Bild. Ohne Maus: Nummer wählen, dann die Stelle.', nachLinks: 'nach links', nachRechts: 'nach rechts', scAbsenden: 'Absenden', scAendern: 'Neu einschätzen', deinProfil: 'Dein Profil',
     warteSchaetzung: 'Gib zuerst deine Schätzung ab. Danach geht es weiter.',
     warteUebung: 'Bearbeite zuerst die Übung auf dieser Seite. Danach geht es weiter.',
     naechstesKapitel: 'Nächstes Kapitel', lernzeit: 'Lernzeit', minuten: 'Minuten', kapitel: 'Kapitel', starten: 'Starten',
@@ -344,7 +382,10 @@ function kursPlayer(course, opts) {
     triJa: 'Kommt mit', triNein: 'Bleibt draußen', triFrage: 'Was machst du damit?', triGewaehlt: 'Ausgewählt',
     triPasst: 'Passt', triSchauNochmal: 'Schau noch einmal', triFertig: 'Alle durch', triRichtig: 'richtig',
     triRichtigWaere: 'Richtig wäre:', triNachlesen: 'Die richtige Seite steht jetzt an den Karten.',
-    triLeer: 'Noch keine Karten.', nochEinmal: 'Noch einmal', von: 'von', karteVon: 'Karte {n} von {m}',
+    wbOffen: 'Offen', wbSpaeter: 'Später', wbFertig: 'Erledigt', wbStarten: 'Aufgaben starten', wbWeiterMit: 'Weiter mit Aufgabe {n}', wbAufgabeVon: 'Aufgabe {n} von {m}', wbErstDie: 'Diese Aufgabe öffnet sich später. Mach erst Aufgabe {n}.', szeneVon: 'Szene {n} von {m}', szeneWeiter: 'Nächste Szene', szeneZurueck: 'Vorige Szene', hilfeNachlesen: 'Nachlesen',
+    tszAufgabe: 'Lies den Kommentar. Tipp auf die passende Einordnung.', tszKommentar: 'Kommentar {n} von {m}', tszRichtig: 'Richtig!', tszNichtGanz: 'Nicht ganz.', tszNochmal: 'Schau noch einmal hin und versuch es erneut.', tszWarnzeichen: 'Warnzeichen', tszNaechster: 'Nächster Kommentar', tszAuswertung: 'Zur Auswertung', tszFertig: 'Alle {n} Kommentare eingeordnet.', tszErsterVersuch: '{n} von {m} beim ersten Versuch richtig.', falsch: 'falsch',
+    slHinweis: 'Wähl für jeden Punkt einen Bereich und prüf dann deine Zuordnung.', slWaehle: 'Bereich wählen', slBereichFuer: 'Bereich für „{k}“', slPruefen: 'Zuordnung prüfen', slOffen: 'Noch {n} Punkte ohne Bereich.', slStand: '{n} von {m} richtig. Ändere die markierten Punkte und prüf noch einmal.', slNochNicht: 'Noch nicht. Schau noch einmal.', slGehoertZu: 'Gehört zu „{c}“.', slCheckliste: 'Deine Checkliste', slRichtig: 'Richtig.', slDrucken: 'Checkliste drucken',
+    triLeer: 'Noch keine Karten.', nochEinmal: 'Noch einmal', fastGeschafft: 'Fast geschafft', testfrageOffen: 'Es ist noch 1 Testfrage offen.', testfragenOffen: 'Es sind noch {n} Testfragen offen.', testWiederholen: 'Test wiederholen', zumZertifikat: 'Zum Zertifikat', ueberspringen: 'Überspringen', trotzdemDurcharbeiten: 'Trotzdem durcharbeiten', antwortenAendern: 'Antworten ändern', zertBestaetigt: 'Hiermit wird bestätigt, dass', sortHinweis: 'Zieh die Karten in die passende Spalte. Mit der Tastatur: Karte anwählen und die Nummer der Spalte drücken.', sortErgebnis: '{n} von {m} richtig zugeordnet.', sortFalschHinweis: 'Die richtige Spalte steht jetzt hinter den falschen Karten.', sortOffen: 'Noch {n} offen', sortOffenEins: 'Noch 1 Karte offen', von: 'von', karteVon: 'Karte {n} von {m}',
     clStand: '{n} von {z} erledigt', clAlle: 'Alles erledigt: {z} von {z}', nochmalVersuchen: 'Versuch es noch einmal.',
     szene: 'Szene', abspielen: 'Abspielen', pause: 'Pause', naechsteZeile: 'Nächste Zeile', vollbild: 'Vollbild', ende: 'Ende', nochmalAnsehen: 'Noch einmal ansehen',
     szeneStarten: 'Szene starten', vorlesen: 'Vorlesen', vorlesenStopp: 'Vorlesen anhalten', tonAus: 'Ton aus', tonAn: 'Ton an', weiterAbspielen: 'Weiter abspielen', allesAnzeigen: 'Alles anzeigen', szeneNochmal: 'Szene noch einmal',
@@ -372,7 +413,7 @@ function kursPlayer(course, opts) {
     alleRichtigen: 'Wähle alle Antworten, die stimmen', tabelle: 'Tabelle', denkpauseStart: 'Denkpause starten ({m})', denkpauseEnde: 'Zeit ist um. Schreib jetzt auf, was dir eingefallen ist.', gedankenPh: 'Deine Gedanken …', deineAntwort: 'Deine Antwort', loesung: 'Lösung', antwortLoesung: 'Antwort und Lösung', tippLabel: 'Tipp', nichtBeantwortet: 'nicht beantwortet', stellenRichtig: '{r} von {n} Stellen richtig', stelleImBild: 'die markierte Stelle im Bild',
     kalenderTitel: 'Wiederholung: {k}', kalenderText: 'Fünf Minuten: Was war der Kern? Was habe ich seitdem davon umgesetzt?', kalenderFragen: 'Drei Fragen zum Abrufen, erst antworten, dann im Kurs nachsehen:',
     kurzWiederholen: 'Kurz wiederholen', kurzWiederholenHinweis: 'Ein paar Fragen aus dem, was du schon gelernt hast. Sie zählen nicht zur Bewertung. Wiederholen mit Abstand hilft dem Behalten.',
-    allesZugeordnet: 'Alles zugeordnet', nichtZugeordnet: 'Nichts zugeordnet',
+    allesZugeordnet: 'Alles zugeordnet', sortNochNichts: 'Noch nichts zugeordnet', sortPruefen: 'Zuordnung prüfen', sortAbgelegt: '„{k}“ liegt jetzt in „{c}“.', nichtZugeordnet: 'Nichts zugeordnet',
     notizen: 'Notizen', glossar: 'Glossar', ergebnis: 'Ergebnis', abgeschlossen: 'abgeschlossen', ca: 'ca.', min: 'Min',
     zumVergleich: 'Zum Vergleich:', kritTitel: 'Deine Antwort im Vergleich', kritHinweis: 'Lies die Musterantwort und hake ab, was deine Antwort erfüllt.', kritErfuellt: 'Kriterien erfüllt', kritAlle: 'Alle Kriterien erfüllt. Gut gemacht.',
     hallo: 'Hallo', willkommenZurueckName: 'Willkommen zurück, {n}!', msAlleKapitel: 'Das war das letzte Kapitel. Jetzt noch der Abschluss.',
@@ -382,7 +423,7 @@ function kursPlayer(course, opts) {
     ergebnisJeLernziel: 'Ergebnis je Lernziel', richtig: 'richtig', sitzt: 'Sitzt', zumKapitel: 'Zum Kapitel', jedeAussage: 'Entscheide bei jeder Aussage', richtigWaere: 'Richtig wäre', zumNachlesen: 'Zum Nachlesen', selbstbild: 'am Anfang eingeschätzt', selbstUeber: 'Am Anfang hast du dich hier sicherer eingeschätzt, als es der Test zeigt. Ein zweiter Blick lohnt sich.', selbstUnter: 'Du kannst hier mehr, als du am Anfang dachtest.', nochmalAnsehen: 'Dazu noch einmal ansehen',
     transkript: 'Transkript', szene: 'Szene', schritt: 'Schritt', von: 'von', herunterladen: 'Herunterladen',
     suchen: 'Suchen', suchHinweis: 'Gib mindestens zwei Zeichen ein.', keineTreffer: 'Keine Treffer.',
-    abspielen: 'Abspielen', pause: 'Pause', allesZeigen: 'Alles zeigen', deineSchaetzung: 'Deine Schätzung', tatsaechlich: 'Tatsächlich', amAnfang: 'Am Anfang', heute: 'Heute', deineVermutung: 'Deine Vermutung',
+    abspielen: 'Abspielen', pause: 'Pause', allesZeigen: 'Alles zeigen', deineSchaetzung: 'Deine Schätzung', tatsaechlich: 'Tatsächlich', pkHilfe: 'Klick auf ein Symbol, um bis dorthin einzufärben. Mit den Pfeiltasten geht es auch.', pkWaehlen: 'Färbe zuerst so viele Symbole ein, wie du schätzt.', pkGenau: 'Genau getroffen.', pkHoch: 'Du lagst {n} zu hoch.', pkTief: 'Du lagst {n} zu niedrig.', pkLegendeDu: 'Umriss: deine Schätzung', pkLegendeReal: 'gefüllt: {x}', amAnfang: 'Am Anfang', heute: 'Heute', deineVermutung: 'Deine Vermutung',
     entdeckt: 'entdeckt', fuehrungStarten: 'Führung starten', naechsterPunkt: 'Nächster Punkt',
     oeffnen: 'öffnen', besucht: 'schon besucht', gefunden: 'gefunden', nochOffen: 'noch offen', fundstueck: 'Fundstück',
     stopp: 'Stopp', kiHinweis: 'Hinweis zu künstlicher Intelligenz:', kiMarke: 'KI-unterstützt', kiBild: 'Mit KI erzeugt', kiStimme: 'Vorgelesen von einer synthetischen Stimme', kiStimmeKurz: 'KI-Stimme',
@@ -390,8 +431,10 @@ function kursPlayer(course, opts) {
     chatWaehle: 'Was antwortest du?', chatNochmal: 'Wähle eine andere Antwort.', chatEnde: 'Das Gespräch ist beendet.', hyNachricht: 'Nachricht', hyGesendet: 'Gesendet', warteChat: 'Führe zuerst das Gespräch zu Ende.',
     mkcNeu: 'Neue Karte für deinen Stapel', mkcFrage: 'Frage', mkcAntwort: 'Antwort', mkcHinweis: 'Überleg kurz, dann dreh die Karte um.', mkcUmdrehen: 'Karte umdrehen', mkcImStapel: 'Liegt in deinem Kartenstapel ({n} von {m} gesammelt).',
     deckTitel: 'Kartenstapel', deckLeer: 'Noch keine Merkkarten im Kurs.', deckAnzahl: '{n} Karten in deinem Stapel, {g} davon hast du schon umgedreht.', deckStart: 'Abfrage starten', deckStand: 'Karte {i} von {n} · {k} auf Anhieb gewusst', deckUmdrehen: 'Umdrehen', deckGewusst: 'Gewusst', deckNochNicht: 'Noch nicht', deckErgebnis: '{k} von {n} auf Anhieb gewusst.', deckWiederholen: 'Diese Karten schaust du dir in ein paar Tagen noch einmal an:', deckAlle: 'Alle Karten auf Anhieb gewusst.', deckNeu: 'Noch einmal abfragen', deckKommtNochmal: 'Kommt am Ende noch einmal.', deckAufgedeckt: 'Schon aufgedeckt', deckGewusstAlle: 'Auf Anhieb gewusst:',
+    deckFaellig: '{n} Karten sind heute fällig.', deckFaellig1: '1 Karte ist heute fällig.', deckFaelligStart: 'Fällige wiederholen', deckNichtsFaellig: 'Heute ist nichts fällig. Nächste Wiederholung am {d}.', deckTrotzdem: 'Trotzdem üben', deckTrotzdemHinweis: 'Beim freien Üben bleiben die Fächer, wie sie sind.', deckFaecher: 'Fach 1 bis 5', deckFaecherAria: 'Karten je Fach: {l}', deckFach: 'Fach {f}', deckSitzt: 'sitzt', deckFaecherHinweis: 'Was du weißt, rückt ein Fach weiter und kommt erst nach ein paar Tagen wieder. Was noch nicht sitzt, kommt morgen.', deckNaechste: 'Nächste Wiederholung am {d}.', resumeFaellig: '{n} Karten aus deinem Kartenstapel sind heute fällig.', resumeFaellig1: '1 Karte aus deinem Kartenstapel ist heute fällig.', zumStapel: 'Zum Kartenstapel', kalenderFaellig: 'Öffne den Kurs, dein Kartenstapel hat fällige Karten.',
+    dmapWeg: 'Dein Weg durch das Szenario: {n} Entscheidungen', dmapWeg1: 'Dein Weg durch das Szenario: 1 Entscheidung', dmapNochOffen: '{n} davon noch offen', dmapListe: 'Entscheidungskarte', dmapDeineWahl: 'Deine Wahl', dmapZuerst: 'zuerst versucht', dmapOffen: 'noch offen', dmapZurEntscheidung: 'Zur Entscheidung', dmapWaere: 'Was wäre passiert?', dmapWurde: 'Was daraus wurde', dmapKeineFolge: 'Zu dieser Möglichkeit steht keine Folge im Kurs.', dmapHinweis: 'Öffne eine andere Abzweigung und sieh nach, was dort passiert wäre.', dmapEntscheidung: 'Entscheidung {n}', warteKarteZweig: 'Öffne auf der Karte noch eine andere Abzweigung.',
     formLeer: 'Klick auf die Kopfzeile', formStand: '{n} von {m} Feldern ausgefüllt', formVollstaendig: 'Vollständig', formDrucken: 'Ausdrucken', warteFormular: 'Füll zuerst alle Felder des Formulars aus. Danach geht es weiter.', warteKarte: 'Dreh zuerst die Karte um. Danach geht es weiter.', warteBildschirm: 'Löse zuerst die Aufgabe am Bildschirm. Danach geht es weiter.', bsKeinEcht: 'Übungsfeld: Gib hier kein echtes Passwort ein.', bsAnklicken: 'anklicken', bsBestaetigen: 'Bestätigen', bsWillkommen: 'Willkommen', pwLaenge: 'mindestens {n} Zeichen', pwKlein: 'Kleinbuchstaben', pwGross: 'Großbuchstaben', pwZahl: 'eine Zahl', pwZeichen: 'ein Sonderzeichen wie @, ! oder $', pwEinfach: 'keine einfache Folge wie 12345 oder „passwort“', warteStapel: 'Geh zuerst den Kartenstapel durch. Danach geht es weiter.',
-    promptWaehlen: 'Wähle oben einen Prompt …', weitereInfos: 'Weitere Informationen', lesezeit: 'Lesezeit', minute: 'Minute', ueberblick: 'Überblick', kapitelPl: 'Kapitel', gelesen: 'gelesen', geuebt: 'geübt', kurzZusammen: 'Kurz zusammengefasst', anhoerenName: 'Anhören', kurzGefragt: 'Kurz gefragt', kfFreiwillig: 'Freiwillig, ein, zwei Sätze reichen', kfFesthalten: 'Festhalten', soAntwortenAndere: 'So haben andere geantwortet', deineWahl: 'deine Wahl', quelle: 'Quelle', kfFakt: 'Der Hintergrund', kalenderNugget: 'Weißt du es noch?', kalenderAufloesung: 'Auflösung', kfImLernbuch: 'steht in deinem Lernbuch', udDanke: 'Danke. Der Kurs richtet sich jetzt nach dir.', udBegleitung: 'Deine Begleitung', udBegleitFrage: 'Wer begleitet dich durch den Kurs?', mkMarkiert: '{n} von {m} markiert', mkFertig: 'Fertig', mkHinweis: 'Klick auf einen Satz, um ihn zu markieren. Du kannst es jederzeit ändern.', mkDanke: 'Danke, das merkt sich der Kurs.', mkKeins: 'Nichts davon markiert.', deinWeg: 'Dein Weg durch den Kurs', wegVorher: 'am Anfang', wegHeute: 'heute', wegWirklich: 'tatsächlich', wegSelbst: 'Deine Selbsteinschätzung', wegSchaetzung: 'Deine Schätzungen', wegWorte: 'Deine Worte', perMail: 'Per E-Mail an mich', deineNotiz: 'Deine Notiz', notizZuSeite: 'Notiz zu dieser Seite', notizAllgemein: 'Allgemeine Notiz', notizHinweis: 'Alle Notizen stehen in deinem Lernbuch und gehen am Ende mit per E-Mail, Druck oder Textdatei.', notizAndere: 'Deine Notizen auf anderen Seiten', notizLeer: 'Was willst du dir zu dieser Seite merken?', lbwEyebrow: 'Dein Begleiter durch den Kurs', lbwLead: 'Dieser Kurs merkt sich, was du denkst, schreibst und entscheidest, und gibt es dir am Ende mit.', lbwNotizT: 'Notizen auf jeder Seite', lbwNotiz: 'Über „Notizen“ in der Leiste hältst du fest, was dir auf einer Seite wichtig ist. Jede Seite hat ihre eigene Notiz.', lbwSammeltT: 'Der Kurs sammelt mit', lbwSammelt: 'Deine Antworten, Schätzungen, Entscheidungen und Begründungen landen von selbst im Lernbuch.', lbwMailT: 'Am Ende an dich', lbwMail: 'Per E-Mail an dich selbst, als Ausdruck oder als Textdatei. Nichts verlässt deinen Browser, bis du es schickst.', lbwLos: 'Alles klar, los geht’s', lbwProbieren: 'Erste Notiz schreiben', lbwWo: 'Du findest dein Lernbuch jederzeit im Menü.', markiert: 'Markiert', udLage: 'Deine Lage', udLageFrage: 'Was trifft am ehesten auf dich zu?', deinZiel: 'Dein Ziel', deinFall: 'Dein Fall', aendern: 'Ändern', udFehlt: 'Bitte wähle eine Antwort und schreib bei jeder Frage mindestens drei Wörter.', udLos: 'Los geht’s', udPrivat: 'Das wird nicht bewertet. Es bleibt in deinem Lernstand und steht in deinem Lernbuch.', lernbuch: 'Mein Lernbuch', lernbuchLeer: 'Hier sammelt sich alles, was du im Kurs schreibst, schätzt und entscheidest.', zurSeite: 'Zur Seite', drucken: 'Drucken', alsTextSpeichern: 'Als Textdatei speichern', deineBegruendung: 'Deine Begründung', reflexion: 'Reflexion', checkliste: 'Checkliste', zuletztGeschrieben: 'Zuletzt hast du geschrieben:', msZielFrage: 'Was davon bringt dich deinem Ziel näher?', zielRueckblick: 'Was davon probierst du als Erstes aus?', lernbuchOeffnen: 'Mein Lernbuch ansehen', fragWas: 'Was willst du wissen?', fragWeiter: 'Was noch?', fragStand: '{n} von {m} Fragen gestellt', fragNoch: 'noch {n} bis weiter',
+    promptWaehlen: 'Wähle oben einen Prompt …', weitereInfos: 'Weitere Informationen', lesezeit: 'Lesezeit', minute: 'Minute', ueberblick: 'Überblick', kapitelPl: 'Kapitel', gelesen: 'gelesen', geuebt: 'geübt', kurzZusammen: 'Kurz zusammengefasst', anhoerenName: 'Anhören', kurzGefragt: 'Kurz gefragt', kfFreiwillig: 'Freiwillig, ein, zwei Sätze reichen', kfFesthalten: 'Festhalten', soAntwortenAndere: 'So haben andere geantwortet', deineWahl: 'deine Wahl', quelle: 'Quelle', kfFakt: 'Der Hintergrund', kalenderNugget: 'Weißt du es noch?', kalenderAufloesung: 'Auflösung', kfImLernbuch: 'steht in deinem Lernbuch', udDanke: 'Danke. Der Kurs richtet sich jetzt nach dir.', udBegleitung: 'Deine Begleitung', udBegleitFrage: 'Wer begleitet dich durch den Kurs?', mkMarkiert: '{n} von {m} markiert', mkFertig: 'Fertig', mkHinweis: 'Klick auf einen Satz, um ihn zu markieren. Du kannst es jederzeit ändern.', mkDanke: 'Danke, das merkt sich der Kurs.', mkKeins: 'Nichts davon markiert.', deinWeg: 'Dein Weg durch den Kurs', wegVorher: 'am Anfang', wegHeute: 'heute', wegWirklich: 'tatsächlich', wegSelbst: 'Deine Selbsteinschätzung', wegSchaetzung: 'Deine Schätzungen', wegWorte: 'Deine Worte', perMail: 'Per E-Mail an mich', deineNotiz: 'Deine Notiz', notizZuSeite: 'Notiz zu dieser Seite', notizAllgemein: 'Allgemeine Notiz', notizHinweis: 'Alle Notizen stehen in deinem Lernbuch und gehen am Ende mit per E-Mail, Druck oder Textdatei.', notizAndere: 'Deine Notizen auf anderen Seiten', notizLeer: 'Was willst du dir zu dieser Seite merken?', lbwEyebrow: 'Dein Begleiter durch den Kurs', lbwLead: 'Dieser Kurs merkt sich, was du denkst, schreibst und entscheidest, und gibt es dir am Ende mit.', lbwNotizT: 'Notizen auf jeder Seite', lbwNotiz: 'Über „Notizen“ in der Leiste hältst du fest, was dir auf einer Seite wichtig ist. Jede Seite hat ihre eigene Notiz.', lbwSammeltT: 'Der Kurs sammelt mit', lbwSammelt: 'Deine Antworten, Schätzungen, Entscheidungen und Begründungen landen von selbst im Lernbuch.', lbwMailT: 'Am Ende an dich', lbwMail: 'Per E-Mail an dich selbst, als Ausdruck oder als Textdatei. Nichts verlässt deinen Browser, bis du es schickst.', lbwLos: 'Alles klar, los geht’s', lbwProbieren: 'Erste Notiz schreiben', lbwWo: 'Du findest dein Lernbuch jederzeit im Menü.', markiert: 'Markiert', udLage: 'Deine Lage', udLageFrage: 'Was trifft am ehesten auf dich zu?', deinZiel: 'Dein Ziel', deinFall: 'Dein Fall', aendern: 'Ändern', udFehlt: 'Bitte wähle eine Antwort und schreib bei jeder Frage mindestens drei Wörter.', udLos: 'Los geht’s', udPrivat: 'Das wird nicht bewertet. Es bleibt in deinem Lernstand und steht in deinem Lernbuch.', lernbuch: 'Mein Lernbuch', lernbuchLeer: 'Hier sammelt sich alles, was du im Kurs schreibst, schätzt und entscheidest.', zurSeite: 'Zur Seite', drucken: 'Drucken', alsTextSpeichern: 'Als Textdatei speichern', deineBegruendung: 'Deine Begründung', reflexion: 'Reflexion', checkliste: 'Checkliste', zuletztGeschrieben: 'Zuletzt hast du geschrieben:', msZielFrage: 'Was davon bringt dich deinem Ziel näher?', zielRueckblick: 'Was davon probierst du als Erstes aus?', lernbuchOeffnen: 'Mein Lernbuch ansehen', fragWas: 'Was willst du wissen?', fragWeiter: 'Was noch?', fragStand: '{n} von {m} Fragen gestellt', fragBudget: 'Noch {n} Fragen, dann ist die Zeit um', fragUrsachen: '{n} von {m} Ursachen gefunden', fragGefunden: 'gefunden', fragOffen: 'noch offen', fragNeu: 'Gespräch neu beginnen', fragNoch: 'noch {n} bis weiter',
     mxHierAblegen: 'Hier ablegen', mxVergleich: 'Deine Einordnung im Vergleich', mxDeine: 'deine Einordnung', mxExperte: 'Einschätzung', mxNah: 'nah dran', mxGleichesFeld: 'gleiches Feld',
     mxAnderesFeld: 'anderes Feld', mxAbgelegt: 'eingeordnet', mxHilfe: 'Wähle einen Begriff und klicke dann in die Fläche, dorthin, wo er für dich hingehört. Gesetzte Nummern kannst du ziehen oder anklicken und neu setzen.', mxVerschieben: 'Nummer {n} ({t}) verschieben: ziehen, anklicken und neu setzen oder mit den Pfeiltasten', mxVergleichen: 'Mit der Einschätzung vergleichen', warteMatrix: 'Ordne zuerst alle Begriffe ein und vergleiche.',
     bereichSicher: 'Mit {p} % Sicherheit liegt der Wert zwischen …', bereichVon: 'von', bereichBis: 'bis', bereichDrin: 'Getroffen. Der wahre Wert liegt in deinem Bereich.', bereichDaneben: 'Daneben. Der wahre Wert liegt außerhalb deines Bereichs.',
@@ -399,9 +442,10 @@ function kursPlayer(course, opts) {
     rwTitel: 'Umschreiben', rwVorher: 'Vorher', rwDeine: 'Deine Fassung', rwMuster: 'Musterfassung',
     schlossOeffnen: 'Öffnen', schlossStelle: 'Stelle {n} von {m}', schlossHoeher: 'Stelle {n} eins höher', schlossTiefer: 'Stelle {n} eins tiefer', schlossCode: 'Code', schlossGruppe: 'Zahlenschloss',
     schlossFalsch: 'Das passt noch nicht. Sieh dir deine Fundstücke noch einmal an.', schlossLeer: 'Bitte fülle zuerst alle Stellen aus.', schlossOffen: 'Das Schloss ist offen.', hinweisZeigen: 'Hinweis zeigen',
+    ieNachSperre: 'Erscheint erst nach der Weiter-Sperre', ieNachBedingung: 'Erscheint erst, wenn die Bedingung erfüllt ist', ieNurHandy: 'Nur am Handy sichtbar', ieNurGross: 'Nur am Bildschirm sichtbar',
     fundstueck: 'Fundstück', fundstuecke: 'Deine Fundstücke', nochNichtGefunden: 'noch nicht gefunden', warteSchloss: 'Öffne zuerst das Schloss. Danach geht es weiter.',
     wbStand: '{n} von {m} erledigt', wbGeschafft: 'Geschafft: {n} erledigt. Weitere Aufgaben kannst du freiwillig wählen.', wbOeffnen: 'Aufgabe öffnen', wbZurSeite: 'Zur Aufgabe', wbErledigt: 'Erledigt', wbErledigtMark: 'erledigt',
-    warteWahlbrett: 'Wähle zuerst {m} Aufgaben aus dem Wahlbrett und erledige sie.',
+    warteWahlbrett: 'Wähle zuerst {m} Aufgaben aus dem Wahlbrett und erledige sie.', warteListe: 'Geh zuerst alle Herausforderungen durch.',
     zerlegenHinweis: 'Zieh jedes Stück der Antwort auf den passenden Teil. Ohne Maus: Buchstabentaste am Kärtchen.',
     regalLabel: 'Regal', regalWaehle: 'Wähle genau {n} Teile', regalStand: '{k} von {n} gewählt', regalVoll: 'Du hast schon {n} Teile gewählt. Leg erst eins zurück.',
     regalGenau: 'Wähle genau {n} Teile.', regalTreffer: '{k} von {n} Teilen passen', regalFehlt: 'fehlt', regalPasst: 'passt.', regalPasstNicht: 'passt hier nicht.',
@@ -411,22 +455,57 @@ function kursPlayer(course, opts) {
     mappeOffen: 'Lies in Ruhe. Danach geht es weiter.', mappeGelesen: 'Gelesen. Du kannst die Mappe jederzeit wieder öffnen.', warteMappe: 'Öffne zuerst die Mappe und lies sie.',
     vpHinweis: 'Sieh dir beide Szenen an und wähl eine.', vpWaehlen: 'Diese Szene', vpPlay: 'Abspielen', vpAbspielen: 'Szene {n} abspielen', vpBeschreibung: 'Was im Bild passiert',
     vpSoGeht: 'So geht es', vpSoNicht: 'So nicht', vpRichtig: 'Richtig erkannt.', vpFalsch: 'Sieh noch einmal genau hin.', vpTun: 'Tun', vpLassen: 'Lassen',
-    udZielKommt: 'Dein Ziel kommt vor in', udZielOffen: 'Kein Kapitel nennt dein Ziel wörtlich. Sieh in die Kapitelübersicht und wähl, was am nächsten liegt.', szeneN: 'Szene {n}', warteVideopaar: 'Sieh dir beide Szenen an und wähl eine.'
+    udZielKommt: 'Dein Ziel kommt vor in', udZielOffen: 'Kein Kapitel nennt dein Ziel wörtlich. Sieh in die Kapitelübersicht und wähl, was am nächsten liegt.', szeneN: 'Szene {n}', warteVideopaar: 'Sieh dir beide Szenen an und wähl eine.',
+    spLabel: 'Laut sagen', spAufnehmen: 'Aufnehmen', spStopp: 'Stopp', spLaeuft: 'Aufnahme läuft', spWarte: 'Mikrofon wird gestartet …', spHoechstens: 'höchstens {m}',
+    spPrivat: 'Die Aufnahme bleibt auf deinem Gerät und wird nicht gespeichert.', spDeine: 'Deine Aufnahme', spAnhoeren: 'Hör dir an, wie es klingt. Passt es, klick auf „Fertig“.',
+    spNeu: 'Neu aufnehmen', spFertig: 'Fertig', spNochmal: 'Noch einmal sprechen', spGesagt: 'Du hast deine Antwort laut gesagt. Die Aufnahme ist nicht gespeichert.',
+    spLieberSchreiben: 'Lieber schreiben', spLieberSprechen: 'Lieber sprechen', spSchreibPh: 'Schreib den Satz so, wie du ihn sagen würdest …',
+    spSpeichern: 'Speichern', spSpeichernMuster: 'Speichern und Musterantwort ansehen', spAktualisieren: 'Aktualisieren', spGespeichert: 'gespeichert',
+    spDreiWoerter: 'Schreib mindestens drei Wörter.', spKeinGeraet: 'Dieser Browser kann hier nicht aufnehmen. Schreib deine Antwort deshalb auf.',
+    spAbgelehnt: 'Das Mikrofon ist nicht freigegeben. Schreib deine Antwort deshalb auf.', spKeinMikro: 'Es ist kein Mikrofon angeschlossen. Schreib deine Antwort deshalb auf.',
+    spFehler: 'Die Aufnahme ließ sich nicht starten. Schreib deine Antwort deshalb auf.', spZeitUm: 'Die Zeit ist um.', spBeendet: 'Aufnahme beendet, {t}. Du kannst sie jetzt anhören.',
+    spSekunden: 'Aufnahme läuft, {n} Sekunden', spAufgenommen: 'aufgenommen', spLautGesagt: 'Laut gesagt (die Aufnahme wird nicht gespeichert)', spMusterHoeren: 'Musterantwort anhören',
+    warteSprechen: 'Sag oder schreib zuerst deine Antwort. Danach geht es weiter.',
+    // Bisher fest im Code, seit 08.11.2026 Bedientexte (in „Direkt bearbeiten“ änderbar)
+    qhMehrere: 'Mehrere Antworten sind richtig', qhEine: 'Eine Antwort ist richtig', qhWahrFalsch: 'Wahr oder falsch?', qhLuecken: 'Lücken ausfüllen', qhZahl: 'Zahl eingeben',
+    qhReihenfolge: 'In die richtige Reihenfolge bringen', qhZuordnen: 'Passendes zuordnen', qhStelle: 'Die richtige Stelle im Bild anklicken', qhNummern: 'Nummern an die passende Stelle im Bild bringen',
+    uebungMarke: 'Übung', wdhMarke: 'Wiederholung', wdhIntro: 'Fragen aus früheren Abschnitten. Was zuletzt nicht saß, kommt zuerst. Sie zählen nicht zur Bewertung.',
+    wdhLeer: 'Es gibt noch keine früheren Fragen zum Wiederholen.', rueckmeldungMarke: 'Rückmeldung', skalaNiedrig: 'trifft nicht zu', skalaHoch: 'trifft voll zu', okKnopf: 'OK',
+    tkDrucken: 'Als Merkkarte drucken oder speichern', quellenTitel: 'Quellen',
+    warteFragen: 'Bitte beantworte zuerst die Fragen auf dieser Seite.', warteUebungAb: 'Bitte schließe zuerst die Übung auf dieser Seite ab.', warteEntscheidungBitte: 'Bitte triff zuerst eine Entscheidung.',
+    warteAufgabe: 'Bitte bearbeite zuerst die Aufgabe auf dieser Seite.', warteMission: 'Bitte schließe zuerst die Mini-Mission auf dieser Seite ab.', warteSpiel: 'Bitte spiele zuerst das Level-Spiel auf dieser Seite zu Ende.',
+    zertBereit: 'Das Zertifikat steht bereit, sobald alle Testfragen beantwortet sind.', denkpause: 'Denkpause',
+    // Bedientexte seit 11.11.2026 (vorher fest im Code)
+    confGeraten: 'Geraten', confEher: 'Eher sicher', confSicher: 'Sicher', confFrage: 'Wie sicher bist du?',
+    nachbesprechung: 'Nachbesprechung', debriefTitel: 'Deine Entscheidungen im Überblick',
+    planMarke: 'Umsetzungsplan', planTitel: 'Mein Umsetzungsplan', planSpeichern: 'Plan speichern', planDrucken: 'Drucken oder als PDF sichern',
+    zertDrucken: 'Zertifikat anzeigen und drucken', nochKeinVideo: 'Noch kein Video',
   };
   const langs = course.languages || [];
   const langOriginals = {};
   let langUi = {};
   // Sie-Fassung der Bedientexte (settings.anrede: 'Sie'). Jeder Text aus UI_DE mit du, dich, dir, dein … oder einer Du-Aufforderung
   // braucht hier ein Gegenstück; der Selbsttest „Anrede: du, Du oder Sie“ meldet fehlende Einträge.
-  const UI_SIE = { nahtStart: 'Starten Sie jetzt ins Training.',
+  const UI_SIE = { sortHinweis: 'Ziehen Sie die Karten in die passende Spalte. Mit der Tastatur: Karte anwählen und die Nummer der Spalte drücken.', leerAuswahl: 'Wählen Sie zuerst eine Antwort aus.', leerLuecke: 'Füllen Sie zuerst eine Lücke aus.', leerZahl: 'Geben Sie zuerst eine Zahl ein.', leerZuordnen: 'Ordnen Sie zuerst mindestens einen Begriff zu.', leerPins: 'Setzen Sie zuerst alle Nummern ins Bild.', leerAussagen: 'Beurteilen Sie zuerst jede Aussage.', slSchritt: 'Ihr Schritt', poolBereit: 'Bereit, wenn Sie es sind', nahtStart: 'Starten Sie jetzt ins Training.', kursBeendet: 'Ihr Stand ist gespeichert. Sie können dieses Fenster jetzt schließen.', keineVersuche: 'Sie haben alle {n} Versuche für den Test genutzt. Wenden Sie sich an die Kursverantwortlichen, wenn Sie ihn noch einmal machen möchten.',
+    spPrivat: 'Die Aufnahme bleibt auf Ihrem Gerät und wird nicht gespeichert.', spDeine: 'Ihre Aufnahme', spAnhoeren: 'Hören Sie sich an, wie es klingt. Passt es, klicken Sie auf „Fertig“.',
+    spGesagt: 'Sie haben Ihre Antwort laut gesagt. Die Aufnahme ist nicht gespeichert.', spSchreibPh: 'Schreiben Sie den Satz so, wie Sie ihn sagen würden …',
+    spDreiWoerter: 'Schreiben Sie mindestens drei Wörter.', spKeinGeraet: 'Dieser Browser kann hier nicht aufnehmen. Schreiben Sie Ihre Antwort deshalb auf.',
+    spAbgelehnt: 'Das Mikrofon ist nicht freigegeben. Schreiben Sie Ihre Antwort deshalb auf.', spKeinMikro: 'Es ist kein Mikrofon angeschlossen. Schreiben Sie Ihre Antwort deshalb auf.',
+    spFehler: 'Die Aufnahme ließ sich nicht starten. Schreiben Sie Ihre Antwort deshalb auf.', spBeendet: 'Aufnahme beendet, {t}. Sie können sie jetzt anhören.',
+    warteSprechen: 'Sagen oder schreiben Sie zuerst Ihre Antwort. Danach geht es weiter.',
     zerlegenHinweis: 'Ziehen Sie jedes Stück der Antwort auf den passenden Teil. Ohne Maus: Buchstabentaste am Kärtchen.',
     regalWaehle: 'Wählen Sie genau {n} Teile', regalVoll: 'Sie haben schon {n} Teile gewählt. Legen Sie erst eins zurück.', regalGenau: 'Wählen Sie genau {n} Teile.',
     mappeHinweis: 'Öffnen Sie die Mappe und lesen Sie sie, bevor Sie entscheiden.', mappeOffen: 'Lesen Sie in Ruhe. Danach geht es weiter.',
     mappeGelesen: 'Gelesen. Sie können die Mappe jederzeit wieder öffnen.', warteMappe: 'Öffnen Sie zuerst die Mappe und lesen Sie sie.',
     udZielKommt: 'Ihr Ziel kommt vor in', udZielOffen: 'Kein Kapitel nennt Ihr Ziel wörtlich. Sehen Sie in die Kapitelübersicht und wählen Sie, was am nächsten liegt.', vpHinweis: 'Sehen Sie sich beide Szenen an und wählen Sie eine.', warteVideopaar: 'Sehen Sie sich beide Szenen an und wählen Sie eine.', vpFalsch: 'Sehen Sie noch einmal genau hin.', promptMarkieren: 'Kopieren ging nicht. Markieren Sie den Text und kopieren Sie ihn von Hand.',
+
+    mapStart: 'Wählen Sie einen Ort auf der Karte. Ich begleite Sie.', duWaehltest: 'Sie haben {x} gewählt', wahlFolgen: 'Wählen Sie eine Antwort. Ihre Wahl verändert, was als Nächstes passiert.', deinZug: 'Ihr Zug', mapFertig: 'Sie haben alle Orte erkundet. Gut gemacht.',
+    m3dHinweis: 'Drehen Sie das Modell mit Maus oder Finger, zoomen Sie mit dem Mausrad oder zwei Fingern. Klicken Sie auf die Nummern.', m3dStart: 'Klicken Sie auf eine Nummer am Modell oder in der Liste.', m3dAr: 'In Ihrem Raum ansehen', warteModell: 'Sehen Sie sich zuerst alle Teile des Modells an. Danach geht es weiter.', scrBild: 'Gezeichnetes Erklärvideo. Den gesprochenen Text finden Sie unter „Zum Nachlesen“.', warteScribble: 'Sehen Sie sich das Video bis zum Ende an oder lesen Sie den Text unter „Zum Nachlesen“. Danach geht es weiter.', warteSchritte: 'Sehen Sie sich zuerst alle Schritte an. Danach geht es weiter.',
     postfachHinweis: 'Mit dieser Mail stimmt etwas nicht. Finden Sie die Warnzeichen? Ziehen Sie jedes Etikett auf die Stelle der Mail, an der Sie es erkennen.', postfachStart: 'In Ihrem Postfach warten ein paar neue Mails. Sehen wir sie uns an?', postfachDaneben: 'Das passt hier noch nicht. Sehen Sie sich die Stelle noch einmal an.', postfachFertig: 'Alle Warnzeichen gefunden. Bei der nächsten Mail sehen Sie sie schneller.',
     mkcNeu: 'Neue Karte für Ihren Stapel', mkcHinweis: 'Überlegen Sie kurz, dann drehen Sie die Karte um.', mkcImStapel: 'Liegt in Ihrem Kartenstapel ({n} von {m} gesammelt).',
     deckAnzahl: '{n} Karten in Ihrem Stapel, {g} davon haben Sie schon umgedreht.', deckWiederholen: 'Diese Karten schauen Sie sich in ein paar Tagen noch einmal an:',
+    deckFaecherHinweis: 'Was Sie wissen, rückt ein Fach weiter und kommt erst nach ein paar Tagen wieder. Was noch nicht sitzt, kommt morgen.', resumeFaellig: '{n} Karten aus Ihrem Kartenstapel sind heute fällig.', resumeFaellig1: '1 Karte aus Ihrem Kartenstapel ist heute fällig.', kalenderFaellig: 'Öffnen Sie den Kurs, Ihr Kartenstapel hat fällige Karten.',
+    dmapWeg: 'Ihr Weg durch das Szenario: {n} Entscheidungen', dmapWeg1: 'Ihr Weg durch das Szenario: 1 Entscheidung', dmapDeineWahl: 'Ihre Wahl', dmapHinweis: 'Öffnen Sie eine andere Abzweigung und sehen Sie nach, was dort passiert wäre.', warteKarteZweig: 'Öffnen Sie auf der Karte noch eine andere Abzweigung.',
     formLeer: 'Klicken Sie auf die Kopfzeile', warteFormular: 'Füllen Sie zuerst alle Felder des Formulars aus. Danach geht es weiter.', warteKarte: 'Drehen Sie zuerst die Karte um. Danach geht es weiter.', warteBildschirm: 'Lösen Sie zuerst die Aufgabe am Bildschirm. Danach geht es weiter.', bsKeinEcht: 'Übungsfeld: Geben Sie hier kein echtes Passwort ein.', warteStapel: 'Gehen Sie zuerst den Kartenstapel durch. Danach geht es weiter.',
     wieGutVorher: 'Wie gut kennen Sie sich damit aus? Schätzen Sie sich ein, bevor Sie die Frage sehen.',
     vorherUeber: 'Sie haben gesagt, Sie kennen sich gut aus, aber die Antwort stimmt nicht. Hier haben Sie sich überschätzt: Genau das lohnt einen zweiten Blick.',
@@ -484,7 +563,7 @@ function kursPlayer(course, opts) {
     deinErgebnis: 'Ihr Ergebnis', geschafftTitel: 'Das haben Sie geschafft',
     selbstUeber: 'Am Anfang haben Sie sich hier sicherer eingeschätzt, als es der Test zeigt. Ein zweiter Blick lohnt sich.',
     selbstUnter: 'Sie können hier mehr, als Sie am Anfang dachten.',
-    deineSchaetzung: 'Ihre Schätzung', deineVermutung: 'Ihre Vermutung',
+    deineSchaetzung: 'Ihre Schätzung', deineVermutung: 'Ihre Vermutung', pkHilfe: 'Klicken Sie auf ein Symbol, um bis dorthin einzufärben. Mit den Pfeiltasten geht es auch.', pkWaehlen: 'Färben Sie zuerst so viele Symbole ein, wie Sie schätzen.', pkHoch: 'Sie lagen {n} zu hoch.', pkTief: 'Sie lagen {n} zu niedrig.', pkLegendeDu: 'Umriss: Ihre Schätzung',
     chatWaehle: 'Was antworten Sie?', deineWahl: 'Ihre Wahl',
     kfImLernbuch: 'steht in Ihrem Lernbuch',
     kalenderNugget: 'Wissen Sie es noch?',
@@ -522,6 +601,14 @@ function kursPlayer(course, opts) {
     warteKarten: 'Entscheiden Sie zuerst alle Karten. Danach geht es weiter.',
     warteStellen: 'Finden Sie zuerst alle Stellen im Text. Danach geht es weiter.',
     warteKartenDrehen: 'Drehen Sie zuerst alle Karten um. Danach geht es weiter.',
+    warteAufklappen: 'Öffnen Sie zuerst alle Einträge. Danach geht es weiter.',
+    hfZeigen: 'Tippen Sie auf die Stelle im Bild, an der es gefährlich wird. Ohne Maus: mit Tab ein Feld wählen. Escape bricht ab.', hfDaneben: 'Hier ist die Gefahr nicht. Schauen Sie noch einmal genau hin.',
+    panoHilfe: 'Rundumblick. Ziehen Sie mit der Maus oder dem Finger, um sich umzusehen, oder nutzen Sie die Pfeiltasten links und rechts. Pos1 führt zur Startrichtung. Alle Punkte erreichen Sie auch über die Liste „Punkte im Raum“.',
+    hfUebersehen: 'Hier haben Sie etwas übersehen.', hfFehlalarm: 'Hier ist noch nichts kritisch. Schauen Sie weiter.', warteFolge: 'Gehen Sie zuerst die Bildfolge bis zum Ende durch. Danach geht es weiter.',
+    tfFehlt: 'Wählen Sie zuerst in jeder Lücke etwas aus. Noch offen: {n}.', tfDeineWahl: 'Ihre Wahl', tfHinweis: 'Wählen Sie in jeder leeren Zelle aus, was dorthin gehört. Dann prüfen Sie die Tabelle.', warteTabelle: 'Füllen Sie zuerst die Tabelle aus und prüfen Sie sie. Danach geht es weiter.',
+    vermutungFeld: 'Ihr Stichwort', vermutungFehlt: 'Schreiben Sie erst ein Stichwort.',
+    stapelHinweis: 'Ziehen Sie die oberste Karte in den richtigen Behälter. Ohne Maus: Karte anwählen und die Nummer des Behälters drücken.',
+    wischHinweis: 'Wischen Sie nach links oder rechts, oder nutzen Sie die Knöpfe.',
     warteFrage: 'Beantworten Sie zuerst die Frage. Danach geht es weiter.',
     warteSelbstcheck: 'Beantworten Sie zuerst den Selbstcheck. Danach geht es weiter.',
     punkteHinweis: 'Klicken Sie auf die Punkte in den Bildern.', pyrHinweis: 'Klicken Sie auf eine Stufe, dann sehen Sie hier, was sie bedeutet.', vennHinweis: 'Klicken Sie auf einen Kreis, dann sehen Sie hier, was er bedeutet.',
@@ -535,13 +622,19 @@ function kursPlayer(course, opts) {
     zuordnenHinweis: 'Ziehen Sie die Kärtchen auf den passenden Begriff. Mit der Tastatur: Kärtchen anwählen und die Nummer des Begriffs drücken.',
     memoryHinweis: 'Decken Sie zwei Karten auf. Gehört die Bedeutung zum Begriff, bleiben beide offen.',
     jedeAussage: 'Entscheiden Sie bei jeder Aussage',
+    wbErstDie: 'Diese Aufgabe öffnet sich später. Machen Sie erst Aufgabe {n}.',
+    tszAufgabe: 'Lesen Sie den Kommentar. Tippen Sie auf die passende Einordnung.', tszNochmal: 'Schauen Sie noch einmal hin und versuchen Sie es erneut.',
+    slHinweis: 'Wählen Sie für jeden Punkt einen Bereich und prüfen Sie dann Ihre Zuordnung.', slStand: '{n} von {m} richtig. Ändern Sie die markierten Punkte und prüfen Sie noch einmal.', slNochNicht: 'Noch nicht. Schauen Sie noch einmal.', slCheckliste: 'Ihre Checkliste',
     suchHinweis: 'Geben Sie mindestens zwei Zeichen ein.',
     chatNochmal: 'Wählen Sie eine andere Antwort.',
     promptWaehlen: 'Wählen Sie oben einen Prompt …',
     warteMatrix: 'Ordnen Sie zuerst alle Begriffe ein und vergleichen Sie.',
     schlossFalsch: 'Das passt noch nicht. Sehen Sie sich Ihre Fundstücke noch einmal an.', schlossLeer: 'Bitte füllen Sie zuerst alle Stellen aus.', fundstuecke: 'Ihre Fundstücke',
     warteSchloss: 'Öffnen Sie zuerst das Schloss. Danach geht es weiter.', wbGeschafft: 'Geschafft: {n} erledigt. Weitere Aufgaben können Sie freiwillig wählen.',
-    warteWahlbrett: 'Wählen Sie zuerst {m} Aufgaben aus dem Wahlbrett und erledigen Sie sie.'
+    warteWahlbrett: 'Wählen Sie zuerst {m} Aufgaben aus dem Wahlbrett und erledigen Sie sie.', warteListe: 'Gehen Sie zuerst alle Herausforderungen durch.',
+    warteFragen: 'Bitte beantworten Sie zuerst die Fragen auf dieser Seite.', warteUebungAb: 'Bitte schließen Sie zuerst die Übung auf dieser Seite ab.', warteEntscheidungBitte: 'Bitte treffen Sie zuerst eine Entscheidung.',
+    warteAufgabe: 'Bitte bearbeiten Sie zuerst die Aufgabe auf dieser Seite.', warteMission: 'Bitte schließen Sie zuerst die Mini-Mission auf dieser Seite ab.', warteSpiel: 'Bitte spielen Sie zuerst das Level-Spiel auf dieser Seite zu Ende.',
+    confFrage: 'Wie sicher sind Sie?', debriefTitel: 'Ihre Entscheidungen im Überblick'
   };
   // Anrede (settings.anrede): 'du' (Standard), 'Du' (Pronomen groß, z. B. TBW) oder 'Sie'; eigene Bedientexte über settings.uiTexts { Schlüssel: Text }
   const ANREDE = set.anrede === 'Sie' || set.anrede === 'Du' ? set.anrede : 'du';
@@ -609,12 +702,28 @@ function kursPlayer(course, opts) {
       const acc = hex(theme.accent);
       if (acc) rootStyle.setProperty('--kp-on-accent', ratio(acc, [255, 255, 255]) >= ratio(acc, [4, 17, 31]) ? '#fff' : '#04111f');
     }
+    // Schrift auf der Hauptfarbe nach demselben Maßstab (ein helles Türkis trägt dunkle Schrift)
+    const pri = hex(theme.primary);
+    if (pri) rootStyle.setProperty('--kp-on-primary', ratio(pri, [255, 255, 255]) >= ratio(pri, [4, 17, 31]) ? '#fff' : '#04111f');
+    // Tiefe Hauptfarbe für Flächen mit kleiner weißer Schrift (Seite der großen Merkkarte): so weit Richtung Nachtblau gemischt,
+    // dass auch leicht getöntes Weiß 4,5 : 1 hat (Sichtprüfung 10.11.2026: Hellblau auf Blau 3,0 : 1 im Wandel-Kurs)
+    if (pri) {
+      let p = 0.82, deep = pri;
+      const mixD = q => pri.map((x, i) => Math.round(x * q + [11, 16, 32][i] * (1 - q)));
+      for (deep = mixD(p); p > 0.3 && ratio(deep, [255, 255, 255]) < 6; p -= 0.04) deep = mixD(p);
+      rootStyle.setProperty('--kp-primary-deep', `rgb(${deep.join(',')})`);
+    }
     // Stil-Paket und Darstellung als Klassen, damit das CSS darauf reagieren kann
     document.documentElement.classList.add('kp-style-' + (theme.style || 'klar'));
     if (theme.style === 'micro' && theme.sideLook === 'lektion') document.documentElement.classList.add('kp-ml-lektion');
+    // Lektionen zum Scrollen (sideLook 'scroll', Vorbild Rise): baut auf dem Lektions-Look auf und läuft immer als Scroll-Darstellung
+    if (theme.style === 'micro' && theme.sideLook === 'scroll') document.documentElement.classList.add('kp-ml-lektion', 'kp-ml-scroll', 'kp-layout-scroll');
+    if (lessonScroll) document.documentElement.classList.add('kp-sl-wahl', 'kp-sl-von-' + theme.fromStyle);
     if (theme.look !== 'klassisch') document.documentElement.classList.add('kp-modern');
     // Effekte „hochwertig“ ist der Standard; „dezent“ lässt nur die Grundbewegungen
-    if (theme.effects !== 'dezent') document.documentElement.classList.add('kp-fx-premium');
+    // „Bewegung reduzieren“ der Lernenden (Schalter im Inhaltsverzeichnis) schaltet die hochwertigen Effekte mit ab
+    if (theme.effects !== 'dezent' && !calmOn()) document.documentElement.classList.add('kp-fx-premium');
+    if (calmOn()) document.documentElement.classList.add('kp-ruhig');
     if (set.layout === 'scroll') document.documentElement.classList.add('kp-layout-scroll');
     // Bildschirmseiten: jede Seite füllt den Bildschirm wie eine Folie, Text und Übung stehen nebeneinander
     if (set.screen) document.documentElement.classList.add('kp-screen');
@@ -626,7 +735,7 @@ function kursPlayer(course, opts) {
   // Verweise wie "assets/logo.png" in HTML und CSS auf die hinterlegten Dateien umbiegen
   const res = s => String(s || '').replace(/assets\/[\w.\-]+/g, m => assetMap[m] || m);
   // Eigene Kopf- und Fußzeile (leer = Standard); das globale CSS steht danach und kann alles überschreiben
-  const chrome = course.chrome || {};
+  const chrome = lessonScroll ? Object.assign({}, course.chrome, { navPos: 'links' }) : (course.chrome || {});
   // Lage der Leiste: oben (Standard), unten oder links. Farben leer = Farben des Designs.
   // „menue“ ist die dezente dunkle Leiste unten: Symbole links, Menü in der Mitte (klappt das Inhaltsverzeichnis links auf), Pfeile rechts
   const dezent = chrome.navPos === 'menue';
@@ -646,8 +755,34 @@ function kursPlayer(course, opts) {
     if (chrome.navInk) ns.setProperty('--kp-nav-ink', chrome.navInk);
     else if (chrome.navColor) ns.setProperty('--kp-nav-ink', navInkFor(chrome.navColor));
   }
+  // Eigene Farben der Leiste und des Lektionskopfs (chrome.sl, aus „Direkt bearbeiten“ oder dem Design-Reiter):
+  // Kopf der Leiste, Liste, Akzent und Symbole der Lektionen, Grund und Schrift des Lektionskopfs, Etikett, die Karten „Situation“ und „Schritt“.
+  // Ohne eigene Schriftfarbe richtet sie sich nach der Helligkeit der Fläche. Das ID-Gewicht schlägt die Regeln der Stil-Pakete.
+  function slColorCss() {
+    const c = chrome.sl && typeof chrome.sl === 'object' ? chrome.sl : {};
+    const ok = v => /^#[0-9a-f]{6}$/i.test(v || '');
+    const H = 'html:not(#kp-frei).kp-ml-scroll', A = 'html:not(#kp-frei)', r = [];
+    const topInk = ok(c.topInk) ? c.topInk : ok(c.topBg) ? navInkFor(c.topBg) : '';
+    if (ok(c.topBg)) r.push(`${H} .kp-sl-top, ${H}.kp-nav-links .kp-navbar .kp-head { background: ${c.topBg}; }`);
+    if (topInk) r.push(`${H} :is(.kp-sl-top, .kp-sl-title, .kp-sl-sub, .kp-sl-prog span) { color: ${topInk}; }`, `${H} .kp-sl-prog i { background: color-mix(in srgb, ${topInk} 30%, transparent); }`, `${H} .kp-sl-prog i::after { background: ${topInk}; }`, `${H}.kp-nav-links .kp-navbar .kp-head .kp-iconbtn { color: ${topInk}; border-color: color-mix(in srgb, ${topInk} 32%, transparent); }`);
+    const ink = ok(c.ink) ? c.ink : ok(c.bg) ? navInkFor(c.bg) : '';
+    if (ok(c.bg)) r.push(`${H}.kp-nav-links .kp-navbar { background: ${c.bg}; }`, `${H} .kp-sl-item button:hover:not(:disabled), ${H} .kp-sl-item.current button { background: color-mix(in srgb, ${ink} 8%, ${c.bg}); }`);
+    if (ink) r.push(`${H} :is(.kp-sl-item button, .kp-sl-ico, .kp-sl-sec, .kp-ml-info, .kp-ml-info *) { color: ${ink}; }`, `${H} .kp-sl-item { border-bottom-color: color-mix(in srgb, ${ink} 14%, transparent); }`, `${H} .kp-sl-track { stroke: color-mix(in srgb, ${ink} 38%, transparent); }`);
+    if (ok(c.accent)) r.push(`${H} .kp-sl-item.current button { box-shadow: inset 5px 0 0 ${c.accent}; }`, `${H} .kp-sl-fill { stroke: ${c.accent}; }`, `${H} .kp-sl-ring.is-done .kp-sl-fill { fill: ${c.accent}; }`);
+    if (ok(c.icon)) r.push(`${H} .kp-sl-ico { color: ${c.icon}; }`);
+    if (ok(c.heroBg)) r.push(`${H} .kp-page-head.kp-sl-hero { background-color: ${c.heroBg}; }`, `${H} .kp-sl-hero::after { background: linear-gradient(90deg, color-mix(in srgb, ${c.heroBg} 95%, transparent) 0%, transparent 76%); }`, `@media (max-width: 760px) { ${H} .kp-sl-hero::after { background: linear-gradient(0deg, color-mix(in srgb, ${c.heroBg} 96%, transparent) 0%, transparent 84%); } }`);
+    const heroInk = ok(c.heroInk) ? c.heroInk : ok(c.heroBg) ? navInkFor(c.heroBg) : '';
+    if (heroInk) r.push(`${H} .kp-page-head.kp-sl-hero, ${H} .kp-page-head.kp-sl-hero :is(h1, .kp-sl-lead, .kp-sl-eyebrow, .kp-sl-pill, .kp-sl-dots span, .kp-sl-credit) { color: ${heroInk}; }`);
+    if (ok(c.badge)) r.push(`${H} .kp-sl-badge { background: ${c.badge}; color: ${navInkFor(c.badge)}; }`, `${H} .kp-page-head.kp-sl-hero h1::after, ${H} .kp-sl-dots i.now { background: ${c.badge}; }`);
+    [['momentBg', 'moment'], ['moveBg', 'move']].forEach(([k, n]) => {
+      if (!ok(c[k])) return;
+      const i2 = navInkFor(c[k]);
+      r.push(`${A} .kp-sl-mini.kp-sl-mini-${n} { background: ${c[k]}; color: ${i2}; }`, `${A} .kp-sl-mini.kp-sl-mini-${n} :is(.kp-sl-label, p.kp-sl-mtext) { color: ${i2}; }`);
+    });
+    return r.join('\n');
+  }
   const globalStyle = document.createElement('style');
-  globalStyle.textContent = res(chrome.css) + '\n' + res(course.css);
+  globalStyle.textContent = slColorCss() + '\n' + res(chrome.css) + '\n' + res(course.css);
   const pageStyle = document.createElement('style');
   if (!opts.renderer) {
     document.head.appendChild(globalStyle);
@@ -777,8 +912,8 @@ function kursPlayer(course, opts) {
       if (b.type === 'review') reviewQuestions(b).forEach(q => add(pi, q, false));
       if (b.type === 'glossquiz' && b.mode === 'match' && drawnPairs(b).length) add(pi, glossQuiz(b), false);
       if (b.type === 'ivideo') (b.markers || []).forEach(m => { if (m.kind === 'question' && m.q) add(pi, m.q, m.q.graded !== false); });
-      // Klickpfad (Stufe „prüfen“), Mini-Mission, Level-Spiel und eigene Interaktion zählen nur mit b.graded
-      if (b.graded && (b.type === 'mission' || b.type === 'game' || b.type === 'interaktion' || (b.type === 'simulation' && (b.modes || ['zeigen', 'ueben', 'pruefen']).includes('pruefen'))))
+      // Klickpfad (Stufe „prüfen“), Mini-Mission, Level-Spiel, eigene Interaktion und Tabelle zum Ausfüllen zählen nur mit b.graded
+      if (b.graded && (b.type === 'mission' || b.type === 'game' || b.type === 'interaktion' || (b.type === 'table' && b.look === 'ausfuellen') || (b.type === 'simulation' && (b.modes || ['zeigen', 'ueben', 'pruefen']).includes('pruefen'))))
         list.push({ id: b.id, pageIndex: pi, play: b, graded: true, points: Number(b.points) || 10, objective: b.objective || '' });
     }));
     // Entscheidungen (auch am Ende eines Comic-Dialogs) mit Punkten
@@ -865,6 +1000,8 @@ function kursPlayer(course, opts) {
     if (b.type === 'simulation') { const st = state.self[b.id]; return st && st.exam != null ? st.exam : null; }
     // Eigene Interaktion: der gemeldete Wert (0 bis 1), ohne Wert zählt „fertig“ voll
     if (b.type === 'interaktion') { const st = state.self[b.id]; return st && st.done ? (st.s == null ? 1 : st.s) : null; }
+    // Tabelle zum Ausfüllen: Anteil richtiger Zellen beim ersten Prüfen („Noch einmal“ hilft beim Lernen, ändert die Wertung nicht)
+    if (b.type === 'table') { const st = state.self[b.id]; return st && st.n ? (st.f == null ? 0 : st.f) : null; }
     const r = (state.self.mm || {})[b.id];
     if (!r) return null;
     if (!r.ok || r.r || r.k) return 0;
@@ -937,17 +1074,17 @@ function kursPlayer(course, opts) {
     else if (mode === 'auto') completed = hasTest ? testDone : pagesDone;
     else completed = pagesDone;
     const useSuccess = hasTest && (mode === 'auto' || mode === 'test' || mode === 'percent+test');
-    return { completed, pagesDone, hasTest, testDone, passed, pct: testDone ? s.pct : null, useSuccess };
+    return { completed, pagesDone, hasTest, testDone, passed, pct: testDone ? s.pct : null, useSuccess, report: set.lmsStatus || '' };
   }
 
   // Ist auf der Seite noch etwas offen?
   function openReason(i) {
     const p = pages[i];
     const hid = condHiddenIds(p); // durch eine Bedingung verborgen: hält nicht auf
-    if (items.some(it => it.pageIndex === i && !it.branch && !it.play && !hid.has(it.id) && state.answers[it.id] == null)) return 'Bitte beantworte zuerst die Fragen auf dieser Seite.';
-    if (items.some(it => it.pageIndex === i && it.play && !hid.has(it.id) && playFraction(it.play) == null)) return 'Bitte schließe zuerst die Übung auf dieser Seite ab.';
+    if (items.some(it => it.pageIndex === i && !it.branch && !it.play && !hid.has(it.id) && state.answers[it.id] == null)) return T('warteFragen');
+    if (items.some(it => it.pageIndex === i && it.play && !hid.has(it.id) && playFraction(it.play) == null)) return T('warteUebungAb');
     for (const br of branchesIn(p)) {
-      if (!hid.has(br.id) && ((br.options || []).some(o => o.target) || br.scored) && state.branch[br.id] == null) return 'Bitte triff zuerst eine Entscheidung.';
+      if (!hid.has(br.id) && ((br.options || []).some(o => o.target) || br.scored) && state.branch[br.id] == null) return T('warteEntscheidungBitte');
     }
     // Ein Abschnitt, der erst nach einer Übung erscheint, hält auf, bis diese Übung gemacht ist –
     // sonst käme man an dem verborgenen Teil vorbei, ohne ihn je gesehen zu haben.
@@ -960,19 +1097,274 @@ function kursPlayer(course, opts) {
     for (const b of (p.blocks || []).filter(x => !hid.has(x.id))) {
       // „Weiter erst, wenn bearbeitet“ – gilt für jeden Baustein mit etwas zu tun
       if (b.required && !['reflection', 'actionplan', 'mission', 'game', 'casebank'].includes(b.type) && !blockDone(b)) return waitReason(b);
-      if ((b.type === 'reflection' || b.type === 'actionplan') && b.required && state.texts[b.id] == null) return 'Bitte bearbeite zuerst die Aufgabe auf dieser Seite.';
+      if ((b.type === 'reflection' || b.type === 'actionplan') && b.required && state.texts[b.id] == null) return T('warteAufgabe');
       if (b.type === 'ivideo' && b.requireWatch && !state.watched[b.id]) return T('warteVideo2');
-      if (b.type === 'mission' && b.skippable === false && !(state.self.mm || {})[b.id]) return 'Bitte schließe zuerst die Mini-Mission auf dieser Seite ab.';
-      if (b.type === 'game' && b.required && !(state.self.mm || {})[b.id]) return 'Bitte spiele zuerst das Level-Spiel auf dieser Seite zu Ende.';
+      if (b.type === 'mission' && b.skippable === false && !(state.self.mm || {})[b.id]) return T('warteMission');
+      if (b.type === 'game' && b.required && !(state.self.mm || {})[b.id]) return T('warteSpiel');
       if (b.type === 'casebank' && b.required && cbDoneCount(b) < cbGoal(b)) return T('cbZiel').replace('{z}', cbGoal(b));
       if (b.type === 'schloss' && !blockDone(b)) return T('warteSchloss');
     }
     return '';
   }
   // Was genau noch fehlt – je Übung ein eigener Satz, damit niemand raten muss
+  // Akkordeon mit Nummern: Nummer füllt sich nach dem Öffnen, Kernzeile unter dem Text, Zähler darunter, immer nur einer offen
+  function accNumStatus(b) {
+    const n = (b.items || []).length, open = (state.self[b.id] || {}).open || [];
+    return T('geoeffnet').replace('{n}', open.filter(i => i < n).length).replace('{z}', n);
+  }
+  function renderAccNum(b) {
+    const open = (state.self[b.id] || {}).open || [];
+    return guessWrap(b, `<div class="kp-acc-num">${itemsHtml(b.items, (it, i) => `<details class="kp-acc kp-acc-nr${open.includes(i) ? ' is-seen' : ''}" name="acc-${esc(b.id)}" data-acc="${esc(b.id)}" data-acc-i="${i}" data-gi="${i}"><summary><span class="kp-acc-no" aria-hidden="true">${i + 1}</span><span class="kp-acc-nrt">${esc(it.title)}</span></summary><div class="kp-text" data-gbody>${accInner(b, it, i)}</div></details>`)}<p class="kp-acc-status" data-acc-status aria-live="polite">${esc(accNumStatus(b))}</p></div>`);
+  }
+  // Akkordeon mit Nummern: Eintrag als geöffnet merken (Nummer füllt sich, Zähler zieht nach); false, wenn er schon offen war
+  function accSeen(b, d, i) {
+    const st = state.self[b.id] = state.self[b.id] || {};
+    st.open = st.open || [];
+    if (st.open.includes(i)) return false;
+    st.open.push(i);
+    if (d) d.classList.add('is-seen');
+    const stat = root.querySelector(`[data-block="${b.id}"] [data-acc-status]`); if (stat) stat.textContent = accNumStatus(b);
+    return true;
+  }
+  // Erst überlegen, dann aufdecken (Webanalyse moderner E-Learnings 29.10.2026, Empfehlung 1): je Eintrag von Karten zum Umdrehen,
+  // Reitern, Akkordeon und Punkten im Bild optional guess { q, options, answer }. Solange keine Vermutung in state.self[id].g steht,
+  // zeigt der Eintrag statt des Inhalts die Frage; danach steht „Deine Vermutung“ über dem Inhalt. „Alle aufdecken“ (b.guessSkip) setzt st.all.
+  function guessOf(it) {
+    const g = it && it.guess;
+    if (!g || typeof g !== 'object' || !String(g.q || '').trim()) return null;
+    const raw = Array.isArray(g.options) ? g.options : typeof g.options === 'string' ? g.options.split('\n')
+      : g.options && typeof g.options === 'object' ? Object.keys(g.options).sort((x, y) => x - y).map(k => g.options[k]) : [];
+    const opts = raw.map(x => String(x == null ? '' : x).trim()).filter(Boolean);
+    const a = g.answer === '' || g.answer == null ? -1 : Number(g.answer);
+    return { q: String(g.q).trim(), opts, answer: opts.length > 1 && Number.isInteger(a) && a >= 0 && a < opts.length ? a : -1 };
+  }
+  function hsGKey(rd, i) { return rd.R ? rd.r + '.' + i : String(i); }
+  // Einträge eines Blocks mit Schlüssel: Index, bei Suchbild-Runden „Runde.Index“; Türen und Lernkarte fragen nichts
+  function guessEntries(b) {
+    if (b.type === 'hotspots') { if ((b.map && !b.panorama) || b.mode === 'folge') return []; const rd = hsRound(b, state.self[b.id] || {}); return rd.list.map((pt, i) => [hsGKey(rd, i), pt]).filter(([, pt]) => pt && !pt.target); }
+    return (b.items || []).map((it, i) => [String(i), it]);
+  }
+  function guessItem(b, key) { const e = guessEntries(b).find(([k]) => k === String(key)); return e ? e[1] : null; }
+  function guessVal(b, key) { const g = (state.self[b.id] || {}).g; return g && g[key] != null ? g[key] : null; }
+  function guessPending(b, key, it) { return !b.customHtml && !!guessOf(it) && !(state.self[b.id] || {}).all && guessVal(b, String(key)) == null; }
+  function hasGuess(b) { return !b.customHtml && guessEntries(b).some(([, it]) => guessOf(it)); }
+  function guessAskHtml(b, key, it, srTitle) {
+    const g = guessOf(it), uid = 'gq-' + String(b.id).replace(/\W/g, '_') + '-' + String(key).replace(/\W/g, '_');
+    const k = esc(String(key)), id = esc(b.id);
+    return `<div class="kp-guess" role="group" aria-labelledby="${uid}" data-guess-box="${id}" data-gk="${k}">
+      <p class="kp-guess-eb" aria-hidden="true">${esc(T('erstVermuten'))}</p>
+      <p class="kp-guess-q" id="${uid}">${srTitle ? `<span class="kp-sr">${esc(srTitle)}: </span>` : ''}${esc(g.q)}</p>
+      ${g.opts.length ? `<div class="kp-guess-opts">${g.opts.map((o, n) => `<button type="button" class="kp-guess-opt" data-guess="${id}" data-gk="${k}" data-gv="${n}">${esc(o)}</button>`).join('')}</div>`
+        : `<div class="kp-guess-row"><input type="text" class="kp-guess-in" data-guess-text maxlength="120" autocomplete="off" aria-labelledby="${uid}" placeholder="${esc(T('vermutungFeld'))}"><button type="button" class="kp-btn kp-guess-go" data-guess="${id}" data-gk="${k}">${esc(T('vermutungAufdecken'))}</button></div><p class="kp-guess-missing" data-guess-missing aria-live="polite"></p>`}
+    </div>`;
+  }
+  function guessResHtml(b, key, it) {
+    const g = guessOf(it), v = guessVal(b, String(key));
+    if (!g || v == null) return '';
+    const mine = typeof v === 'number' ? (g.opts[v] || '') : String(v);
+    const ok = g.answer >= 0 && typeof v === 'number' ? v === g.answer : null;
+    return `<p class="kp-guess-res${ok === true ? ' is-ok' : ok === false ? ' is-no' : ''}" tabindex="-1" data-guess-res aria-live="polite"><span class="kp-guess-lbl">${esc(T('deineVermutung'))}:</span> <b>${esc(mine)}</b>${ok === true ? ` <span class="kp-guess-v">${icon('check')}${esc(T('vermutungStimmt'))}</span>` : ok === false ? ` <span class="kp-guess-v">${esc(T('vermutungAntwort'))}: <b>${esc(g.opts[g.answer])}</b></span>` : ''}</p>`;
+  }
+  function guessSkipHtml(b) {
+    if (!b.guessSkip || (state.self[b.id] || {}).all) return '';
+    return guessEntries(b).some(([k, it]) => guessPending(b, k, it)) ? `<button type="button" class="kp-guess-skip" data-guess-all="${esc(b.id)}">${esc(T('alleAufdecken'))}</button>` : '';
+  }
+  function guessWrap(b, html) { return hasGuess(b) ? `<div class="kp-guess-wrap" data-guess-wrap="${esc(b.id)}">${guessSkipHtml(b)}${html}</div>` : html; }
+  // Inhalt eines Eintrags: Frage, solange die Vermutung fehlt, sonst Vermutung und Text
+  function accInner(b, it, i) {
+    if (guessPending(b, i, it)) return guessAskHtml(b, i, it);
+    return `${guessResHtml(b, i, it)}${res(it.html)}${b.look === 'nummern' && String(it.punch || '').trim() ? `<p class="kp-acc-punch">${esc(it.punch)}</p>` : ''}`;
+  }
+  function renderAccordion(b) {
+    if (b.look === 'nummern') return renderAccNum(b);
+    return guessWrap(b, b.look === 'bilder'
+      ? `<div class="kp-acc-bilder" style="--n:${Math.min(4, (b.items || []).length || 1)}">${itemsHtml(b.items, (it, i) => `<details class="kp-acc kp-acc-bild" data-gi="${i}"><summary>${it.image && it.image.src ? `<img src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}<span class="kp-acc-bar">${esc(it.title)}</span></summary><div class="kp-text" data-gbody>${accInner(b, it, i)}</div></details>`)}</div>`
+      : itemsHtml(b.items, (it, i) => `<details class="kp-acc" data-gi="${i}"><summary>${esc(it.title)}</summary><div class="kp-text" data-gbody>${accInner(b, it, i)}</div></details>`));
+  }
+  function tabBody(b, it, i) {
+    const pend = guessPending(b, i, it);
+    if (b.look === 'lesezeichen') return `${it.image && it.image.src ? `<img class="kp-lz-img" loading="lazy" decoding="async" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}">` : ''}<h3>${esc(it.title)}</h3>${pend ? guessAskHtml(b, i, it) : `${guessResHtml(b, i, it)}<div class="kp-text">${res(it.html)}</div>`}`;
+    return pend ? guessAskHtml(b, i, it) : guessResHtml(b, i, it) + res(it.html);
+  }
+  function renderTabs(b) {
+    const lz = b.look === 'lesezeichen';
+    return guessWrap(b, `<div data-kurs-tabs${lz ? ' class="kp-tabs-lz"' : ''}>${itemsHtml(b.items, (it, i) => `<section data-titel="${esc(it.title)}" data-gi="${i}" class="${lz ? 'kp-lz-card' : 'kp-text'}">${tabBody(b, it, i)}</section>`)}</div>`);
+  }
+  // Karten zum Umdrehen in allen Darstellungen; mit `only` nur die eine Karte (nach der Vermutung wird nur sie ersetzt)
+  function renderFlipcards(b, only) {
+    const items = b.items || [], st = state.self[b.id] || {};
+    const tall = items.some(it => (it.image && it.image.src) || (it.backImage && it.backImage.src));
+    const pic = im => im && im.src ? `<img class="kp-flip-img" src="${esc(res(im.src))}" alt="${esc(im.alt || '')}" loading="lazy">` : '';
+    const fill = im => (im && im.src ? `<img class="kp-flip-img" src="${esc(res(im.src))}" alt="${esc(im.alt || '')}" loading="lazy"${focusStyle(im)}>` : '');
+    // eine Karte mit Vermutung gilt erst danach als gesehen; „Alle aufdecken“ zählt jede Karte
+    const seen = (it, i) => (st.all || (guessOf(it) && guessVal(b, String(i)) != null)) ? ' kp-seen' : '';
+    const gl = i => guessResHtml(b, i, items[i]);
+    const ask = (it, i, cls, front, srTitle) => `<div class="kp-flip kp-flip-ask${cls}" data-fi="${i}"><div class="kp-flip-inner"><div class="kp-flip-front">${front}${guessAskHtml(b, i, it, srTitle)}</div></div></div>`;
+    const N = items.length;
+    const at = b.look === 'karussell' && N ? Math.min(Number(st.at) || 0, N - 1) : null;
+    let card, box;
+    if (b.look === 'streifen' && N) {
+      // Bildstreifen (Vorbild youknow „Unbewusste Vorannahmen“): hohe Bilder nebeneinander, ein runder Knopf mit Brille im Bild,
+      // die Rückseite zeigt die Szene aus dem anderen Blickwinkel (backImage) mit Titel und Text. Umdrehen und Erledigt wie bei den Karten.
+      const Y = [74, 66, 80, 70, 62];
+      const sfill = im => (im && im.src ? `${fill(im)}${im.credit ? `<span class="kp-credit-over kp-stripe-credit">${esc(im.credit)}</span>` : ''}` : '');
+      card = (it, i) => guessPending(b, i, it) ? ask(it, i, ' kp-stripe', fill(it.image), it.title)
+        : `<div class="kp-flip kp-stripe${seen(it, i)}" data-fi="${i}" tabindex="0" role="button" aria-label="${esc(it.title)}: Karte umdrehen" style="--y:${Number(it.y) || Y[i % Y.length]}%"><div class="kp-flip-inner"><div class="kp-flip-front">${sfill(it.image)}<span class="kp-stripe-btn" aria-hidden="true">${icon(b.icon || 'glasses')}</span></div><div class="kp-flip-back">${sfill(it.backImage || it.image)}<div class="kp-stripe-text"><strong>${esc(it.title)}</strong>${gl(i)}${res(it.html)}</div></div></div></div>`;
+      box = h => `<div class="kp-flipgrid kp-stripes" style="--n:${N}">${h}</div>`;
+    } else if (b.look === 'kacheln' && N) {
+      // Bildkacheln (Vorbild „Besonderheiten in der Online-Kommunikation“): quadratische Fotos ohne Text, Akzentkante oben,
+      // Eckmarke mit Umdreh-Symbol; die Rückseite zeigt Titel und Text. Der Titel steht vorn als aria-label.
+      // Spalten: bis vier nebeneinander, sechs und neun als 3er-Raster, sonst vier; die Zeilenzahl begrenzt die Breite
+      const cols = N <= 4 ? N : (N % 3 === 0 || N === 5 ? 3 : 4);
+      card = (it, i) => {
+        const hasPic = it.image && it.image.src;
+        if (guessPending(b, i, it)) return ask(it, i, ' kp-tile', hasPic ? fill(it.image) : `<strong class="kp-tile-title">${esc(it.title)}</strong>`, hasPic ? it.title : '');
+        return `<div class="kp-flip kp-tile${seen(it, i)}" data-fi="${i}" tabindex="0" role="button" aria-label="${esc(it.title)}: Karte umdrehen"><div class="kp-flip-inner"><div class="kp-flip-front">${fill(it.image)}${hasPic ? '' : `<strong class="kp-tile-title">${esc(it.title)}</strong>`}<span class="kp-tile-badge" aria-hidden="true">${icon(b.icon || 'flip')}</span></div><div class="kp-flip-back"><div class="kp-tile-text"><strong>${esc(it.title)}</strong>${gl(i)}${res(it.html)}</div></div></div></div>`;
+      };
+      box = h => `<div class="kp-flipgrid kp-tiles" style="--n:${cols};--rows:${Math.ceil(N / cols)}">${h}</div>`;
+    } else {
+      card = (it, i) => {
+        const on = at != null && i === at ? ' on' : '';
+        if (guessPending(b, i, it)) return ask(it, i, (tall ? ' kp-flip-tall' : '') + on, `${pic(it.image)}<span class="kp-flip-title">${esc(it.title)}</span>`);
+        return `<div class="kp-flip${tall ? ' kp-flip-tall' : ''}${on}${seen(it, i)}" data-fi="${i}" tabindex="0" role="button" aria-label="${esc(it.title)}: Karte umdrehen"><div class="kp-flip-inner"><div class="kp-flip-front">${pic(it.image)}${esc(it.title)}</div><div class="kp-flip-back">${gl(i)}${pic(it.backImage)}${res(it.html)}</div></div></div>`;
+      };
+      // Karussell: eine Karte in der Mitte, blaettern mit ‹ ›, „1 von 3“ und eine duenne Fortschrittslinie
+      box = at != null ? h => `<div class="kp-flipcar" data-flipcar="${b.id}">
+            <div class="kp-flipcar-track">${h}</div>
+            <div class="kp-flipcar-nav">
+              <button type="button" class="kp-flipcar-btn" data-fc-step="${b.id}" data-dir="-1" aria-label="${T('zurueck')}" ${at === 0 ? 'disabled' : ''}>‹</button>
+              <span class="kp-flipcar-pos"><span data-fc-pos>${at + 1} ${T('von')} ${N}</span><i class="kp-flipcar-bar" aria-hidden="true"><b style="width:${Math.round((at + 1) / N * 100)}%"></b></i></span>
+              <button type="button" class="kp-flipcar-btn" data-fc-step="${b.id}" data-dir="1" aria-label="${T('weiter')}" ${at >= N - 1 ? 'disabled' : ''}>›</button>
+            </div></div>` : h => `<div class="kp-flipgrid">${h}</div>`;
+    }
+    if (only != null) return card(items[only] || {}, only);
+    return guessWrap(b, box(itemsHtml(items, card)));
+  }
+  function wireFlip(f) {
+    // Karte mit offener Vermutung: dreht nicht, ein Klick daneben führt zur ersten Möglichkeit
+    if (f.classList.contains('kp-flip-ask')) {
+      f.onclick = e => { if (e.target.closest('button, input')) return; const x = f.querySelector('.kp-guess-opt, .kp-guess-in'); if (x) x.focus(); };
+      f.onmouseenter = null; f.onkeydown = null;
+      return;
+    }
+    const turn = () => { f.classList.toggle('flipped'); f.classList.add('kp-seen'); uiSound('aufdecken'); updateConditions(); };
+    f.onclick = turn;
+    f.onmouseenter = () => { f.classList.add('kp-seen'); updateConditions(); };
+    f.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); turn(); } };
+  }
+  // Punkt im Bild mit offener Vermutung: Fokus auf die erste Möglichkeit, die Gruppe trägt die Frage als Namen
+  function hsFocusGuess(b) {
+    const x = root.querySelector(`[data-hotspots="${b.id}"] .kp-guess :is(.kp-guess-opt, .kp-guess-in)`);
+    if (x) x.focus({ preventScroll: true });
+  }
+  function guessPick(btn) {
+    const id = btn.dataset.guess, key = String(btn.dataset.gk), b = findBlock(id);
+    if (!b) return;
+    const it = guessItem(b, key), g = guessOf(it);
+    if (!g) return;
+    const box = btn.closest('[data-guess-box]');
+    let val;
+    if (btn.hasAttribute('data-gv')) val = Number(btn.dataset.gv);
+    else {
+      const inp = box && box.querySelector('[data-guess-text]');
+      val = String(inp ? inp.value : '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      if (!/[\p{L}\p{N}]/u.test(val)) {
+        const m = box && box.querySelector('[data-guess-missing]'); if (m) m.textContent = T('vermutungFehlt');
+        if (inp) inp.focus();
+        return;
+      }
+    }
+    const st = state.self[id] = state.self[id] || {};
+    st.g = Object.assign({}, st.g, { [key]: val });
+    uiSound(g.answer >= 0 && typeof val === 'number' ? (val === g.answer ? 'richtig' : 'falsch') : 'aufdecken');
+    const target = guessShow(b, key, box);
+    updateConditions(); renderFooter(); report();
+    if (target) { target.focus({ preventScroll: true }); if (target.scrollIntoView) target.scrollIntoView({ block: 'nearest' }); }
+  }
+  // Inhalt nach der Vermutung zeigen: nur den einen Eintrag ersetzen (Reiter und Akkordeon bleiben, wo sie sind; andere Karten bleiben umgedreht)
+  function guessShow(b, key, box) {
+    const sec = (box && box.closest('[data-block]')) || root.querySelector(`[data-block="${b.id}"]`);
+    if (!sec) return null;
+    const it = guessItem(b, key), i = Number(String(key).split('.').pop());
+    if (b.type === 'hotspots') {
+      const st = state.self[b.id] || {};
+      state.self[b.id] = hsMarkSeen(b, st, i, st.v);
+      const el = sec.querySelector('[data-hotspots]');
+      if (el) refreshBlock(el, renderHotspots(b));
+      return root.querySelector(`[data-hotspots="${b.id}"] [data-guess-res]`);
+    }
+    if (b.type === 'flipcards') {
+      const old = sec.querySelector(`.kp-flip[data-fi="${i}"]`);
+      if (!old) return null;
+      const tmp = document.createElement('div');
+      tmp.innerHTML = footnotes(renderFlipcards(b, i));
+      const f = tmp.firstElementChild;
+      old.replaceWith(f);
+      wireFlip(f);
+      void f.offsetWidth;
+      f.classList.add('flipped', 'kp-seen');
+      return f.querySelector('[data-guess-res]');
+    }
+    if (b.type === 'tabs') {
+      const s2 = sec.querySelector(`[data-kurs-tabs] > section[data-gi="${i}"]`);
+      if (!s2) return null;
+      s2.innerHTML = footnotes(tabBody(b, it, i));
+      return s2.querySelector('[data-guess-res]');
+    }
+    if (b.type === 'accordion') {
+      const d = sec.querySelector(`details[data-gi="${i}"]`), body = d && d.querySelector(':scope > [data-gbody]');
+      if (!body) return null;
+      body.innerHTML = footnotes(accInner(b, it, i));
+      if (!d.open) d.open = true;
+      if (b.look === 'nummern') accSeen(b, d, i);
+      return body.querySelector('[data-guess-res]');
+    }
+    return null;
+  }
+  // „Alle aufdecken“: ohne Vermutung weiter; Karten drehen um, Punkte und Einträge gelten als gesehen
+  function guessAll(btn) {
+    const b = findBlock(btn.dataset.guessAll);
+    if (!b) return;
+    const sec = btn.closest('[data-block]') || root.querySelector(`[data-block="${b.id}"]`);
+    const pend = guessEntries(b).filter(([k, it]) => guessPending(b, k, it)).map(([k]) => k);
+    const st = state.self[b.id] = state.self[b.id] || {};
+    st.all = true;
+    let focus = null;
+    if (b.type === 'hotspots') {
+      let s2 = st;
+      hsRound(b, st).list.forEach((pt, i) => { if (pt && !pt.target) s2 = hsMarkSeen(b, s2, i, s2.v); });
+      state.self[b.id] = s2;
+      const el = sec && sec.querySelector('[data-hotspots]');
+      if (el) refreshBlock(el, renderHotspots(b));
+      focus = root.querySelector(`[data-hotspots="${b.id}"] .kp-hs-dot`);
+    } else if (b.type === 'flipcards') {
+      const wrap = sec && sec.querySelector('[data-guess-wrap]');
+      if (wrap) refreshBlock(wrap, renderFlipcards(b));
+      const cards = sec ? [...sec.querySelectorAll('.kp-flip')] : [];
+      cards.forEach(f => f.classList.add('flipped', 'kp-seen'));
+      focus = cards[Number(st.at) || 0] || cards[0];
+    } else {
+      if (sec) pend.forEach(k => {
+        const i = Number(k), it = (b.items || [])[i];
+        if (b.type === 'tabs') { const s3 = sec.querySelector(`[data-kurs-tabs] > section[data-gi="${i}"]`); if (s3) s3.innerHTML = footnotes(tabBody(b, it, i)); }
+        else { const d = sec.querySelector(`details[data-gi="${i}"]`), body = d && d.querySelector(':scope > [data-gbody]'); if (body) body.innerHTML = footnotes(accInner(b, it, i)); if (b.look === 'nummern') accSeen(b, d, i); }
+      });
+      focus = sec && sec.querySelector('[data-kurs-tabs] .kp-tabbar button.active, details > summary');
+      btn.remove();
+    }
+    uiSound('aufdecken');
+    updateConditions(); renderFooter(); report();
+    if (focus) focus.focus({ preventScroll: true });
+  }
   function waitReason(b) {
     const t = b.type;
-    if (t === 'hotspots') return T('wartePunkte');
+    if (t === 'accordion') return T('warteAufklappen');
+    if (t === 'table') return T('warteTabelle');
+    if (t === 'debrief') return T('warteKarteZweig');
+    if (t === 'hotspots') return T(b.mode === 'folge' ? 'warteFolge' : 'wartePunkte');
+    if (t === 'modell3d') return T('warteModell');
+    if (t === 'scribble') return T('warteScribble');
+    if (t === 'lottie' || t === 'anim') return T('warteSchritte');
     if (t === 'triage') return T('warteKarten');
     if (t === 'promptbuild') return T('warteBausteine');
     if (t === 'findtext') return T('warteStellen');
@@ -990,8 +1382,9 @@ function kursPlayer(course, opts) {
     if (t === 'mappe') return T('warteMappe');
     if (t === 'videopaar') return T('warteVideopaar');
     if (t === 'bildschirm') return T('warteBildschirm');
+    if (t === 'sprechen') return T('warteSprechen');
     if (t === 'kartenstapel') return T('warteStapel');
-    if (t === 'wahlbrett') return T('warteWahlbrett').replace('{m}', wbMin(b));
+    if (t === 'wahlbrett') return b.look === 'liste' ? T('warteListe') : T('warteWahlbrett').replace('{m}', wbMin(b));
     return T('warteUebung');
   }
   function blockedHere() {
@@ -1057,8 +1450,12 @@ function kursPlayer(course, opts) {
     const data = { v: Array.from(state.visited), a: state.answers, t: state.tries, p: state.pools, b: state.branch, c: state.conf, s: state.survey, x: state.texts, w: state.watched, k: state.self, l: state.lang || '' };
     let json = JSON.stringify(data);
     const limit = lms ? lms.suspendLimit : 4000;
+    // settings.textsLocal: eigene Texte (Reflexion, Notizen, Begründungen) gehen nie ans LMS, sie liegen nur im Browser
+    if (set.textsLocal) { delete data.x; json = JSON.stringify(data); }
     // Bei SCORM 1.2 wird es eng: freie Texte liegen dann nur im Browser, Umfrage und Sicherheit zuletzt
     if (json.length > limit) { delete data.x; json = JSON.stringify(data); }
+    // Fächer des Kartenstapels liegen zusätzlich im Browser (deckLbSave): bei Platzmangel fallen sie aus dem Lernstand
+    if (json.length > limit) { data.k = {}; Object.keys(state.self).forEach(id => { const v = state.self[id]; data.k[id] = v && v.lb ? Object.assign({}, v, { lb: undefined }) : v; }); json = JSON.stringify(data); }
     if (json.length > limit) { delete data.s; delete data.c; json = JSON.stringify(data); }
     return json;
   }
@@ -1119,18 +1516,97 @@ function kursPlayer(course, opts) {
 
   // ---------- Blöcke ----------
   const IMG_SHAPES = ['fleck', 'kreis', 'wolke'];
+  // Hängt am Band (image.hang, Vorbild Fernhill-Namensschild): freistehendes Bild oder Symbol an einem Band mit Clip, schwingt beim
+  // Sichtbarwerden gedämpft ein (−9°, +5°, −2°, +0,8°), steht in Ruhe 3° schräg und richtet sich beim Überfahren auf; zwei Kreise dahinter.
+  // 'band' = mit Band und Clip, 'frei' = schwingt ohne Band (für Symbole), Kreise mit hangRings (Standard an).
+  function inViewCheck() {
+    const h = window.innerHeight || document.documentElement.clientHeight;
+    root.querySelectorAll('[data-hang]:not(.is-in), [data-quote-in]:not(.is-in)').forEach(el => {
+      const r = el.getBoundingClientRect();
+      if (r.height && r.top < h * .85 && r.bottom > h * .1) el.classList.add('is-in');
+    });
+  }
+  function hangHtml(b) {
+    const img = b.image, band = b.hang !== 'frei';
+    const cap = [img.caption, img.credit ? (/^(©|foto|bild|quelle|illustration)/i.test(img.credit) ? img.credit : 'Bild: ' + img.credit) : ''].filter(Boolean);
+    return `<figure class="kp-hang kp-hang-${band ? 'band' : 'frei'}${b.hangRings === false ? '' : ' kp-hang-rings'} kp-hang-${b.size || 'small'}" data-hang>
+      <div class="kp-hang-move"><div class="kp-hang-swing">${band ? '<span class="kp-hang-strap" aria-hidden="true"></span><span class="kp-hang-clip" aria-hidden="true"></span>' : ''}<img src="${esc(res(img.src))}" alt="${esc(img.alt || '')}" loading="lazy"></div></div>
+      ${cap.length ? `<figcaption class="kp-caption">${esc(cap.join(' · '))}</figcaption>` : ''}</figure>`;
+  }
+  // Bild- oder Videoidee (aus dem KI-Bauplan oder von Hand): nur in der Vorschau ein Kasten in Format und Größe des
+  // späteren Bilds, mit der Idee als Text; im Paket bleibt die Stelle leer (Bild) bzw. zeigt den Sprechtext (Video).
+  // In „Direkt bearbeiten“ hängt das Editor-Skript Hochladen und Suchen an den Kasten.
+  const IDEA_FMT = { quer: '16 / 9', hoch: '3 / 4', quadrat: '1 / 1', breit: '21 / 9' };
+  // Bild bearbeiten (Größe, Zuschnitt, Zoom, Spiegeln, Filter; aus „Direkt bearbeiten“ oder dem Formular):
+  // width = Breite in Prozent, align left|center|right, ratio = Format (16:9 …), zoom 1–4 mit focus als Mittelpunkt
+  // („35% 60%“ oder Schlüsselwort), flip = gespiegelt, filter aus IMG_FILTERS. Filter laufen über eine Variable,
+  // damit Stilregeln (Comic: Fotos grau) weiter gewinnen.
+  const IMG_RATIOS = { '16:9': '16 / 9', '4:3': '4 / 3', '3:2': '3 / 2', '1:1': '1 / 1', '3:4': '3 / 4', '21:9': '21 / 9' };
+  const IMG_FILTERS = { sw: 'grayscale(1)', hell: 'brightness(1.12) saturate(1.05)', kontrast: 'contrast(1.18) saturate(1.12)', warm: 'sepia(.22) saturate(1.15)', kuehl: 'saturate(.88) hue-rotate(-10deg) brightness(1.04)', weich: 'contrast(.92) brightness(1.06) saturate(.9)' };
+  const imgW = o => { const w = Number(o && o.width); return w >= 10 && w < 100 ? Math.round(w) : 0; };
+  // Korrekturen wie in PowerPoint (bright, contrast, sat in Prozent, 100 = unverändert; Helligkeit und Kontrast 50–150,
+  // Sättigung 0–200) laufen zusammen mit dem Filter über --kp-img-filter. fit: 'ganz' zeigt das Bild ganz statt angeschnitten.
+  const corrVal = (v, lo, hi) => { const n = Number(v); return v == null || v === '' || !Number.isFinite(n) ? 100 : Math.min(hi, Math.max(lo, Math.round(n))); };
+  function imgCorr(img) {
+    const b = corrVal(img.bright, 50, 150), c = corrVal(img.contrast, 50, 150), s = corrVal(img.sat, 0, 200);
+    return [b !== 100 ? `brightness(${b / 100})` : '', c !== 100 ? `contrast(${c / 100})` : '', s !== 100 ? `saturate(${s / 100})` : ''].filter(Boolean).join(' ');
+  }
+  function imgAdj(img) {
+    if (!img) return { cls: '', style: '' };
+    const st = [], z = Math.min(4, Math.max(1, Number(img.zoom) || 1)), pos = img.focus ? esc(img.focus) : '';
+    if (pos) st.push('object-position:' + pos);
+    if (z > 1 || img.flip) st.push(`--kp-img-tf:scale(${img.flip ? -z : z}, ${z})`, '--kp-img-org:' + (pos || '50% 50%'));
+    const filt = [IMG_FILTERS[img.filter] || '', imgCorr(img)].filter(Boolean).join(' ');
+    if (filt) st.push('--kp-img-filter:' + filt);
+    const cls = (z > 1 || img.flip ? ' kp-img-tf' : '') + (filt ? ' kp-img-filt' : '') + (img.fit === 'ganz' ? ' kp-img-fit' : '');
+    return { cls, style: st.length ? ` style="${st.join(';')}"` : '' };
+  }
+  function frameAdj(img) {
+    const w = imgW(img), r = IMG_RATIOS[img && img.ratio], st = [], cls = [];
+    if (w) { cls.push('kp-img-sized'); st.push('--kp-img-w:' + w + '%'); }
+    if (r) { cls.push('kp-img-ratio'); st.push('--kp-img-ar:' + r); }
+    if (img && ['left', 'right'].includes(img.align)) cls.push('kp-img-al-' + img.align);
+    if (img && (Number(img.zoom) > 1)) cls.push('kp-img-zoomed');
+    return { cls: cls.length ? ' ' + cls.join(' ') : '', style: st.length ? ` style="${st.join(';')}"` : '' };
+  }
+  // Platzhalter für das Bild einer Folie als SVG (Hintergrund): Kamera, Art und die Idee in Zeilen, nur in der Vorschau
+  function slideIdeaSvg(o, compact) {
+    const words = plainText(o.idea).split(/\s+/), lines = [];
+    words.forEach(w => { const l = lines[lines.length - 1]; if (l && (l + ' ' + w).length <= 34) lines[lines.length - 1] = l + ' ' + w; else lines.push(w); });
+    const xe = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+    const txt = lines.slice(0, 6).map((l, i) => `<text x="400" y="${388 + i * 40}" text-anchor="middle" font-family="system-ui, Segoe UI, Arial, sans-serif" font-size="28" fill="#3a4254">${xe(l)}</text>`).join('');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid slice"><rect width="800" height="800" fill="#e7ebf2"/><rect x="24" y="24" width="752" height="752" rx="18" fill="none" stroke="#9aa6bb" stroke-width="4" stroke-dasharray="16 12"/><g fill="none" stroke="#5b6780" stroke-width="5" stroke-linejoin="round" transform="translate(352 220) scale(4)"><path d="M4 7.5h3l1.5-2h7l1.5 2h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></g><text x="400" y="340" text-anchor="middle" font-family="system-ui, Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="2" fill="#5b6780">${o.ideaKind === 'illustration' ? 'BILDIDEE · ILLUSTRATION' : 'BILDIDEE · FOTO'}</text>${txt}</svg>`;
+    // Hinter einer Übung: nur ein schmales Band oben mit Art und Idee, die Mitte bleibt für die Übung frei
+    const one = xe(plainText(o.idea).slice(0, 70) + (plainText(o.idea).length > 70 ? ' …' : ''));
+    const band = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMin slice"><rect width="1600" height="900" fill="#c9d1de"/><rect x="20" y="20" width="1560" height="860" rx="18" fill="none" stroke="#7d899f" stroke-width="5" stroke-dasharray="20 14"/><text x="800" y="96" text-anchor="middle" font-family="system-ui, Segoe UI, Arial, sans-serif" font-size="30" font-weight="700" letter-spacing="2" fill="#1f2635">${o.ideaKind === 'illustration' ? 'BILDIDEE · ILLUSTRATION' : 'BILDIDEE · FOTO'}: ${one}</text></svg>`;
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(compact ? band : svg).replace(/'/g, '%27').replace(/\(/g, '%28').replace(/\)/g, '%29');
+  }
+  function ideaBox(o, kind, cls) {
+    if (!opts.preview || !o || o.src || !plainText(o.idea)) return '';
+    const fmt = IDEA_FMT[o.format] ? o.format : kind === 'video' ? 'quer' : 'quer';
+    const art = kind === 'video' ? 'Videoidee' : o.ideaKind === 'illustration' ? 'Bildidee · Illustration' : 'Bildidee · Foto';
+    const ico = kind === 'video' ? '<path d="M4 6.5h11v11H4z"/><path d="M15 10.5l5-3v9l-5-3"/>' : '<path d="M4 7.5h3l1.5-2h7l1.5 2h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>';
+    return `<figure class="kp-fig kp-idea kp-idea-${fmt} ${cls || ''}" data-idea="${kind}" style="--kp-idea-ar:${IDEA_FMT[fmt]}"><div class="kp-idea-box">
+      <svg class="kp-idea-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">${ico}</svg>
+      <span class="kp-idea-lab">${art}</span><span class="kp-idea-text">${esc(plainText(o.idea))}</span>
+      ${kind === 'video' && plainText(o.transcript) ? '<small class="kp-idea-note">Sprechtext liegt bei. Bis das Video da ist, zeigt der Kurs ihn als Platzhalter.</small>' : `<small class="kp-idea-note">Noch kein ${kind === 'video' ? 'Video' : 'Bild'}. Im Kurs bleibt die Stelle bis dahin leer.</small>`}
+    </div></figure>`;
+  }
   function figure(img, cls) {
-    if (!img || !img.src) return '';
+    if (!img || !img.src) return ideaBox(img, 'bild', cls);
     const cap = [img.caption, img.credit ? (/^(©|foto|bild|quelle)/i.test(img.credit) ? img.credit : 'Bild: ' + img.credit) : ''].filter(Boolean);
     // Geraeterahmen (monitor, tablet, whiteboard): das Bild haengt wie ein Bildschirm in der Kulisse
     const frame = deviceFrame(img.frame);
     // Glitch braucht die Bildadresse als CSS-Variable fuer die versetzten Farbkopien an den Raendern
-    const glitch = img.treat === 'glitch' ? ` style="--kp-img:url('${esc(res(img.src))}')"` : '';
+    const fa = frameAdj(img), ia = imgAdj(img);
+    const glitch = img.treat === 'glitch' ? ` style="--kp-img:url('${esc(res(img.src))}')${fa.style ? ';' + fa.style.slice(8, -1) : ''}"` : fa.style;
     // Zeichnungen (SVG) bekommen keine automatische Bildbehandlung des Stils (Raster, Duotone), die gilt Fotos
     const drawing = /\.svg(\?|$)|^data:image\/svg/i.test(String(img.src || '')) ? ' kp-drawing' : '';
     // Form hinter oder um die Illustration (Vorbild bildungsinnovator „EU AI Act“, „Kognitive Flexibilität“)
     const shape = IMG_SHAPES.includes(img.shape) ? ' kp-form kp-form-' + img.shape : '';
-    return `<figure class="kp-fig${drawing}${shape} ${cls || ''} ${img.treat ? 'kp-treat-' + esc(img.treat) : ''} ${img.ai ? 'kp-ai' : ''}${frame.open ? ' kp-framed' : ''}">${frame.open}<div class="kp-fig-frame"${glitch}><img loading="lazy" decoding="async" src="${esc(res(img.src))}" alt="${esc(img.alt)}"${img.focus ? ` style="object-position:${esc(img.focus)}"` : ''}>${img.ai ? `<span class="kp-ai-badge">${T('kiBild')}</span>` : ''}
+    // Einfärben (img.tint: duo = in der Hauptfarbe, duotone = Haupt- und Akzentfarbe) gilt zusätzlich zu den Ecken aus treat
+    const tint = ['duo', 'duotone'].includes(img.tint) && img.tint !== img.treat ? ' kp-treat-' + img.tint : '';
+    return `<figure class="kp-fig${drawing}${shape}${tint} ${cls || ''} ${img.treat ? 'kp-treat-' + esc(img.treat) : ''} ${img.ai ? 'kp-ai' : ''}${frame.open ? ' kp-framed' : ''}">${frame.open}<div class="kp-fig-frame${fa.cls}"${glitch}><img loading="lazy" decoding="async" class="${ia.cls.trim()}" src="${esc(res(img.src))}" alt="${esc(img.alt)}"${ia.style}>${img.ai ? `<span class="kp-ai-badge">${T('kiBild')}</span>` : ''}
       <button type="button" class="kp-zoom" data-zoom aria-label="Bild vergrößern"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M11 8.5v5M8.5 11h5"/></svg></button></div>${frame.close}
       ${cap.length ? `<figcaption>${img.caption ? esc(img.caption) : ''}${img.credit ? `<span class="kp-credit">${esc(cap[cap.length - 1])}</span>` : ''}</figcaption>` : ''}</figure>`;
   }
@@ -1151,10 +1627,34 @@ function kursPlayer(course, opts) {
     return url;
   }
 
+  const trimSec = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.round(n * 10) / 10 : 0; };
+  function setupVideoTrim(scope) {
+    scope.querySelectorAll('video[data-vtrim]:not([data-vtrim-on])').forEach(v => {
+      v.dataset.vtrimOn = '1';
+      const s = Number(v.dataset.vs) || 0, e = Number(v.dataset.ve) || 0, loop = v.hasAttribute('data-vloop');
+      const seek = t => { try { v.currentTime = t; } catch (x) { /* noch nicht geladen */ } };
+      if (v.readyState >= 1) { if (s && v.currentTime < s) seek(s); } else v.addEventListener('loadedmetadata', () => { if (s && v.currentTime < s) seek(s); }, { once: true });
+      // je Videobild nachsehen (genauer als timeupdate, das nur rund viermal je Sekunde kommt)
+      const watch = () => { if (!e || v.paused) return; if (v.currentTime >= e) { atEnd(); return; } if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(watch); };
+      v.addEventListener('play', () => { if ((s && v.currentTime < s - .3) || (e && v.currentTime >= e - .05)) seek(s); watch(); });
+      const atEnd = () => {
+        if (loop) { seek(s); v.play().catch(() => {}); return; }
+        v.pause(); v.dispatchEvent(new Event('kp-vtrim-ende'));
+      };
+      v.addEventListener('timeupdate', () => { if (e && v.currentTime >= e && !v.paused) atEnd(); });
+      v.addEventListener('ended', () => { if (loop) atEnd(); });
+    });
+  }
   function renderMedia(m) {
     m = m || {};
     // Vollbild-Knopf am Video (Prüfung 19.10.2026): startet das Video gleich im Vollbild, auch auf dem iPhone (webkitEnterFullscreen)
-    if (m.kind === 'video' && m.src) return `<div class="kp-vid" data-vid><video controls playsinline ${m.poster ? `poster="${esc(res(m.poster))}"` : ''} src="${esc(res(m.src))}">${trackHtml(m.captions, m.captionsText)}</video>${vidFsOk() ? `<button type="button" class="kp-vid-full" data-vid-full>${icon('expand')}<span>${esc(T('vollbildAnsehen'))}</span></button>` : ''}</div>`;
+    // Video kürzen (media.start, media.end in Sekunden): setupVideoTrim() springt an den Anfang und hält am Ende an;
+    // mit Schleife läuft dann nur der Ausschnitt im Kreis, deshalb ohne das loop-Attribut
+    const vs = trimSec(m.start), ve = trimSec(m.end), trim = vs || (ve && ve > vs);
+    if (m.kind === 'video' && m.src) return `<div class="kp-vid${frameAdj(m).cls}" data-vid${frameAdj(m).style}><video controls playsinline${trim ? ` data-vtrim data-vs="${vs}" data-ve="${ve > vs ? ve : 0}"${m.loop ? ' data-vloop' : ''}` : m.loop ? ' loop' : ''}${m.autoplay ? ' autoplay muted' : ''} ${m.poster ? `poster="${esc(res(m.poster))}"` : ''}${m.focus ? ` style="object-position:${esc(m.focus)}"` : ''} src="${esc(res(m.src))}">${trackHtml(m.captions, m.captionsText)}</video>${vidFsOk() ? `<button type="button" class="kp-vid-full" data-vid-full>${icon('expand')}<span>${esc(T('vollbildAnsehen'))}</span></button>` : ''}</div>`;
+    if (m.kind === 'video' && !m.src && ideaBox(m, 'video')) return ideaBox(m, 'video');
+    // Leeres Video oder leere Adresse in der Vorschau: Kasten zum Hochladen statt einer Zeile ohne Ausweg (UX-Prüfung 02.11.2026)
+    if (opts.preview && ((m.kind === 'video' && !m.src && !plainText(m.transcript)) || (m.kind === 'embed' && !m.url))) return ideaBox(Object.assign({}, m, { idea: 'Video hochladen oder im Formular eine Adresse eintragen', format: m.format || 'quer' }), 'video');
     if (m.kind === 'video' && plainText(m.transcript)) return videoDummy(m.transcript, m.poster);
     if (m.kind === 'audio' && m.src) return `<audio controls src="${esc(res(m.src))}"></audio>${m.transcript ? `<details class="kp-acc"><summary>Transkript</summary><div class="kp-text">${res(m.transcript)}</div></details>` : ''}`;
     if (m.kind === 'embed' && m.url) return `<div class="kp-embed"><iframe src="${esc(embedUrl(m.url))}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen title="Video"></iframe></div>`;
@@ -1162,7 +1662,7 @@ function kursPlayer(course, opts) {
     if (m.kind === 'compare' && m.before && m.after) {
       return `<div class="kp-compare" data-compare><img loading="lazy" decoding="async" src="${esc(res(m.before))}" alt="vorher"><div class="kp-after" style="width:50%"><img loading="lazy" decoding="async" src="${esc(res(m.after))}" alt="nachher"></div><input type="range" min="0" max="100" value="50" aria-label="Vergleich verschieben"></div>`;
     }
-    return '<p class="kp-label">Für diesen Block ist noch kein Medium hinterlegt.</p>';
+    return '<p class="kp-label">Für diesen Baustein ist noch kein Medium hinterlegt.</p>';
   }
 
   const itemsHtml = (list, fn) => (list || []).map(fn).join('');
@@ -1172,12 +1672,41 @@ function kursPlayer(course, opts) {
   const cardsRv = b => (b.items || []).map((it, i) => plainText(it.reveal) ? i : -1).filter(i => i >= 0);
   function cardRvHtml(b, it, i, open) {
     if (!plainText(it.reveal)) return '';
-    return open ? `<p class="kp-card-rv on" tabindex="-1">${icon('arrow-circle')}<span>${esc(plainText(it.reveal))}</span></p>`
-      : `<button type="button" class="kp-card-rv" data-card-rv="${i}" aria-expanded="false">${icon('arrow-circle')}<span>${esc(b.revealLabel || T('karteDahinter'))}</span></button>`;
+    return open ? `<p class="kp-card-rv on" tabindex="-1">${iconOr(b.revealIcon, 'arrow-circle')}<span>${esc(plainText(it.reveal))}</span></p>`
+      : `<button type="button" class="kp-card-rv" data-card-rv="${i}" aria-expanded="false">${iconOr(b.revealIcon, 'arrow-circle')}<span>${esc(b.revealLabel || T('karteDahinter'))}</span></button>`;
+  }
+  // Fuß einer Karte (Vorbild Fernhill „Need-to-know“): Quellenlink mit Pfeil (items[].link, linkLabel) und Pille mit Haken
+  // (items[].tag, etwa „Hausregel“); eine Karte mit Pille trägt kp-card-tagged (grüne Oberkante im Scroll-Look)
+  function cardFoot(it, b) {
+    b = b || {};
+    const link = String(it.link || '').trim(), tag = plainText(it.tag);
+    if (!link && !tag) return '';
+    return `<div class="kp-card-foot">${link ? `<a class="kp-card-src" href="${esc(link)}" target="_blank" rel="noopener">${esc(it.linkLabel || T('quelle'))}${icon('arrow-ur')}</a>` : ''}${tag ? `<span class="kp-card-tag">${iconOr(b.tagIcon, 'check')}${esc(it.tag)}</span>` : ''}</div>`;
   }
   function renderCards(b) {
     const rv = cardsRv(b), open = (state.self[b.id] || {}).open || [];
     const status = rv.length ? `<p class="kp-tk-hint kp-cards-status" data-cards-status>${esc(b.revealHint || T('aufdeckenHinweis'))} <b>${esc(T('aufgedeckt').replace('{n}', rv.filter(i => open.includes(i)).length).replace('{z}', rv.length))}</b></p>` : '';
+    // Foto-Karussell (Vorbild Fernhill „Know the list“): eine große Karte auf ihrem Foto unter einem Schleier in der Hauptfarbe,
+    // Symbol in einer Glaskachel, Strich, Titel und ein Satz, Nummer oben rechts; die Nachbarn kleiner, unscharf und blass.
+    // Darunter runde Pfeile und „03 / 09“ mit Balken. Blättern über denselben Klick-Handler wie das Begleitpersonen-Karussell.
+    if (b.look === 'karussell') {
+      const its = b.items || [], N = its.length;
+      const st = state.self[b.id] = state.self[b.id] || {};
+      const at = Math.max(0, Math.min(N - 1, Number(st.at) || 0));
+      st.seen = st.seen || []; if (N && !st.seen.includes(at)) st.seen.push(at);
+      const pad = n => String(n).padStart(2, '0');
+      const cards = its.map((it, i) => {
+        const img = it.image && it.image.src;
+        return `<div class="kp-tc-card kp-cc-card${i === at ? ' on kp-fresh' : ''}${img ? ' kp-cc-photo' : ''}" data-tc-go="${i}" data-team="${esc(b.id)}" role="group" aria-roledescription="${esc(T('karteVon').replace('{n}', i + 1).replace('{m}', N))}"${i === at ? '' : ' aria-hidden="true"'}>${img ? `<img class="kp-cc-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}<span class="kp-cc-num" aria-hidden="true">${pad(i + 1)}</span><div class="kp-cc-body">${it.icon ? `<span class="kp-cc-icon" aria-hidden="true">${icon(it.icon)}</span>` : ''}<h3>${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}</div></div>`;
+      }).join('');
+      return `<div class="kp-team-car kp-cards-car" data-team-car="${esc(b.id)}" style="--n:${N}">
+        <div class="kp-tc-view"><div class="kp-tc-track" style="--at:${at}">${cards}</div></div>
+        <div class="kp-cc-nav">
+          <button type="button" class="kp-tc-btn kp-tc-prev" data-tc-step="${esc(b.id)}" data-dir="-1" aria-label="${T('zurueck')}"${at === 0 ? ' disabled' : ''}>${icon('arrow')}</button>
+          <p class="kp-cc-count" aria-live="polite" data-tc-pos><span><b data-tc-n>${pad(at + 1)}</b> / ${pad(N)}</span><i style="--w:${N ? Math.round((at + 1) / N * 100) : 0}%" data-tc-bar></i></p>
+          <button type="button" class="kp-tc-btn kp-tc-next" data-tc-step="${esc(b.id)}" data-dir="1" aria-label="${T('weiter')}"${at >= N - 1 ? ' disabled' : ''}>${icon('arrow')}</button>
+        </div></div>`;
+    }
     if (b.look === 'reihe') {
       // Tagesablauf (Vorbild „DISRU… WAS?“): links die Einleitung mit rundem „+“ für mehr Text, rechts die Leitfrage fett,
       // darunter hohe Fotos nebeneinander auf einem zarten Verlauf, in jedem ein Punkt an eigener Stelle. Der Punkt deckt eine
@@ -1212,9 +1741,9 @@ function kursPlayer(course, opts) {
       // Methoden nebeneinander (Vorbild Rise „Mit Struktur zum Ziel“): großes Liniensymbol, darunter „Typ 1:“ und der Name in
       // Versalien, kurzer Text und ein rundes Plus, das die Aufdeckzeile öffnet. Ohne Kasten, auf dunkler Folie hell.
       const lab = plainText(b.numLabel);
-      return `${status}<div class="kp-cards kp-cards-methode${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}" style="--n:${Math.min(3, Math.max(1, (b.items || []).length))}">${itemsHtml(b.items, (it, i) => {
+      return `${status}<div class="kp-cards kp-cards-methode${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}" style="--n:${Math.min(4, Math.max(1, (b.items || []).length))}">${itemsHtml(b.items, (it, i) => {
         const has = plainText(it.reveal), on = open.includes(i);
-        return `<div class="kp-card kp-card-methode fx-reveal">${it.icon ? `<span class="kp-mt-icon" aria-hidden="true">${icon(it.icon)}</span>` : ''}<h3>${lab ? `<span class="kp-mt-num">${esc(lab)} ${i + 1}:</span>` : ''}${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${has && !on ? `<button type="button" class="kp-mt-plus" data-card-rv="${i}" aria-expanded="false" aria-label="${esc((b.revealLabel || T('karteDahinter')) + ': ' + plainText(it.title))}"><span aria-hidden="true"></span></button>` : ''}${has && on ? cardRvHtml(b, it, i, true) : ''}</div>`;
+        return `<div class="kp-card kp-card-methode fx-reveal">${it.icon ? `<span class="kp-mt-icon" aria-hidden="true">${icon(it.icon)}</span>` : ''}<h3>${lab ? `<span class="kp-mt-num">${esc(lab)} ${i + 1}:</span>` : ''}${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${has && !on ? `<button type="button" class="kp-mt-plus" data-card-rv="${i}" aria-expanded="false" aria-label="${esc((b.revealLabel || T('karteDahinter')) + ': ' + plainText(it.title))}"><span aria-hidden="true"></span></button>` : ''}${has && on ? cardRvHtml(b, it, i, true) : ''}${cardFoot(it, b)}</div>`;
       })}</div>`;
     }
     if (b.look === 'nummer') {
@@ -1222,7 +1751,7 @@ function kursPlayer(course, opts) {
       // steht eine riesige Ziffer in der Hauptfarbe, das Foto ragt unten links hinein; Titel und Text darunter, Aufdeckzeile wie sonst
       return `${status}<div class="kp-cards kp-cards-nummer${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}" style="--n:${Math.min(3, Math.max(1, (b.items || []).length))}">${itemsHtml(b.items, (it, i) => `<div class="kp-card kp-card-nummer fx-reveal" style="--kp-i:${i}"><div class="kp-nc-stage"><span class="kp-nc-num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span>${it.image && it.image.src ? `<img class="kp-nc-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}</div><h3>${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${cardRvHtml(b, it, i, open.includes(i))}</div>`)}</div>`;
     }
-    return `${status}<div class="kp-cards${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}">${itemsHtml(b.items, (it, i) => `<div class="kp-card fx-reveal fx-hover-lift${it.icon ? ' kp-card-iconed' : ''}${it.icon && !plainText(it.html) ? ' kp-card-tile' : ''}${it.image && it.image.src ? ' kp-card-pic' : ''}">${it.image && it.image.src ? `<img class="kp-card-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}${it.icon ? `<span class="kp-card-icon" aria-hidden="true">${icon(it.icon, 'kp-ico-lg')}</span>` : ''}<h3>${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${cardRvHtml(b, it, i, open.includes(i))}</div>`)}</div>`;
+    return `${status}<div class="kp-cards${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}">${itemsHtml(b.items, (it, i) => `<div class="kp-card fx-reveal fx-hover-lift${it.icon ? ' kp-card-iconed' : ''}${it.icon && !plainText(it.html) ? ' kp-card-tile' : ''}${it.image && it.image.src ? ' kp-card-pic' : ''}${plainText(it.tag) ? ' kp-card-tagged' : ''}">${it.image && it.image.src ? `<img class="kp-card-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}${plainText(it.badge) ? `<span class="kp-card-badge">${esc(it.badge)}</span>` : ''}${it.icon ? `<span class="kp-card-icon" aria-hidden="true">${icon(it.icon, 'kp-ico-lg')}</span>` : ''}<h3>${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${cardRvHtml(b, it, i, open.includes(i))}${cardFoot(it, b)}</div>`)}</div>${calloutHtml(b)}`;
   }
 
   function renderBlock(b) {
@@ -1239,7 +1768,7 @@ function kursPlayer(course, opts) {
       // Zitatkarte über dem Foto (Vorbild Rise „Ziele mit Plan verfolgen“): dunkle Karte mit Name und Zitat ragt unten ins Bild
       case 'image': return b.quote && plainText(b.quote.text) && b.image && b.image.src
         ? `<div class="kp-fig-quoted">${figure(b.image, 'kp-' + (b.size || 'full'))}<blockquote class="kp-fig-quote kp-on-dark">${b.quote.name ? `<footer><b>${esc(b.quote.name)}</b>${b.quote.role ? ` <span>${esc(b.quote.role)}</span>` : ''}</footer>` : ''}<p>${esc(plainText(b.quote.text))}</p></blockquote></div>`
-        : figure(b.image, 'kp-' + (b.size || 'full'));
+        : b.hang && b.image && b.image.src ? hangHtml(b) : figure(b.image, 'kp-' + (b.size || 'full'));
       // Karte (Vorbild „In diesem Training lernst Du“): großes Foto, der Text liegt als dunkle Karte überlappend unten daneben
       case 'textimage': if (b.look === 'karte') return `<div class="kp-ti-karte${b.side === 'left' ? ' kp-left' : ''}${b.cardStyle === 'akzent' ? ' kp-ti-akzent' : ''}">${figure(b.image)}<div class="kp-ti-card${b.cardStyle === 'akzent' ? '' : ' kp-on-dark'} kp-text">${res(b.html)}</div></div>`;
         return `<div class="kp-textimage ${b.side === 'left' ? 'kp-left' : ''} ${b.size === 'medium' || b.size === 'small' ? 'kp-ti-' + b.size : ''}"><div class="kp-text">${res(b.html)}</div>${figure(b.image)}</div>`;
@@ -1268,65 +1797,30 @@ function kursPlayer(course, opts) {
         : `<div class="kp-note kp-text">${b.title ? `<h3 class="kp-note-title">${accent(b.title)}</h3>` : ''}${res(b.html)}</div>`;
       case 'divider': return '<hr class="kp-divider">';
       // Bild-Akkordeon (Vorbild „Die Situation · Das Warum · Die Alternative“): Bilder nebeneinander, darunter die Leiste zum Aufklappen
-      case 'accordion': return b.look === 'bilder'
-        ? `<div class="kp-acc-bilder" style="--n:${Math.min(4, (b.items || []).length || 1)}">${itemsHtml(b.items, it => `<details class="kp-acc kp-acc-bild"><summary>${it.image && it.image.src ? `<img src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}<span class="kp-acc-bar">${esc(it.title)}</span></summary><div class="kp-text">${res(it.html)}</div></details>`)}</div>`
-        : itemsHtml(b.items, it => `<details class="kp-acc"><summary>${esc(it.title)}</summary><div class="kp-text">${res(it.html)}</div></details>`);
+      case 'accordion': return renderAccordion(b);
       // Lesezeichen (Vorbild youknow „Unbewusste Vorannahmen“): nummerierte Reiter senkrecht links, die Karte mit Bild und Titel daneben
-      case 'tabs': return b.look === 'lesezeichen'
-        ? `<div data-kurs-tabs class="kp-tabs-lz">${itemsHtml(b.items, it => `<section data-titel="${esc(it.title)}" class="kp-lz-card">${it.image && it.image.src ? `<img class="kp-lz-img" loading="lazy" decoding="async" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}">` : ''}<h3>${esc(it.title)}</h3><div class="kp-text">${res(it.html)}</div></section>`)}</div>`
-        : `<div data-kurs-tabs>${itemsHtml(b.items, it => `<section data-titel="${esc(it.title)}" class="kp-text">${res(it.html)}</section>`)}</div>`;
-      case 'flipcards': {
-        const tall = (b.items || []).some(it => (it.image && it.image.src) || (it.backImage && it.backImage.src));
-        const pic = im => im && im.src ? `<img class="kp-flip-img" src="${esc(res(im.src))}" alt="${esc(im.alt || '')}" loading="lazy">` : '';
-        const cards = (on) => itemsHtml(b.items, (it, i) => `<div class="kp-flip${tall ? ' kp-flip-tall' : ''}${on != null && i === on ? ' on' : ''}" tabindex="0" role="button" aria-label="${esc(it.title)}: Karte umdrehen"><div class="kp-flip-inner"><div class="kp-flip-front">${pic(it.image)}${esc(it.title)}</div><div class="kp-flip-back">${pic(it.backImage)}${res(it.html)}</div></div></div>`);
-        // Karussell: eine Karte in der Mitte, blaettern mit ‹ ›, „1 von 3“ und eine duenne Fortschrittslinie
-        if (b.look === 'karussell' && (b.items || []).length) {
-          const N = b.items.length;
-          const at = Math.min(Number((state.self[b.id] || {}).at) || 0, N - 1);
-          return `<div class="kp-flipcar" data-flipcar="${b.id}">
-            <div class="kp-flipcar-track">${cards(at)}</div>
-            <div class="kp-flipcar-nav">
-              <button type="button" class="kp-flipcar-btn" data-fc-step="${b.id}" data-dir="-1" aria-label="${T('zurueck')}" ${at === 0 ? 'disabled' : ''}>‹</button>
-              <span class="kp-flipcar-pos"><span data-fc-pos>${at + 1} ${T('von')} ${N}</span><i class="kp-flipcar-bar" aria-hidden="true"><b style="width:${Math.round((at + 1) / N * 100)}%"></b></i></span>
-              <button type="button" class="kp-flipcar-btn" data-fc-step="${b.id}" data-dir="1" aria-label="${T('weiter')}" ${at >= N - 1 ? 'disabled' : ''}>›</button>
-            </div></div>`;
-        }
-        // Bildstreifen (Vorbild youknow „Unbewusste Vorannahmen“): hohe Bilder nebeneinander, ein runder Knopf mit Brille im Bild,
-        // die Rückseite zeigt die Szene aus dem anderen Blickwinkel (backImage) mit Titel und Text. Umdrehen und Erledigt wie bei den Karten.
-        if (b.look === 'streifen' && (b.items || []).length) {
-          const Y = [74, 66, 80, 70, 62];
-          const fill = im => (im && im.src ? `<img class="kp-flip-img" src="${esc(res(im.src))}" alt="${esc(im.alt || '')}" loading="lazy"${focusStyle(im)}>${im.credit ? `<span class="kp-credit-over kp-stripe-credit">${esc(im.credit)}</span>` : ''}` : '');
-          return `<div class="kp-flipgrid kp-stripes" style="--n:${b.items.length}">${itemsHtml(b.items, (it, i) => `<div class="kp-flip kp-stripe" tabindex="0" role="button" aria-label="${esc(it.title)}: Karte umdrehen" style="--y:${Number(it.y) || Y[i % Y.length]}%"><div class="kp-flip-inner"><div class="kp-flip-front">${fill(it.image)}<span class="kp-stripe-btn" aria-hidden="true">${icon(b.icon || 'glasses')}</span></div><div class="kp-flip-back">${fill(it.backImage || it.image)}<div class="kp-stripe-text"><strong>${esc(it.title)}</strong>${res(it.html)}</div></div></div></div>`)}</div>`;
-        }
-        // Bildkacheln (Vorbild „Besonderheiten in der Online-Kommunikation“): quadratische Fotos ohne Text, Akzentkante oben,
-        // Eckmarke mit Umdreh-Symbol; die Rückseite zeigt Titel und Text. Der Titel steht vorn als aria-label.
-        if (b.look === 'kacheln' && (b.items || []).length) {
-          const fill = im => (im && im.src ? `<img class="kp-flip-img" src="${esc(res(im.src))}" alt="${esc(im.alt || '')}" loading="lazy"${focusStyle(im)}>` : '');
-          // Spalten: bis vier nebeneinander, sechs und neun als 3er-Raster, sonst vier; die Zeilenzahl begrenzt die Breite
-          const N = b.items.length, cols = N <= 4 ? N : (N % 3 === 0 || N === 5 ? 3 : 4);
-          return `<div class="kp-flipgrid kp-tiles" style="--n:${cols};--rows:${Math.ceil(N / cols)}">${itemsHtml(b.items, it => `<div class="kp-flip kp-tile" tabindex="0" role="button" aria-label="${esc(it.title)}: Karte umdrehen"><div class="kp-flip-inner"><div class="kp-flip-front">${fill(it.image)}${it.image && it.image.src ? '' : `<strong class="kp-tile-title">${esc(it.title)}</strong>`}<span class="kp-tile-badge" aria-hidden="true">${icon(b.icon || 'flip')}</span></div><div class="kp-flip-back"><div class="kp-tile-text"><strong>${esc(it.title)}</strong>${res(it.html)}</div></div></div></div>`)}</div>`;
-        }
-        return `<div class="kp-flipgrid">${cards()}</div>`;
-      }
+      case 'tabs': return renderTabs(b);
+      case 'flipcards': return renderFlipcards(b);
       case 'linkcard': return renderLinkcard(b);
       case 'table': return renderTable(b);
       case 'timeline': if (b.style === 'fotos') return renderTimelineFotos(b); return `<div class="${b.style === 'steps' ? 'kp-steps' : 'kp-timeline'}">${itemsHtml(b.items, it => `<div class="fx-reveal"><div><h3>${esc(it.title)}</h3><div class="kp-text">${res(it.html)}</div></div></div>`)}</div>`;
       case 'cards': return renderCards(b);
       case 'quiz': return renderQuiz(b, b.graded !== false);
-      case 'pool': return `<div class="kp-pool">${(state.pools[b.id] || []).map(i => b.questions[i]).filter(Boolean).map(q => renderQuiz(q, b.graded !== false)).join('')}</div>`;
+      case 'pool': return b.startCard && !(state.self[b.id] || {}).started ? poolStartCard(b) : `<div class="kp-pool">${(state.pools[b.id] || []).map(i => b.questions[i]).filter(Boolean).map(q => renderQuiz(q, b.graded !== false)).join('')}</div>`;
       case 'review': return renderReview(b);
       case 'glossquiz': return renderGlossquiz(b);
       case 'pretest': return renderPretest(b);
       case 'branch': return renderBranch(b);
       case 'debrief': return renderDebrief(b);
       case 'reflection': return renderReflection(b);
+      case 'sprechen': return renderSprechen(b);
       case 'actionplan': return renderPlan(b);
       case 'survey': return renderSurvey(b);
       case 'certificate': return renderCertificate(b);
       case 'ivideo': return renderIVideo(b);
       case 'dialog': return renderDialog(b);
       case 'sequence': return renderSequence(b);
-      case 'lottie': return `<div class="kp-lottie kp-${b.size || 'medium'}" data-lottie="${b.id}" role="img" aria-label="${esc(b.alt || 'Animation')}"></div>`;
+      case 'lottie': return renderLottie(b);
       case 'hero': return renderHero(b);
       case 'guide': return renderGuide(b);
       case 'agenda': return renderAgenda(b);
@@ -1343,6 +1837,8 @@ function kursPlayer(course, opts) {
       case 'hotspots': return renderHotspots(b);
       case 'layers': return renderLayers(b);
       case 'aufdecken': return renderAufdecken(b);
+      case 'modell3d': return renderModell3d(b);
+      case 'scribble': return renderScribble(b);
       case 'comicstrip': return renderStrip(b);
       case 'sortcats': return renderSort(b);
       case 'triage': return renderTriage(b);
@@ -1395,12 +1891,12 @@ function kursPlayer(course, opts) {
     if (q.kind === 'multiple' && q.look === 'regal') return T('regalWaehle').replace('{n}', regalPick(q));
     if (set.sameBoxes && (q.kind === 'multiple' || sameBoxes(q))) return T('alleRichtigen');
     return {
-      multiple: 'Mehrere Antworten sind richtig', single: 'Eine Antwort ist richtig', truefalse: 'Wahr oder falsch?',
-      fill: 'Lücken ausfüllen', numeric: 'Zahl eingeben', order: 'In die richtige Reihenfolge bringen', match: 'Passendes zuordnen', hotspot: 'Die richtige Stelle im Bild anklicken', pins: 'Nummern an die passende Stelle im Bild bringen', claims: T('jedeAussage')
-    }[q.kind] || 'Eine Antwort ist richtig';
+      multiple: T('qhMehrere'), single: T('qhEine'), truefalse: T('qhWahrFalsch'),
+      fill: T('qhLuecken'), numeric: T('qhZahl'), order: T('qhReihenfolge'), match: T('qhZuordnen'), hotspot: T('qhStelle'), pins: T('qhNummern'), claims: T('jedeAussage')
+    }[q.kind] || T('qhEine');
   }
 
-  const CONF = ['Geraten', 'Eher sicher', 'Sicher'];
+  const CONF = { get 0() { return T('confGeraten'); }, get 1() { return T('confEher'); }, get 2() { return T('confSicher'); } };
 
   // Serie: wie viele Fragen in Kursreihenfolge bis zu dieser am Stück richtig sind (settings.streak, kein Vergleich mit anderen)
   function streakOf(q) {
@@ -1422,6 +1918,8 @@ function kursPlayer(course, opts) {
     const mailLook = q.kind === 'match' && q.dragdrop && q.look === 'postfach';
     const mailLive = mailLook && !isGraded && q.instant !== false;
     const tries = state.tries[q.id] || 0;
+    // Mischung: nach dem Prüfen bleibt die gezeigte Reihenfolge stehen (der Versuch ist schon gezählt), neu gemischt wird erst beim neuen Versuch
+    const mixTries = done ? Math.max(0, tries - 1) : tries;
     if (!state.seen[q.id]) state.seen[q.id] = Date.now();
     let body = '';
 
@@ -1530,7 +2028,7 @@ function kursPlayer(course, opts) {
       body = `<div class="kp-claims">${(q.claims || []).map((x, i) => {
         const v = done ? given[i] : null, ok = done && v === (x.yes === false ? 0 : 1);
         const opt = (val, lab) => `<label class="kp-claim-opt"><input type="radio" name="cl-${q.id}-${i}" value="${val}" ${v === val ? 'checked' : ''} ${done ? 'disabled' : ''}><span>${esc(lab)}</span></label>`;
-        return `<div class="kp-claim${done ? (ok ? ' kp-right' : ' kp-wrong') : ''}" role="radiogroup" aria-labelledby="cl-${q.id}-${i}-t">
+        return `<div class="kp-claim${done ? (ok ? ' kp-right' : ' kp-wrong') : ''}" style="--kp-i:${Math.min(i, 8)}" role="radiogroup" aria-labelledby="cl-${q.id}-${i}-t">
           <span class="kp-claim-text" id="cl-${q.id}-${i}-t">${esc(x.text)}</span><span class="kp-claim-btns">${opt(1, yes)}${opt(0, no)}</span>
           ${done && (x.feedback || !ok) ? `<span class="kp-claim-fb">${ok ? '' : `${T('richtigWaere')}: <b>${esc(x.yes === false ? no : yes)}</b>. `}${esc(x.feedback || '')}</span>` : ''}</div>`;
       }).join('')}</div>`;
@@ -1557,8 +2055,9 @@ function kursPlayer(course, opts) {
       // die Antworten sind die Stufen in ihrer Reihenfolge und werden deshalb nie gemischt)
       const regler = q.look === 'regler' && q.kind === 'single';
       // Farbbalken (q.look 'balken', Vorbild LUCYDATE): jede Antwort als volle Fläche in der Hauptfarbe mit heller Schrift
-      const lookCls = regler ? ' kp-ans-regler' : q.look === 'bilder' ? ' kp-ans-cards' : q.look === 'balken' ? ' kp-ans-balken' : q.look === 'raster' ? ' kp-ans-raster' : q.look === 'pillen' ? ' kp-ans-pillen' : '';
-      const order = q.shuffle && q.kind !== 'truefalse' && !regler ? shuffled(ans.length, q.id + tries) : ans.map((a, i) => i);
+      const notes = q.look === 'notizen' && q.kind === 'multiple';
+      const lookCls = notes ? ' kp-ans-notizen' : regler ? ' kp-ans-regler' : q.look === 'bilder' ? ' kp-ans-cards' : q.look === 'balken' ? ' kp-ans-balken' : q.look === 'raster' ? ' kp-ans-raster' : q.look === 'pillen' ? ' kp-ans-pillen' : '';
+      const order = q.shuffle && q.kind !== 'truefalse' && !regler ? shuffled(ans.length, q.id + mixTries) : ans.map((a, i) => i);
       const perAnswer = q.answerFeedback || q.kind === 'truefalse';
       const ansImg = a => (a.image && a.image.src ? `<img class="kp-answer-img" loading="lazy" decoding="async" src="${esc(res(a.image.src))}" alt="${esc(a.image.alt || '')}">` : '');
       // „Weiß ich nicht“ (q.dontKnow): eigene Antwort mit Wert −1 am Ende, schließt die anderen aus; senkt das Raten,
@@ -1572,8 +2071,9 @@ function kursPlayer(course, opts) {
         const checked = done && given.indexOf(i) >= 0;
         const cls = done ? (a.correct ? 'kp-right' : (checked ? 'kp-wrong' : '')) : '';
         const showFb = done && perAnswer && a.feedback && (checked || (a.correct && q.kind === 'multiple'));
+        const nt = notes ? String(a.text || '').split('|') : null;
         return `<label class="kp-answer ${cls}"><input type="${type}" name="q-${q.id}" value="${i}" ${checked ? 'checked' : ''} ${done ? 'disabled' : ''}>${ansImg(a)}
-          <span class="kp-answer-text"><span>${esc(a.text)}</span>${showFb ? `<span class="kp-answer-fb">${esc(a.feedback)}</span>` : ''}</span></label>`;
+          <span class="kp-answer-text">${nt && nt.length > 1 ? `<span class="kp-note-who">${esc(nt[0].trim())} · <span class="kp-note-tap">${esc(T('notizMarkieren'))}</span><span class="kp-note-flag">${icon('flag')} ${esc(T('notizMarkiert'))}</span></span><span>${esc(nt.slice(1).join('|').trim())}</span>` : `<span>${esc(a.text)}</span>`}${showFb ? `<span class="kp-answer-fb">${esc(a.feedback)}</span>` : ''}</span></label>`;
       }).join('')}${dk}</div>`;
       // Pillen mit zwei Antworten: „?“ steht in der Mitte (Ja ? Nein)
       if (dk && q.look === 'pillen' && order.length === 2) body = body.replace(/(<\/label>)([\s\S]*?)(<label class="kp-answer kp-answer-dk[\s\S]*<\/label>)<\/div>$/, (m, end1, second, dkHtml) => end1 + dkHtml + second + '</div>');
@@ -1583,7 +2083,7 @@ function kursPlayer(course, opts) {
     const pre = confBefore(q, isGraded);
     if (pre && !done && state.conf[q.id] == null) {
       return `<div class="kp-quiz" data-quiz="${q.id}">
-      <p class="kp-label">${esc(quizHint(q))}<span class="kp-badge">Übung</span></p>
+      <p class="kp-label">${esc(quizHint(q))}<span class="kp-badge">${esc(T('uebungMarke'))}</span></p>
       <div class="kp-conf-pre" role="group" aria-labelledby="cp-${q.id}">
         <p class="kp-conf-topic"><span class="kp-label">${T('thema')}</span><b>${esc(confTopic(q))}</b></p>
         <p class="kp-conf-ask" id="cp-${q.id}">${T('wieGutVorher')}</p>
@@ -1591,14 +2091,15 @@ function kursPlayer(course, opts) {
       </div></div>`;
     }
     const askConf = (q.confidence || set.confidence) && !done && !pre;
-    const confHtml = askConf ? `<div class="kp-conf" role="radiogroup" aria-label="Wie sicher bist du?"><span>Wie sicher bist du?</span>
+    const confHtml = askConf ? `<div class="kp-conf" role="radiogroup" aria-label="${esc(T('confFrage'))}"><span>${esc(T('confFrage'))}</span>
       ${[2, 1, 0].map(v => `<label><input type="radio" name="c-${q.id}" value="${v}" ${state.conf[q.id] === v ? 'checked' : ''}>${CONF[v]}</label>`).join('')}
       <span class="kp-conf-msg" data-conf-msg></span></div>` : '';
 
     // Selbsterklärung: vor der Auflösung ein Satz „Warum?“ (Bisra u. a. 2018); die Begründung steht danach neben der des Kurses
     const why = q.explain && q.kind !== 'hotspot';
     const whyHtml = why && !done ? `<div class="kp-why" data-why-box><label><span class="kp-label">${T('warumFrage')}</span><textarea class="kp-notes kp-why-text" rows="1" data-why="${q.id}" placeholder="${esc(T('warumPlatz'))}"></textarea></label><span class="kp-why-missing" role="alert" hidden>${T('warumFehlt')}</span></div>` : '';
-    let bottom = q.kind === 'hotspot' ? confHtml : `${whyHtml}${confHtml}<div class="kp-quiz-actions"><button class="kp-btn" data-check="${q.id}">${T('antwortPruefen')}</button></div>`;
+    const lapQ = q.look === 'notizen' && q.kind === 'multiple';
+    let bottom = q.kind === 'hotspot' ? confHtml : `${whyHtml}${confHtml}<div class="kp-quiz-actions"><button class="kp-btn" data-check="${q.id}">${esc(q.checkLabel || (lapQ ? T('markierungenPruefen') : T('antwortPruefen')))}</button></div>`;
     if (done) {
       const f = evaluate(q, given);
       const ok = f >= 1;
@@ -1615,7 +2116,7 @@ function kursPlayer(course, opts) {
       const max = Number(q.attempts) || 0; // 0 = unbegrenzt
       if (!ok && (max === 0 || tries < max)) bottom += `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-retry-one="${q.id}">Nochmal versuchen${max ? ` (${max - tries} übrig)` : ''}</button></div>`;
     }
-    const badge = isGraded ? '' : '<span class="kp-badge">Übung</span>';
+    const badge = isGraded ? '' : `<span class="kp-badge">${esc(T('uebungMarke'))}</span>`;
     // Person stellt die Frage (q.person, Vorbild „Laura Paulsen, Texterin“): rundes Porträt oder Video links, Name und Rolle darunter
     const zlLook = q.kind === 'match' && q.dragdrop && q.look === 'zerlegen';
     const regalLook = q.kind === 'multiple' && q.look === 'regal';
@@ -1646,14 +2147,32 @@ function kursPlayer(course, opts) {
         <div class="kp-qb-side">${q.eyebrow ? `<p class="kp-eyebrow kp-q-eyebrow">${esc(q.eyebrow)}</p>` : ''}<p class="kp-label">${esc(quizHint(q))}${badge}</p>${qhintHtml}${body}${bottom}</div></div>`;
     }
     // Symbol links neben der Frage (q.icon, Vorbild bildungsinnovator „Was denkst du?“)
+    // Notizen im Laptop (q.look 'notizen', Vorbild Broadlane „Seasonal applications“): Mehrfachauswahl als Notizen in einer App, markieren statt ankreuzen
+    if (lapQ) {
+      const app = q.app || {};
+      const chans = (Array.isArray(app.channels) ? app.channels : String(app.channels || '').split(',')).map(x => plainText(x)).filter(Boolean);
+      return `<div class="kp-quiz kp-quiz-lap" data-quiz="${q.id}"><div class="kp-bx-laptop"><div class="kp-bx-lap-scr">
+        <nav class="kp-bx-lap-side" aria-label="${esc(app.name || 'App')}"><b>${esc(app.name || '')}</b>${app.group ? `<small>${esc(app.group)}</small>` : ''}<ul>${chans.map((c, k) => `<li${k === Number(app.active) ? ' class="on"' : ''}>${esc(c)}</li>`).join('')}</ul></nav>
+        <div class="kp-bx-lap-main"><p class="kp-bx-lap-title">${esc(app.title || '')}</p><div class="kp-lap-body">
+          <p class="kp-label">${esc(quizHint(q))}${badge}</p><h2 class="kp-q">${esc(q.question)}</h2>
+          ${!done && plainText(q.hint) && tries >= Math.max(1, Number(q.hintAfter) || 1) ? `<div class="kp-note kp-qhint" data-qhint="${q.id}" role="note"><span class="kp-label">${esc(T('tippLabel'))}</span> ${esc(plainText(q.hint))}</div>` : ''}
+          ${body}${bottom}</div></div></div><i class="kp-bx-lap-foot" aria-hidden="true"></i></div></div>`;
+    }
     return `<div class="kp-quiz${qp ? ' kp-q-hasperson' : q.icon ? ' kp-q-hasicon' : ''}" data-quiz="${q.id}">
       ${qp || (q.icon ? `<span class="kp-q-icon" aria-hidden="true">${icon(q.icon)}</span>` : '')}
       ${q.eyebrow ? `<p class="kp-eyebrow kp-q-eyebrow">${esc(q.eyebrow)}</p>` : ''}
       <p class="kp-label">${esc(quizHint(q))}${badge}</p>
-      <h2 class="kp-q">${esc(q.question)}</h2>
+      <h2 class="kp-q">${esc(q.question)}</h2>${qGuide(q)}
       ${q.kind === 'hotspot' || q.kind === 'pins' || zlLook ? '' : figure(q.image)}
       ${qhintHtml}
       ${body}${bottom}</div>`;
+  }
+  // Hilfe zum Nachlesen an der Frage (q.guide { label, html }, Vorbild Rise „Review the protections“): jederzeit aufklappbar,
+  // ohne Wertung; als details, damit es ohne eigenen Klick-Handler mit Tastatur und Screenreader geht
+  function qGuide(q) {
+    const g = q.guide;
+    if (!g || !plainText(g.html)) return '';
+    return `<details class="kp-q-guide"><summary>${esc(g.label || T('hilfeNachlesen'))}</summary><div class="kp-text">${res(g.html)}</div></details>`;
   }
 
   // Person oder Bild neben einer Übung (Musterantwort zerlegen, Regal, Sprechblase): Foto der Person aus q.person, sonst q.image
@@ -1697,7 +2216,7 @@ function kursPlayer(course, opts) {
   function regalName(a) { return plainText(a.text) || (a.image && plainText(a.image.alt)) || ''; }
   function regalHtml(q, done, given) {
     const ans = normAnswers(q), per = Math.max(2, Math.min(8, Number(q.shelfCols) || 5));
-    const order = q.shuffle ? shuffled(ans.length, q.id + (state.tries[q.id] || 0)) : ans.map((a, i) => i);
+    const order = q.shuffle ? shuffled(ans.length, q.id + Math.max(0, (state.tries[q.id] || 0) - (done ? 1 : 0))) : ans.map((a, i) => i);
     const item = i => {
       const a = ans[i], img = a.image && a.image.src ? a.image : null, name = regalName(a);
       const chosen = done && given.indexOf(i) >= 0;
@@ -1954,8 +2473,8 @@ function kursPlayer(course, opts) {
 
   function renderReview(b) {
     const qs = reviewQuestions(b);
-    return `<div class="kp-review-head"><p class="kp-label">Wiederholung</p><h2 class="kp-q" style="margin:0">${esc(b.title || T('weisstDuNoch'))}</h2>
-      <p style="margin:6px 0 0">${qs.length ? 'Fragen aus früheren Abschnitten. Was zuletzt nicht saß, kommt zuerst. Sie zählen nicht zur Bewertung.' : 'Es gibt noch keine früheren Fragen zum Wiederholen.'}</p></div>
+    return `<div class="kp-review-head"><p class="kp-label">${esc(T('wdhMarke'))}</p><h2 class="kp-q" style="margin:0">${esc(b.title || T('weisstDuNoch'))}</h2>
+      <p style="margin:6px 0 0">${esc(qs.length ? T('wdhIntro') : T('wdhLeer'))}</p></div>
       <div class="kp-review-list">${qs.map(q => renderQuiz(q, false)).join('')}</div>`;
   }
 
@@ -1968,7 +2487,7 @@ function kursPlayer(course, opts) {
       const passed = s.pct >= (Number(b.passPct) || 80);
       box = `<div class="kp-pretest-box" data-pretest="${b.id}"><p class="kp-label">Einstiegstest</p><div class="kp-score" style="font-size:44px">${s.pct} %</div>
         ${passed && target >= 0 ? `<p>Du kennst dich schon gut aus. Du kannst direkt zu „${plainTitle(pages[target].title)}“ springen oder trotzdem alles durcharbeiten.</p>
-          <div class="kp-quiz-actions" style="justify-content:center"><button class="kp-btn" data-skip="${b.id}">Überspringen</button><button class="kp-btn kp-sec" data-next>Trotzdem durcharbeiten</button></div>`
+          <div class="kp-quiz-actions" style="justify-content:center"><button class="kp-btn" data-skip="${b.id}">${T('ueberspringen')}</button><button class="kp-btn kp-sec" data-next>${T('trotzdemDurcharbeiten')}</button></div>`
           : `<p>${passed ? 'Gut gemacht.' : 'Kein Problem: Der folgende Abschnitt erklärt alles Schritt für Schritt.'}</p>`}</div>`;
     }
     return `${b.intro ? `<div class="kp-text" style="margin-bottom:16px">${res(b.intro)}</div>` : ''}
@@ -2033,7 +2552,7 @@ function kursPlayer(course, opts) {
   function helpButton(b) {
     const h = helpOf(b); if (!h) return '';
     const { name } = helpWho(h), open = helpOpen.has(b.id);
-    return `<button type="button" class="kp-help-btn${open ? ' open' : ''}" data-help-open="${esc(b.id)}" aria-expanded="${open}">${icon('question')}<span>${name ? T('fragHilfe').replace('{n}', esc(name)) : T('hilfe')}</span></button>`;
+    return `<button type="button" class="kp-help-btn${open ? ' open' : ''}" data-help-open="${esc(b.id)}" aria-expanded="${open}">${iconOr((b.help || {}).icon, 'question')}<span>${name ? T('fragHilfe').replace('{n}', esc(name)) : T('hilfe')}</span></button>`;
   }
   function helpPanel(b) {
     const h = helpOf(b); if (!h || !helpOpen.has(b.id)) return '';
@@ -2044,10 +2563,135 @@ function kursPlayer(course, opts) {
       ${h.html ? `<div class="kp-text">${res(h.html)}</div>` : ''}
       ${h.attachment ? `<p><a class="kp-btn kp-sec" href="${esc(res(h.attachment))}" download>${T('arbeitshilfe')}</a></p>` : ''}</div></div>`;
   }
+  // Entscheidung als Szene (Vorbild Broadlane „Fair Calls“, Kerstin 26.10.2026): look 'fall' (Fallkarte mit Rolle, Ort, Erzählung,
+  // Zitat), 'handy' (Nachrichten im Handy links, „Dein Zug“ rechts), 'laptop' (Teamchat im Laptop), 'karte' (Rückblick-Karte mit
+  // Person, Fortschritt und „Festlegen“). Nach der Wahl eine Ergebniskarte: Wertung (options[].verdict), „Du hast C gewählt“, die Folge
+  // (consequence.html), Einschätzung einer Figur (consequence.coach), Zurückspulen und Weiter; darunter die Playbook-Seite (b.playbook).
+  // Logik wie die normale Entscheidung (state.branch, retry, required, showIf), nur die Darstellung ist neu.
+  // Tagesleiste über dem Seitentitel (page.days { labels, at }, Vorbild Broadlane „MON TUE WED“): vergangene Tage dunkel, heute in der Akzentfarbe
+  function pageDays(p) {
+    const d = p && p.days; if (!d) return '';
+    const labels = (Array.isArray(d.labels) ? d.labels : String(d.labels || '').split(',')).map(x => plainText(x)).filter(Boolean);
+    if (labels.length < 2) return '';
+    const at = Math.min(Math.max(0, Number(d.at) || 0), labels.length - 1);
+    return `<ol class="kp-days" aria-label="${esc(T('wochenablauf'))}">${labels.map((l, k) => `<li class="${k < at ? 'done' : k === at ? 'now' : ''}"${k === at ? ' aria-current="step"' : ''}>${esc(l)}</li>`).join('')}</ol>`;
+  }
+  const BX_LOOKS = ['fall', 'handy', 'laptop', 'karte'];
+  const bxSel = {}; // Rückblick-Karte: gewählt, aber noch nicht festgelegt
+  const BX_LETTER = i => 'ABCDEFGHIJ'[i] || String(i + 1);
+  function bxWho(w) {
+    if (!w || typeof w !== 'object') return null;
+    const p = w.castId ? castOf(w) : w;
+    return (p.name || (p.image && p.image.src) || p.look) ? p : null;
+  }
+  function bxFace(p, cls) {
+    const inner = !p ? '' : p.image && p.image.src && (p.look === 'image' || !p.look) ? `<img src="${esc(res(p.image.src))}" alt="">`
+      : p.look && p.look !== 'image' ? avatarSvg(p.look, 'neutral', true)
+      : `<b>${esc(String(p.name || '?').split(/\s+/).map(x => x[0] || '').join('').slice(0, 2).toUpperCase())}</b>`;
+    return `<span class="kp-bx-face ${cls || ''}" aria-hidden="true">${inner}</span>`;
+  }
+  const bxLines = t => String(t || '').split(/\n+/).map(x => x.trim()).filter(Boolean);
+  const bxList = (v, sep) => (Array.isArray(v) ? v : String(v || '').split(sep)).map(x => plainText(x)).filter(Boolean);
+  const bxUnquote = t => String(t || '').trim().replace(/^[„“"»«‚']+|[“”"«»‘']+$/g, '');
+  function bxPlaybook(b) {
+    const pb = b.playbook;
+    if (!pb || typeof pb !== 'object') return '';
+    const items = bxList(pb.items, /\n+/);
+    if (!plainText(pb.title) && !items.length) return '';
+    return `<aside class="kp-bx-pb" aria-label="${esc(T('playbookNeu'))}">
+      <p class="kp-bx-pb-head"><span>${esc(T('playbookNeu'))}</span>${pb.tag ? `<span>${esc(pb.tag)}</span>` : ''}</p>
+      <div class="kp-bx-pb-body">${pb.title ? `<h3>${esc(pb.title)}</h3>` : ''}
+        ${items.length ? `<ul>${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        ${plainText(pb.floor) ? `<p class="kp-bx-pb-floor"><b>${esc(pb.floorLabel || T('playbookPraxis'))}:</b> ${esc(plainText(pb.floor))}</p>` : ''}
+        ${pb.source ? `<p class="kp-bx-pb-src">${esc(T('quelle'))}: ${esc(pb.source)}</p>` : ''}</div></aside>`;
+  }
+  function bxResult(b, i, retried) {
+    const o = (b.options || [])[i] || {}, c = o.consequence && typeof o.consequence === 'object' ? o.consequence : {};
+    const v = ['richtig', 'teilweise', 'falsch'].includes(o.verdict) ? o.verdict : '';
+    const coach = bxWho(c.coach);
+    const coachText = c.coach && plainText(c.coach.text);
+    const hasNext = !retried && pageIndexById && (state.current < pages.length - 1 || (pages[state.current] || {}).next);
+    const ripple = c.html ? res(c.html) : o.feedback ? `<p>${esc(o.feedback)}</p>` : '';
+    return `<div class="kp-bx-res${v ? ' kp-bx-res-' + v : ''}" role="status" tabindex="-1" ${retried ? 'data-retry-fb' : 'data-bx-res'} data-conseq="${esc(b.id)}">
+      <div class="kp-bx-res-top">${v ? `<span class="kp-bx-pill">${esc(T('urteil_' + v))}</span>` : '<span></span>'}<span class="kp-bx-chose">${esc(T('duWaehltest').replace('{x}', BX_LETTER(i)))}</span></div>
+      <p class="kp-bx-label">${esc(c.later || T('dieFolge'))}</p>
+      ${ripple ? `<div class="kp-bx-ripple">${ripple}</div>` : ''}
+      ${coach && coachText ? `<div class="kp-bx-coach">${bxFace(coach)}<div><p class="kp-bx-coach-who"><b>${esc(coach.name || '')}</b>${coach.role ? ` · ${esc(coach.role)}` : ''}</p><p>${esc(coachText)}</p></div></div>` : ''}
+      ${c.html && o.feedback ? `<p class="kp-bx-fb">${esc(o.feedback)}</p>` : ''}
+      <div class="kp-bx-acts">${retried ? `<button type="button" class="kp-btn kp-sec" data-conseq-back="${esc(b.id)}">${esc(T('zurueckspulen'))}</button>`
+        : `${v && v !== 'richtig' && b.rewind !== false ? `<button type="button" class="kp-btn kp-sec" data-bx-rewind="${esc(b.id)}">${esc(T('zurueckspulen'))}</button>` : ''}${o.target ? `<button class="kp-btn" data-follow>${esc(b.nextLabel || T('weiter'))}</button>` : hasNext && b.nextLabel ? `<button class="kp-btn" data-next>${esc(b.nextLabel)}</button>` : ''}`}</div>
+    </div>`;
+  }
+  function bxOptions(b, chosen, tried, tries, lettered, sel) {
+    const locked = chosen != null && !b.changeable;
+    return `<div class="kp-branch-options kp-bx-opts${lettered ? ' kp-bx-lettered' : ''}" role="group">${(b.options || []).map((o, i) => `
+      <button type="button" class="kp-branch-option kp-bx-opt${chosen === i ? ' chosen' : ''}${tried === i || tries.includes(i) ? ' tried' : ''}${sel === i ? ' is-sel' : ''}" ${b.look === 'karte' && chosen == null ? `data-bx-pick="${i}" data-block="${b.id}"` : `data-choose="${i}"`} ${locked || tried != null ? 'disabled' : ''} aria-pressed="${chosen === i || sel === i}">${lettered ? `<span class="kp-bx-letter" aria-hidden="true">${BX_LETTER(i)}</span>` : ''}<span class="kp-bx-otext">${esc(o.text)}</span></button>`).join('')}</div>`;
+  }
+  function renderBranchPro(b) {
+    const chosen = state.branch[b.id];
+    const tried = chosen == null ? (state.self[b.id] || {}).tried : null;
+    const tries = chosen == null ? (state.self[b.id] || {}).tries || [] : [];
+    const shown = chosen != null ? chosen : tried;
+    // Begründung vor der Ergebniskarte (b.explain): erst „Warum?“, dann die Folge
+    const whyBox = branchWhyOpen(b) ? `<div class="kp-why kp-bx-why" data-why-box><label><span class="kp-label">${T('warumFrage')}</span><textarea class="kp-notes kp-why-text" rows="2" data-why="${b.id}" placeholder="${esc(T('warumPlatz'))}"></textarea></label><span class="kp-why-missing" role="alert" hidden>${T('warumFehlt')}</span>
+        <div class="kp-quiz-actions"><button class="kp-btn" data-why-save="${b.id}">${T('begruendungSpeichern')}</button></div></div>` : '';
+    const res1 = whyBox || (shown != null ? bxResult(b, shown, chosen == null) : '');
+    const pb = shown != null && !whyBox ? bxPlaybook(b) : '';
+    const look = b.look;
+    const prompt = (b.prompt ? `<h2 class="kp-q kp-bx-q">${esc(b.prompt)}</h2>` : '') + (chosen == null && helpOf(b) ? `<div class="kp-bx-help">${helpButton(b)}</div>${helpPanel(b)}` : '');
+    if (look === 'fall') {
+      const sc = b.scene || {}, q = bxWho(sc.quote), qt = sc.quote && plainText(sc.quote.text);
+      return `<div class="kp-branch kp-bx kp-bx-fall" data-branch="${b.id}"><div class="kp-bx-card">
+        ${sc.role ? `<p class="kp-bx-role">${icon('user')}<span>${esc(sc.role)}</span></p>` : ''}
+        ${sc.place ? `<p class="kp-bx-place">${icon('pin')}<span>${esc(sc.place)}</span></p>` : ''}
+        ${sc.story ? `<div class="kp-bx-story">${res(sc.story)}</div>` : ''}
+        ${qt ? `<figure class="kp-bx-quote">${q ? bxFace(q) : ''}<div>${q && q.name ? `<figcaption>${esc(q.name)}</figcaption>` : ''}<blockquote>„${esc(bxUnquote(qt))}“</blockquote></div></figure>` : ''}
+        ${sc.after ? `<div class="kp-bx-story">${res(sc.after)}</div>` : ''}
+        ${prompt}<p class="kp-bx-sub">${esc(b.sub || T('wahlFolgen'))}</p>
+        ${bxOptions(b, chosen, tried, tries, false)}${res1}</div>${pb}</div>`;
+    }
+    if (look === 'karte') {
+      const rv = b.review || {}, at = Math.max(1, Number(rv.at) || 1), of = Math.max(at, Number(rv.of) || at);
+      const p = bxWho(b.person), sel = chosen == null ? bxSel[b.id] : null;
+      return `<div class="kp-branch kp-bx kp-bx-karte" data-branch="${b.id}">
+        ${rv.label || of > 1 ? `<div class="kp-bx-rv"><p>${esc([rv.label, of > 1 ? T('situationVon').replace('{n}', at).replace('{z}', of) : ''].filter(Boolean).join(' · '))}</p>${of > 1 ? `<ol class="kp-bx-steps" aria-hidden="true">${Array.from({ length: of }, (x, k) => `<li class="${k + 1 < at ? 'done' : k + 1 === at ? 'now' : ''}"></li>`).join('')}</ol>` : ''}</div>` : ''}
+        <div class="kp-bx-card">${p ? `<div class="kp-bx-person">${bxFace(p, 'kp-bx-big')}<div><b>${esc(p.name || '')}</b>${b.person.place ? `<span>${esc(b.person.place)}</span>` : ''}</div></div>` : ''}
+          ${b.situation ? `<div class="kp-bx-sit">${res(b.situation)}</div>` : ''}${prompt}
+          ${bxOptions(b, chosen, tried, tries, true, sel)}${res1}</div>
+        ${chosen == null && tried == null ? `<div class="kp-bx-lock"><button type="button" class="kp-btn" data-bx-lock="${b.id}" ${sel == null ? 'disabled' : ''}>${esc(b.lockLabel || T('festlegen'))}</button></div>` : ''}${pb}</div>`;
+    }
+    // Gerät links, Zug rechts
+    const th = b.thread || {}, who = bxWho(th);
+    const mine = shown != null ? bxUnquote(((b.options || [])[shown] || {}).reply || ((b.options || [])[shown] || {}).text) : '';
+    let device;
+    if (look === 'handy') {
+      device = `<div class="kp-bx-phone" aria-label="${esc(T('hyNachricht'))}"><div class="kp-bx-phone-scr"><i class="kp-bx-notch" aria-hidden="true"></i>
+        <div class="kp-bx-phone-head">${bxFace(who, 'kp-bx-big')}<b>${esc((who && who.name) || '')}</b>${who && who.role ? `<small>${esc(who.role)}</small>` : ''}</div>
+        <div class="kp-bx-msgs">${bxLines(th.messages).map(t => `<p class="kp-bx-msg">${esc(t)}</p>`).join('')}${mine ? `<p class="kp-bx-msg kp-bx-me${chosen == null ? ' kp-bx-undo' : ''}">${esc(mine)}</p>` : ''}</div>
+        <div class="kp-bx-input" aria-hidden="true">${esc(T('textNachricht'))}</div></div></div>`;
+    } else {
+      const chans = bxList(th.channels, ',');
+      const posts = (th.posts || []).map(x => {
+        if (!x) return '';
+        if (x.note || !(x.name || x.castId)) return `<p class="kp-bx-note">${esc(plainText(x.text))}</p>`;
+        const w = bxWho(x) || x;
+        return `<div class="kp-bx-post">${bxFace(w)}<div><p><b>${esc(w.name || '')}</b>${w.role ? `<small>${esc(w.role)}</small>` : ''}</p><p>${esc(plainText(x.text))}</p></div></div>`;
+      }).join('');
+      device = `<div class="kp-bx-laptop"><div class="kp-bx-lap-scr">
+        <nav class="kp-bx-lap-side" aria-label="${esc(th.app || 'App')}"><b>${esc(th.app || '')}</b>${th.group ? `<small>${esc(th.group)}</small>` : ''}
+          <ul>${chans.map((c, k) => `<li${k === Number(th.active) ? ' class="on"' : ''}>${esc(c)}</li>`).join('')}</ul></nav>
+        <div class="kp-bx-lap-main"><p class="kp-bx-lap-title">${esc(th.channel || '')}</p><div class="kp-bx-posts">${posts}</div>
+          <div class="kp-bx-input" aria-hidden="true">${esc(th.channel ? T('nachrichtAn').replace('{c}', th.channel) : T('textNachricht'))}</div></div>
+      </div><i class="kp-bx-lap-foot" aria-hidden="true"></i></div>`;
+    }
+    return `<div class="kp-branch kp-bx kp-bx-dev kp-bx-${look}" data-branch="${b.id}">${device}
+      <div class="kp-bx-side">${shown == null ? `<div class="kp-bx-card kp-bx-move"><p class="kp-bx-label">${esc(b.eyebrow || T('deinZug'))}</p>${prompt}${bxOptions(b, chosen, tried, tries, true)}</div>` : res1}${pb}</div></div>`;
+  }
   // Begründung zu einer Entscheidung (explain): gespeichert unter der Block-id mit ~why; ohne sie bleibt die Rückmeldung zu
   const branchWhy = b => (b.explain ? loadText(b.id + '~why') : null);
   const branchWhyOpen = b => !!b.explain && state.branch[b.id] != null && !branchWhy(b);
   function renderBranch(b) {
+    if (BX_LOOKS.includes(b.look)) return renderBranchPro(b);
     const chosen = state.branch[b.id];
     const opt = chosen != null ? b.options[chosen] : null;
     const tried = chosen == null ? (state.self[b.id] || {}).tried : null;
@@ -2068,7 +2712,167 @@ function kursPlayer(course, opts) {
     </div>`;
   }
 
+  // ---------- Entscheidungskarte (debrief.look 'karte', Webanalyse 29.10.2026, Empfehlung 5) ----------
+  // Senkrechter Pfad: je Entscheidung ein Knoten, die Möglichkeiten als Zweige. Der eigene Weg ist hervorgehoben und mit dem
+  // nächsten Knoten verbunden, die anderen Zweige lassen sich öffnen und zeigen, was dort passiert wäre (ohne Wertung oder Stand zu ändern).
+  const DMAP_SHOWN = new Set(); // der eigene Pfad zeichnet sich nur beim ersten Sichtbarwerden
+  const dmapOpen = {}; // offenes Feld je Karte ('knoten:i'), außerhalb des Lernstands
+  const DMAP_VERDICTS = ['richtig', 'teilweise', 'falsch'];
+  function dmapNodesOf(x, pi) {
+    const out = [];
+    const opt = o => ({ text: (o && o.text) || '', verdict: o && DMAP_VERDICTS.includes(o.verdict) ? o.verdict : '', o: o || {} });
+    const dec = (d, src, fallback) => {
+      if (!d || (d.options || []).length < 1) return;
+      const st = state.self[d.id] || {};
+      out.push({ key: d.id, src: src.id, pi, prompt: plainText(d.prompt || fallback || ''), opts: d.options.map(opt), scored: !!d.scored,
+        chosen: state.branch[d.id] != null ? Number(state.branch[d.id]) : null, tries: (st.tries || []).map(Number) });
+    };
+    if (x.type === 'branch') dec(x, x, (pages[pi] || {}).title);
+    else if ((x.type === 'dialog' || x.type === 'vscene') && x.decision) dec(x.decision, x, x.title || (pages[pi] || {}).title);
+    else if (x.type === 'chat') {
+      // Im Chat ist jede Runde mit mindestens zwei Antworten eine Entscheidung; die Frage ist die letzte Nachricht davor
+      const st = state.self[x.id] || {}, n = Number(st.n) || 0;
+      (x.turns || []).forEach((t, k) => {
+        if ((t.options || []).length < 2) return;
+        const lines = String(t.them || '').split(/\n+/).map(s => s.trim()).filter(Boolean);
+        const who = (x.persona || {}).name;
+        out.push({ key: x.id + '~' + k, src: x.id, pi, chat: true, prompt: (who ? who + ': ' : '') + (lines[lines.length - 1] || x.title || ''), opts: t.options.map(opt),
+          chosen: k < n && (st.pick || {})[k] != null ? Number(st.pick[k]) : null, tries: (((st.tried || {})[k]) || []).map(Number) });
+      });
+    }
+    return out;
+  }
+  // Ohne refs: alle Entscheidungen vom Kapitelanfang bzw. vom vorigen debrief bis zur eigenen Stelle
+  function dmapCollect(b) {
+    const refs = (Array.isArray(b.refs) ? b.refs : []).filter(Boolean);
+    let nodes = [];
+    if (refs.length) {
+      refs.forEach(r => pages.forEach((p, pi) => (p.blocks || []).forEach(x => {
+        if (x.id === r || (x.decision && x.decision.id === r)) nodes = nodes.concat(dmapNodesOf(x, pi));
+      })));
+    } else {
+      const at = pages.findIndex(p => (p.blocks || []).some(x => x.id === b.id));
+      if (at < 0) return nodes;
+      const seq = [];
+      for (let pi = 0; pi <= at; pi++) for (const x of pages[pi].blocks || []) { if (x.id === b.id) break; seq.push([pi, x]); }
+      const ch = pages[at].chapter || '';
+      let from = 0;
+      for (let k = seq.length - 1; k >= 0; k--) {
+        const [pi, x] = seq[k];
+        if (x.type === 'debrief' || (ch && (pages[pi].chapter || '') !== ch)) { from = k + 1; break; }
+      }
+      seq.slice(from).forEach(([pi, x]) => { nodes = nodes.concat(dmapNodesOf(x, pi)); });
+    }
+    // Offene Entscheidungen auf einem Pfad, den die Lernenden nicht genommen haben (Sprung über die Seite, Bedingung nicht erfüllt), fallen weg
+    return nodes.filter(n => {
+      if (n.chosen != null) return true;
+      if (condHiddenIds(pages[n.pi]).has(n.src) || condHiddenIds(pages[n.pi]).has(n.key)) return false;
+      return !nodes.some(m => m.chosen != null && m.pi < n.pi && pageIndexById((m.opts[m.chosen].o || {}).target) > n.pi && !state.visited.has(n.pi));
+    });
+  }
+  // Was an einer Abzweigung passiert (wäre): Folgekarte, sonst Rückmeldung; im Chat die Antwort der Figur
+  function dmapFolge(n, i) {
+    const o = (n.opts[i] || {}).o || {};
+    let h = '';
+    if (n.chat) h = String(o.reply || '').split(/\n+/).map(s => s.trim()).filter(Boolean).map(s => `<p class="kp-dmap-reply">${esc(s)}</p>`).join('') + (o.feedback ? `<div class="kp-text">${res(o.feedback)}</div>` : '');
+    else if (hasConseq(o)) { const c = o.consequence; h = `${c.later ? `<p class="kp-dmap-later">${esc(c.later)}</p>` : ''}${c.html ? `<div class="kp-text">${res(c.html)}</div>` : ''}${o.feedback ? `<p>${esc(o.feedback)}</p>` : ''}`; }
+    else if (o.feedback) h = `<p>${esc(o.feedback)}</p>`;
+    // Szenario-Werte: nur die Änderung nennen; der Balken zeigt den echten Stand und gehört an das Ende der Karte
+    const eff = o.effects && typeof o.effects === 'object' ? (course.meters || []).filter(m => Number(o.effects[m.id])).map(m => { const d = Number(o.effects[m.id]); return `${esc(m.label || m.id)} ${d > 0 ? '+' : '−'}${Math.abs(d)}`; }) : [];
+    return h + (eff.length ? `<p class="kp-dmap-eff">${eff.join(' · ')}</p>` : '');
+  }
+  const dmapShort = t => { const s = String(t || ''); return s.length > 110 ? s.slice(0, 106).replace(/\s+\S*$/, '') + ' …' : s; };
+  const dmapPid = (b, key) => ('kp-dmap-' + b.id + '-' + key).replace(/[^\w-]/g, '_');
+  function renderDmap(b) {
+    const nodes = dmapCollect(b);
+    const seen = (state.self[b.id] || {}).open || [];
+    const openKey = dmapOpen[b.id];
+    const nOpen = nodes.filter(n => n.chosen == null).length;
+    let got = 0, max = 0;
+    nodes.forEach(n => { if (!n.scored) return; max += Math.max(0, ...n.opts.map(x => Number(x.o.points) || 0)); if (n.chosen != null) got += Number((n.opts[n.chosen].o || {}).points) || 0; });
+    const pill = v => (v ? `<span class="kp-dmap-pill kp-dmap-pill-${v}">${esc(T('urteil_' + v))}</span>` : '');
+    const nodeHtml = (n, k) => {
+      const head = `<div class="kp-dmap-head"><span class="kp-dmap-dot" aria-hidden="true">${k + 1}</span><p class="kp-dmap-q"><span class="kp-sr">${esc(T('dmapEntscheidung').replace('{n}', k + 1))}: </span>${esc(dmapShort(n.prompt))}</p></div>`;
+      if (n.chosen == null) return `<li class="kp-dmap-node is-open">${head}<p class="kp-dmap-pending"><span class="kp-dmap-tag">${esc(T('dmapOffen'))}</span><button type="button" class="kp-btn kp-sec" data-goto="${n.pi}">${esc(T('dmapZurEntscheidung'))}</button></p></li>`;
+      const brs = n.opts.map((op, i) => {
+        const key = n.key + ':' + i, mine = i === n.chosen, tried = !mine && n.tries.includes(i);
+        return `<li class="kp-dmap-br${mine ? ' is-mine' : ''}${tried ? ' is-tried' : ''}${!mine && seen.includes(key) ? ' is-seen' : ''}"><button type="button" class="kp-dmap-btn" data-dmap-br="${esc(key)}" data-dmap="${esc(b.id)}" aria-expanded="${openKey === key}" aria-controls="${dmapPid(b, key)}"${mine ? ' aria-current="step"' : ''}>${mine ? `<span class="kp-dmap-tag">${esc(T('dmapDeineWahl'))}</span>` : tried ? `<span class="kp-dmap-tag">${esc(T('dmapZuerst'))}</span>` : ''}<span class="kp-dmap-text">${esc(op.text)}</span>${pill(op.verdict)}</button></li>`;
+      }).join('');
+      const panels = n.opts.map((op, i) => {
+        const key = n.key + ':' + i;
+        return `<div class="kp-dmap-panel${i === n.chosen ? ' is-mine' : ''}" id="${dmapPid(b, key)}" data-dmap-panel="${esc(key)}" tabindex="-1"${openKey === key ? '' : ' hidden'}><p class="kp-dmap-plabel">${esc(i === n.chosen ? T('dmapWurde') : T('dmapWaere'))}${pill(op.verdict)}</p><p class="kp-dmap-ptext">${esc(op.text)}</p>${dmapFolge(n, i) || `<p>${esc(T('dmapKeineFolge'))}</p>`}</div>`;
+      }).join('');
+      return `<li class="kp-dmap-node${n.chosen != null ? ' is-done' : ''}">${head}<ul class="kp-dmap-brs" style="--n:${Math.min(4, n.opts.length)}">${brs}</ul>${panels}</li>`;
+    };
+    const total = nodes.length;
+    return `<div class="kp-debrief kp-dmap${DMAP_SHOWN.has(b.id) ? ' is-drawn' : ''}" data-dmap-box="${esc(b.id)}"><p class="kp-label">${esc(T('nachbesprechung'))}</p><h2 class="kp-q">${esc(b.title || T('debriefTitel'))}</h2>
+      <p class="kp-dmap-sum">${esc((total === 1 ? T('dmapWeg1') : T('dmapWeg').replace('{n}', total)) + (nOpen ? ', ' + T('dmapNochOffen').replace('{n}', nOpen) : ''))}</p>
+      ${total ? `${nodes.some(n => n.chosen != null && n.opts.length > 1) ? `<p class="kp-dmap-hint">${esc(T('dmapHinweis'))}</p>` : ''}<div class="kp-dmap-map"><svg class="kp-dmap-svg" aria-hidden="true" focusable="false"></svg><ol class="kp-dmap-path" aria-label="${esc(T('dmapListe'))}">${nodes.map(nodeHtml).join('')}</ol></div>`
+        : `<p>${esc(T('nochKeineEntscheidung'))}</p>`}
+      ${(course.meters || []).length ? `<p class="kp-label kp-dmap-meters">${T('werteStand')}</p>${meterPanel(null)}` : ''}
+      ${max ? `<div class="kp-feedback neutral" style="margin-top:14px">Punkte im Szenario: ${got} von ${max}</div>` : ''}
+      ${b.html ? `<div class="kp-text" style="margin-top:14px">${res(b.html)}</div>` : ''}</div>`;
+  }
+  // Linien messen und zeichnen: Zweige hängen am Punkt ihres Knotens, der eigene Weg läuft vom gewählten Zweig zum nächsten Punkt
+  function dmapDraw(box) {
+    const map = box.querySelector('.kp-dmap-map'), svg = map && map.querySelector('.kp-dmap-svg');
+    if (!svg) return;
+    const g = map.getBoundingClientRect();
+    if (!g.width || !g.height) return;
+    svg.setAttribute('viewBox', `0 0 ${g.width.toFixed(1)} ${g.height.toFixed(1)}`);
+    const R = el => { const r = el.getBoundingClientRect(); return { l: r.left - g.left, t: r.top - g.top, r: r.right - g.left, b: r.bottom - g.top, cx: r.left - g.left + r.width / 2, cy: r.top - g.top + r.height / 2 }; };
+    const f = v => v.toFixed(1);
+    // Rechtwinklig mit gerundeten Ecken wie in einem Organigramm: senkrecht bis zur Höhe ym, waagerecht, senkrecht zum Ziel
+    const elbow = (x1, y1, x2, y2, ym) => {
+      if (Math.abs(x2 - x1) < 2) return `M${f(x1)} ${f(y1)} V${f(y2)}`;
+      const r = Math.min(10, Math.abs(x2 - x1) / 2, Math.abs(ym - y1), Math.abs(y2 - ym)), dx = x2 > x1 ? r : -r;
+      return `M${f(x1)} ${f(y1)} V${f(ym - r)} Q${f(x1)} ${f(ym)} ${f(x1 + dx)} ${f(ym)} H${f(x2 - dx)} Q${f(x2)} ${f(ym)} ${f(x2)} ${f(ym + r)} V${f(y2)}`;
+    };
+    const nodes = [...map.querySelectorAll('.kp-dmap-node')];
+    let mine = '', alt = '', open = '';
+    nodes.forEach((nd, k) => {
+      const dot = R(nd.querySelector('.kp-dmap-dot')), head = R(nd.querySelector('.kp-dmap-head'));
+      const nxt = nodes[k + 1] ? R(nodes[k + 1].querySelector('.kp-dmap-dot')) : null;
+      const brs = [...nd.querySelectorAll('.kp-dmap-br')], pick = nd.querySelector('.kp-dmap-br.is-mine');
+      if (!pick) { if (nxt) open += `M${f(dot.cx)} ${f(dot.b)} V${f(nxt.t)}`; return; }
+      const stacked = brs.length > 1 && Math.abs(R(brs[0]).t - R(brs[1]).t) > 4;
+      const p = R(pick), ul = R(nd.querySelector('.kp-dmap-brs'));
+      if (stacked) {
+        // Am Handy stehen die Zweige untereinander: eine Leitlinie links, kurze Stiche zu jedem Zweig
+        alt += `M${f(dot.cx)} ${f(dot.b)} V${f(R(brs[brs.length - 1]).cy)}`;
+        brs.forEach(br => { if (br !== pick) { const r = R(br); alt += `M${f(dot.cx)} ${f(r.cy)} H${f(r.l)}`; } });
+        mine += `M${f(dot.cx)} ${f(dot.b)} V${f(p.cy)} H${f(p.l)}`;
+        if (nxt) mine += `M${f(dot.cx)} ${f(p.cy)} V${f(nxt.t)}`;
+      } else {
+        const bus = (head.b + ul.t) / 2;
+        brs.forEach(br => { if (br !== pick) { const r = R(br); alt += elbow(dot.cx, dot.b, r.cx, r.t, bus); } });
+        mine += elbow(dot.cx, dot.b, p.cx, p.t, bus);
+        if (nxt) mine += elbow(p.cx, p.b, dot.cx, nxt.t, ul.b + 17);
+      }
+    });
+    svg.innerHTML = `<path class="kp-dmap-l-alt" d="${alt}"/><path class="kp-dmap-l-open" d="${open}"/><path class="kp-dmap-l-mine" pathLength="1" d="${mine}"/>`;
+  }
+  // Einmal je Karte: zeichnen, beim ersten Sichtbarwerden den eigenen Pfad von oben nach unten ziehen (600 ms), bei Größenänderung neu messen
+  const dmapRo = typeof ResizeObserver === 'function' ? new ResizeObserver(list => list.forEach(e => { const box = e.target.closest('[data-dmap-box]'); if (box) dmapDraw(box); })) : null;
+  function setupDmap(box) {
+    dmapDraw(box);
+    const map = box.querySelector('.kp-dmap-map');
+    if (map && dmapRo) dmapRo.observe(map);
+    const id = box.dataset.dmapBox;
+    if (DMAP_SHOWN.has(id) || !map) return;
+    // kp-dmap-go trägt den Übergang nur während des Zeichnens; danach (und nach jedem Neuzeichnen) steht der Pfad
+    const show = calm => {
+      DMAP_SHOWN.add(id);
+      const cur = root.querySelector(`[data-dmap-box="${id}"]`) || box;
+      if (!calm) { cur.classList.add('kp-dmap-go'); setTimeout(() => cur.classList.remove('kp-dmap-go'), 700); }
+      void cur.offsetWidth; cur.classList.add('is-drawn');
+    };
+    if (reducedMotion() || !window.IntersectionObserver) return show(true);
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { io.disconnect(); show(); } }), { threshold: .2 });
+    io.observe(map);
+  }
   function renderDebrief(b) {
+    if (b.look === 'karte') return renderDmap(b);
     const list = [];
     let got = 0, max = 0;
     pages.forEach(p => branchesIn(p).forEach(x => {
@@ -2079,7 +2883,7 @@ function kursPlayer(course, opts) {
       if (x.scored) got += Number(o.points) || 0;
       list.push(`<div class="kp-debrief-item"><small>${esc(x.prompt || p.title)}</small><strong>${esc(o.text)}</strong>${o.feedback ? `<span>${esc(o.feedback)}</span>` : ''}</div>`);
     }));
-    return `<div class="kp-debrief"><p class="kp-label">Nachbesprechung</p><h2 class="kp-q">${esc(b.title || 'Deine Entscheidungen im Überblick')}</h2>
+    return `<div class="kp-debrief"><p class="kp-label">${esc(T('nachbesprechung'))}</p><h2 class="kp-q">${esc(b.title || T('debriefTitel'))}</h2>
       ${list.length ? list.join('') : `<p>${esc(T('nochKeineEntscheidung'))}</p>`}
       ${(course.meters || []).length ? `<p class="kp-label" style="margin-top:16px">${T('werteStand')}</p>${meterPanel(null)}` : ''}
       ${max ? `<div class="kp-feedback neutral" style="margin-top:14px">Punkte im Szenario: ${got} von ${max}</div>` : ''}
@@ -2105,6 +2909,15 @@ function kursPlayer(course, opts) {
   const KLANG_MICRO = ['richtig', 'falsch', 'erledigt'];
   let klangCtx = null, klangLast = 0;
   function soundsAllowed() { return set.sounds !== false && !opts.renderer; }
+  // „Bewegung reduzieren“ für Lernende (Komplettprüfung 30.10.2026): wie die Systemeinstellung, aber im Kurs umschaltbar,
+  // gemerkt im Browser je Kurs; reducedMotion() und alle Animationen richten sich danach
+  function calmOn() { if (opts.renderer) return false; try { return localStorage.getItem('kurs-ruhig-' + (course.id || 'kurs')) === 'an'; } catch (e) { return false; } }
+  function setCalmOn(on) {
+    try { localStorage.setItem('kurs-ruhig-' + (course.id || 'kurs'), on ? 'an' : 'aus'); } catch (e) { /* kein Speicher */ }
+    const h = document.documentElement;
+    h.classList.toggle('kp-ruhig', on);
+    h.classList.toggle('kp-fx-premium', !on && theme.effects !== 'dezent');
+  }
   function soundsOn() { if (!soundsAllowed()) return false; try { return localStorage.getItem(SOUND_KEY) !== 'aus'; } catch (e) { return true; } }
   function setSoundsOn(on) { try { localStorage.setItem(SOUND_KEY, on ? 'an' : 'aus'); } catch (e) { /* kein Speicher */ } }
   function klangFamilie() { const st = (course.theme || {}).style || ''; return st === 'micro' ? 'micro' : (st === 'comic' || st === 'praxis') ? 'comic' : 'foto'; }
@@ -2374,7 +3187,10 @@ function kursPlayer(course, opts) {
     'arrow-circle': '<circle cx="12" cy="12" r="9"/><path d="M8 12h8M13 9l3 3-3 3"/>',
     chat: '<path d="M4 5h16v11H9l-5 4z"/>',
     chats: '<path d="M3 4h12v8H7l-4 3z"/><path d="M9 15v2h7l4 3V9h-3"/>',
+    'arrow-ur': '<path d="M7 17L17 7M9 7h8v8"/>',
+    pin: '<path d="M12 21s-6.5-6.2-6.5-11a6.5 6.5 0 0 1 13 0c0 4.8-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.4"/>',
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
+    building: '<path d="M4 21V4.5L13 2v19"/><path d="M13 9l7 2.5V21"/><path d="M2.5 21h19"/><path d="M7.5 7h2M7.5 11h2M7.5 15h2M16 14h1.5M16 17.5h1.5"/>',
     users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 19c1-3.5 3.5-5 6.5-5s5.5 1.5 6.5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4 1.3 4.8 3.8"/>',
     target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
     bulb: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/>',
@@ -2382,6 +3198,7 @@ function kursPlayer(course, opts) {
     star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+    lines: '<path d="M5 7h14M5 12h14M5 17h9"/>',
     book: '<path d="M4 5c3-1.5 6-1.5 8 .5 2-2 5-2 8-.5v14c-3-1.5-6-1.5-8 .5-2-2-5-2-8-.5z"/><path d="M12 5.5v14"/>',
     pencil: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
     flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
@@ -2405,6 +3222,7 @@ function kursPlayer(course, opts) {
     ear: '<path d="M7 9a5 5 0 0 1 10 0c0 3-2.5 4-3 6.5S12.5 21 10 20.5"/><path d="M10 9.5a2 2 0 0 1 4 0"/>',
     mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
     play: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/>',
+    pause: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7M14 8.5v7"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
     alert: '<path d="M12 3l10 17H2z"/><path d="M12 10v4M12 17v.5"/>',
     question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17v.5"/>',
@@ -2420,10 +3238,14 @@ function kursPlayer(course, opts) {
     scale: '<path d="M12 4v16M6 20h12M4 8h16"/><path d="M6 8l-3 6a3 3 0 0 0 6 0zM18 8l-3 6a3 3 0 0 0 6 0z"/>',
     seedling: '<path d="M12 21v-9"/><path d="M12 12c0-4-3-6-7-6 0 4 3 6 7 6zM12 10c0-3.5 2.5-6 7-6 0 4-2.5 6-7 6z"/>'
   };
+  // Symbol mit Standard: leerer Text = bewusst ohne Symbol (Wahl „Kein Symbol“ in „Direkt bearbeiten“)
+  function iconOr(name, def, cls) { return name === '' ? '' : icon(name || def, cls); }
   function icon(name, cls) {
     const p = ICONS[name];
-    return p ? `<svg class="kp-ico ${cls || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>` : '';
+    return p ? `<svg class="kp-ico ${cls || ''}" data-ico="${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>` : '';
   }
+  // Vorschau im Editor: die Symbolwahl in „Direkt bearbeiten“ zeichnet dieselben Symbole
+  if (opts.preview && typeof window !== 'undefined') { window.kpIconNames = Object.keys(ICONS); window.kpIconSvg = n => icon(n); }
   // *Wort* in Überschriften wird zum kursiven Akzent
   const accent = s => esc(s).replace(/\*(.+?)\*/g, '<em class="kp-accent">$1</em>');
   // Derselbe Titel als schlichter Text: die Sternchen des Akzentworts gehören nicht in
@@ -2439,8 +3261,8 @@ function kursPlayer(course, opts) {
   // ---------- Titelbereich, Begleitfigur, Agenda, Selbstcheck ----------
   const focusStyle = img => (img && img.focus ? ` style="object-position:${esc(img.focus)}"` : '');
   const photo = (img, fallbackLabel) => img && img.src
-    ? `<img src="${esc(res(img.src))}" alt="${esc(img.alt || '')}"${focusStyle(img)}>${img.credit ? `<span class="kp-credit-over">${esc(img.credit)}</span>` : ''}`
-    : `<div class="kp-photo-empty">${icon('user')}<span>${esc(fallbackLabel || 'Foto')}</span></div>`;
+    ? `<img src="${esc(res(img.src))}" alt="${esc(img.alt || '')}" class="${imgAdj(img).cls.trim()}"${imgAdj(img).style}>${img.credit ? `<span class="kp-credit-over">${esc(img.credit)}</span>` : ''}`
+    : ideaBox(img, 'bild', 'kp-idea-fill') || `<div class="kp-photo-empty">${icon('user')}<span>${esc(fallbackLabel || 'Foto')}</span></div>`;
 
   // Hervorgehobener Einschub in einer Karte, z. B. eine Frage zum Nachdenken
   const calloutHtml = b => (plainText(b.callout) ? `<div class="kp-callout">${b.calloutIcon ? icon(b.calloutIcon) : ''}<div class="kp-text">${res(b.callout)}</div></div>` : '');
@@ -2499,12 +3321,13 @@ function kursPlayer(course, opts) {
     const parts = t.split('\u0001');
     const strip = x => String(x || '').replace(/\s*\?\s*$/, '').trim();
     const pre = parts.length === 3 ? parts[0].trim() : '', word = parts.length === 3 ? parts[1].trim() : strip(t), post = parts.length === 3 ? strip(parts[2]) : '';
-    const n = Math.max(5, ...word.split(/\s+/).map(w => Array.from(w).length));
-    const pic = b.image && b.image.src ? photo(b.image, 'Titelbild') : mascotHtml(b.pose, 'kp-mascot-hero');
+    // Das Fragezeichen steht am Schlagwort, wenn danach nichts mehr kommt: es zählt dann zur Breite des letzten Worts
+    const n = Math.max(5, ...word.split(/\s+/).map((w, k, a) => Array.from(w).length + (!post && k === a.length - 1 ? 1 : 0)));
+    const pic = b.image && (b.image.src || (opts.preview && plainText(b.image.idea))) ? photo(b.image, 'Titelbild') : mascotHtml(b.pose, 'kp-mascot-hero');
     return `<div class="kp-hero2 kp-hero-frage${b.cover ? ' kp-hero-cover' : ''}${pic ? ' kp-frage-haspic' : ''}">
       <div class="kp-frage-stage">
         <h2 class="kp-frage" style="--n:${n}" aria-label="${esc(strip(t.replace(/\u0001/g, '')) + '?')}"><span aria-hidden="true">
-          ${pre ? `<span class="kp-frage-pre">${esc(pre)}</span>` : ''}<span class="kp-frage-word">${esc(word)}<span class="kp-frage-q">?</span></span>${post ? `<span class="kp-frage-post">${esc(post)}</span>` : ''}</span></h2>
+          ${pre ? `<span class="kp-frage-pre">${esc(pre)}</span>` : ''}<span class="kp-frage-word">${post ? esc(word) : esc(word).replace(/(\S+)$/, '<span class="kp-frage-last">$1<span class="kp-frage-q">?</span></span>')}</span>${post ? `<span class="kp-frage-post">${esc(post)}<span class="kp-frage-q">?</span></span>` : ''}</span></h2>
         ${pic ? `<div class="kp-frage-pic">${pic}</div>` : ''}
       </div>
       <div class="kp-frage-body">
@@ -2655,7 +3478,7 @@ function kursPlayer(course, opts) {
       const sum = st.a.reduce((x, y) => x + Math.max(0, Number(y) || 0), 0);
       const r = (b.results || []).find(x => sum >= Number(x.min) && sum <= Number(x.max));
       result = `${scale && b.profile ? scProfile(b, st) : ''}<div class="kp-sc-result fx-fade-in" role="status">${r ? res(r.html) : ''}</div>
-        <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-self-reset="${b.id}">Antworten ändern</button></div>`;
+        <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-self-reset="${b.id}">${T('antwortenAendern')}</button></div>`;
     }
     // Zweispaltig (Vorbild „Was sind deine Herausforderungen?“): Titel und Einleitung links, die Aussagen mit Ja/?/Nein rechts
     const zwei = b.look === 'zweispaltig';
@@ -3012,7 +3835,26 @@ function kursPlayer(course, opts) {
       return `<div class="kp-seq-step ${img ? 'has-img' : ''} ${i === idx ? 'fx-' + (b.animation || 'slide-up') : ''}"><div class="kp-text">${res(s.html)}</div>${img}</div>`;
     }).join('');
   }
+  // Bildgeschichte (sequence.look „szene“, Vorbild Rise „I asked for time for treatment“, 30.10.2026): eine Szene nach der anderen
+  // im eigenen Tempo, Bild mit Band (label) und Zähler, darunter Dachzeile, Titel und Text, unten Zurück, Striche, Weiter.
+  // Erledigt, sobald die letzte Szene erreicht ist. Weiterschalten zeichnet nur den Block neu, der Fokus bleibt auf dem Knopf.
+  function renderSzenen(b) {
+    const steps = b.steps || [], n = steps.length;
+    const idx = Math.min(state.seq[b.id] || 0, Math.max(0, n - 1)), s = steps[idx] || {};
+    const img = s.image && s.image.src ? `<img src="${esc(res(s.image.src))}" alt="${esc(s.image.alt || '')}"${focusStyle(s.image)}>` : '';
+    return `<div class="kp-sz${img ? '' : ' kp-sz-noimg'}" data-szene="${b.id}">
+      ${plainText(b.hint) ? `<p class="kp-sz-hint">${esc(plainText(b.hint))}</p>` : ''}
+      <div class="kp-sz-card">
+        <div class="kp-sz-media">${img}${n > 1 ? `<span class="kp-sz-count">${esc(T('szeneVon').replace('{n}', idx + 1).replace('{m}', n))}</span>` : ''}${s.image && s.image.credit ? `<span class="kp-credit">${esc(s.image.credit)}</span>` : ''}</div>
+        ${s.label ? `<p class="kp-sz-band">${esc(s.label)}</p>` : ''}
+        <div class="kp-sz-body" aria-live="polite">${eyebrow(s.eyebrow)}${s.title ? `<h3 class="kp-sz-title">${esc(s.title)}</h3>` : ''}<div class="kp-text">${res(s.html || '')}</div></div>
+        ${n > 1 ? `<div class="kp-sz-nav"><button type="button" class="kp-btn kp-sec" data-sz-step="-1" data-block="${b.id}"${idx ? '' : ' disabled'}>← ${esc(T('szeneZurueck'))}</button>
+          <span class="kp-sz-dots" aria-hidden="true">${steps.map((x, i) => `<i class="${i === idx ? 'on' : i < idx ? 'seen' : ''}"></i>`).join('')}</span>
+          <button type="button" class="kp-btn" data-sz-step="1" data-block="${b.id}"${idx < n - 1 ? '' : ' disabled'}>${esc(T('szeneWeiter'))} →</button></div>` : ''}
+      </div></div>`;
+  }
   function renderSequence(b) {
+    if (b.look === 'szene') return renderSzenen(b);
     const steps = b.steps || [];
     const idx = Math.min(state.seq[b.id] == null ? 0 : state.seq[b.id], Math.max(0, steps.length - 1));
     return `<div class="kp-seq" data-seq="${b.id}">
@@ -3467,19 +4309,29 @@ function kursPlayer(course, opts) {
 
   // ---------- Lottie ----------
   const LOTTIE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js';
+  const lottieAnims = {};
+  function renderLottie(b) {
+    if (lsList(b).length) return renderLottieSteps(b);
+    // Läuft die Animation von selbst, bekommt sie einen Knopf zum Anhalten (WCAG 2.2.2); setupLottie blendet ihn nur ein, wenn sie
+    // in Schleife oder länger als fünf Sekunden läuft
+    return `<div class="kp-lottie kp-${b.size || 'medium'}" data-lottie="${b.id}" role="img" aria-label="${esc(b.alt || 'Animation')}"></div>${b.play !== 'click' ? `
+      <button type="button" class="kp-lottie-pause" data-lottie-pause="${b.id}" aria-pressed="false" hidden>${icon('pause')}<span>${esc(T('lottieAnhalten'))}</span></button>` : ''}`;
+  }
   function setupLottie(el) {
     const b = findBlock(el.dataset.lottie);
     if (!b || el.dataset.ready) return;
     el.dataset.ready = '1';
     const src = b.src ? res(b.src) : b.url;
+    if (lsList(b).length) return setupLottieSteps(el, b, src);
     if (!src) { el.innerHTML = '<p class="kp-label">Keine Animation hinterlegt.</p>'; return; }
     // In der Vorschau des Tools liegt Lottie schon im Elternfenster (offline); im LMS ist das Elternfenster fremd
     if (!window.lottie) { try { if (window.parent !== window && window.parent.lottie) window.lottie = window.parent.lottie; } catch (e) { /* fremdes Fenster */ } }
     const lib = window.lottie ? Promise.resolve() : loadScript(LOTTIE_CDN);
     Promise.all([lib, fetch(src).then(r => r.json())]).then(([, data]) => {
-      const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const reduce = reducedMotion();
       const anim = window.lottie.loadAnimation({ container: el, renderer: 'svg', loop: b.loop !== false, autoplay: false, animationData: data });
       anim.setSpeed(Number(b.speed) || 1);
+      lottieAnims[b.id] = anim;
       if (reduce) return anim.goToAndStop(0, true);
       if (b.play === 'click') {
         el.style.cursor = 'pointer';
@@ -3488,12 +4340,192 @@ function kursPlayer(course, opts) {
         el.onclick = toggle;
         el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
         anim.goToAndStop(0, true);
-      } else if (b.play === 'scroll' && window.IntersectionObserver) {
-        new IntersectionObserver(es => es.forEach(e => (e.isIntersecting ? anim.play() : anim.pause())), { threshold: .3 }).observe(el);
+        return;
+      }
+      if (b.play === 'scroll' && window.IntersectionObserver) {
+        new IntersectionObserver(es => es.forEach(e => (e.isIntersecting && !el.dataset.userPaused ? anim.play() : anim.pause())), { threshold: .3 }).observe(el);
       } else {
         anim.play();
       }
+      // Knopf zum Anhalten, wenn die Bewegung länger als fünf Sekunden dauert (Schleife oder lange Datei)
+      const secs = ((Number(data.op) || 0) - (Number(data.ip) || 0)) / (Number(data.fr) || 30) / (Number(b.speed) || 1);
+      const btn = el.parentElement && el.parentElement.querySelector(`[data-lottie-pause="${b.id}"]`);
+      if (btn && (b.loop !== false || secs > 5)) btn.hidden = false;
     }).catch(() => { el.innerHTML = '<p class="kp-label">Die Animation konnte nicht geladen werden.</p>'; });
+  }
+  function lottiePause(btn) {
+    const id = btn.dataset.lottiePause, anim = lottieAnims[id], el = root.querySelector(`[data-lottie="${id}"]`);
+    if (!anim || !el) return;
+    const halt = btn.getAttribute('aria-pressed') !== 'true';
+    if (halt) { anim.pause(); el.dataset.userPaused = '1'; } else { delete el.dataset.userPaused; anim.play(); }
+    btn.setAttribute('aria-pressed', String(halt));
+    btn.innerHTML = `${icon(halt ? 'play' : 'pause')}<span>${esc(T(halt ? 'lottieAbspielen' : 'lottieAnhalten'))}</span>`;
+  }
+
+  // ---------- Animation in Schritten (Webanalyse moderner E-Learnings 29.10.2026, Empfehlung 2) ----------
+  // Animation hilft bei Abläufen, wenn die Person das Tempo steuert (Höffler & Leutner 2007, Segmentierung nach Rey u. a. 2019).
+  // Lottie mit steps [{ end, text }] hält am Ende jedes Schritts an; anim mit stepwise zeigt Stufe für Stufe. Darunter die Leiste:
+  // Zurück (Endbild des vorigen Schritts, ohne Abspielen), „Schritt 2 von 5“, Wiederholen, Weiter. Stand in state.self[id] = { at, seen }.
+  const ANIM_STEP_PRESETS = ['arrow', 'check', 'stairs', 'cycle', 'bars', 'matrix', 'message'];
+  const lsList = b => (b && b.type === 'lottie' && Array.isArray(b.steps) ? b.steps.filter(s => s && s.end !== '' && s.end != null && isFinite(Number(s.end))) : []);
+  function animStageItems(b) {
+    const items = (b.items || []).filter(x => String(x || '').trim()), p = b.preset || 'arrow';
+    if (p === 'matrix') return [0, 1, 2, 3].map(i => items[i] || `Feld ${i + 1}`);
+    if (p === 'stairs' || p === 'message') return items.slice(0, 5);
+    if (p === 'cycle') return items.slice(0, 6);
+    return items;
+  }
+  const animStages = b => (b && b.type === 'anim' && b.stepwise && ANIM_STEP_PRESETS.includes(b.preset || 'arrow') ? animStageItems(b).length : 0);
+  const stepCount = b => (b.type === 'lottie' ? lsList(b).length : animStages(b));
+  function sbState(b) {
+    const n = stepCount(b), st = state.self[b.id] || {};
+    st.at = Math.min(Math.max(0, Number(st.at) || 0), Math.max(0, n - 1));
+    st.seen = Array.isArray(st.seen) ? st.seen.filter(i => i < n) : [];
+    state.self[b.id] = st;
+    return st;
+  }
+  function stepText(b, i) {
+    if (b.type === 'lottie') return res((lsList(b)[i] || {}).text || '');
+    const t = (b.stepTexts || {})[i];
+    if (t && String(t).trim()) return esc(t);
+    const it = String(animStageItems(b)[i] || '');
+    return esc(b.preset === 'message' ? it.replace(/^([^:]{1,24}):\s*/, '$1: ') : it);
+  }
+  function stepBarHtml(b) {
+    const n = stepCount(b), st = sbState(b), seen = st.seen.includes(st.at);
+    return `<div class="kp-stepbar" role="group" aria-label="${esc(T('schritte'))}" data-sb="${b.id}">
+      <button type="button" class="kp-btn kp-sec kp-sb-back" data-sb-go="-1" aria-disabled="${st.at <= 0}">← ${esc(T('zurueck'))}</button>
+      <span class="kp-sb-pos" data-sb-pos aria-live="polite">${esc(T('sbSchritt').replace('{n}', st.at + 1).replace('{z}', n))}</span>
+      <button type="button" class="kp-btn${seen ? ' kp-sec' : ''} kp-sb-again" data-sb-again>${seen ? '↺ ' + esc(T('sbWiederholen')) : '▶ ' + esc(T('sbAbspielen'))}</button>
+      <button type="button" class="kp-btn kp-sb-next" data-sb-go="1" aria-disabled="${st.at >= n - 1}">${esc(T('weiter'))} →</button>
+    </div>
+    <div class="kp-sb-text" data-sb-text aria-live="polite">${stepText(b, st.at)}</div>`;
+  }
+  function renderLottieSteps(b) {
+    const list = lsList(b);
+    return `<div class="kp-lsteps" data-lsteps="${b.id}" data-steps-of="${b.id}">
+      <div class="kp-lottie kp-${b.size || 'medium'}" data-lottie="${b.id}" role="img" aria-label="${esc(b.alt || 'Animation')}"></div>
+      <div class="kp-ls-fallback" data-ls-list hidden><p class="kp-label">${esc(T('sbListe'))}</p>
+        <ol class="kp-ls-list">${list.map((s, i) => `<li data-ls-i="${i}">${res(s.text || '')}</li>`).join('')}</ol></div>
+      ${stepBarHtml(b)}</div>`;
+  }
+  // Bildnummern: end ist die Bildnummer der Datei (ip bis op); lottie rechnet ab ip
+  const lsEndAbs = (b, i) => Number((lsList(b)[i] || {}).end) || 0;
+  const lsStartAbs = (b, i, ctl) => (i > 0 ? lsEndAbs(b, i - 1) : (ctl ? ctl.ip : 0));
+  const lottieSteps = {};
+  function lsStop(b, box, abs) {
+    const ctl = lottieSteps[b.id];
+    if (!ctl || !ctl.anim) return;
+    clearTimeout(ctl.safety); ctl.target = null;
+    const max = ctl.op > ctl.ip ? ctl.op - ctl.ip - 1 : 1e9, rel = Math.max(0, Math.min(max, abs - ctl.ip));
+    try { if (ctl.anim.resetSegments) ctl.anim.resetSegments(true); } catch (e) { /* ältere Fassung */ }
+    ctl.anim.goToAndStop(rel, true);
+    box.dataset.frame = String(rel + ctl.ip);
+    box.classList.remove('kp-ls-playing');
+  }
+  function lsPlay(b, box, i) {
+    const ctl = lottieSteps[b.id];
+    if (!ctl || !ctl.anim) return;
+    const a = lsStartAbs(b, i, ctl), e = lsEndAbs(b, i);
+    if (reducedMotion() || e <= a) return lsStop(b, box, e);
+    clearTimeout(ctl.safety);
+    ctl.target = e;
+    box.dataset.frame = '';
+    box.classList.add('kp-ls-playing');
+    ctl.anim.playSegments([a, e], true);
+    // Sicherheitsnetz: kommt das Ende-Ereignis nicht (Hintergrund-Tab), hält der Schritt trotzdem an seinem Endbild
+    ctl.safety = setTimeout(() => { if (ctl.target === e) lsStop(b, box, e); }, (e - a) / (ctl.fr || 30) / (Number(b.speed) || 1) * 1000 + 600);
+    mediaTimers.push(ctl.safety);
+  }
+  function setupLottieSteps(el, b, src) {
+    const box = el.closest('[data-lsteps]');
+    if (!box) return;
+    // Ersatz ohne Bibliothek oder Datei: die Schritte als nummerierte Liste, Durchblättern zählt als gesehen
+    const fail = () => {
+      lottieSteps[b.id] = { fail: true };
+      box.classList.add('kp-ls-fail');
+      el.hidden = true;
+      box.querySelector('[data-ls-list]').hidden = false;
+      const st = sbState(b);
+      if (!st.seen.includes(st.at)) st.seen.push(st.at);
+      sbUpdate(b, box);
+      updateConditions(); renderFooter(); report();
+    };
+    if (!src) return void Promise.resolve().then(fail);
+    if (!window.lottie) { try { if (window.parent !== window && window.parent.lottie) window.lottie = window.parent.lottie; } catch (e) { /* fremdes Fenster */ } }
+    const lib = window.lottie ? Promise.resolve() : loadScript(LOTTIE_CDN);
+    Promise.all([lib, fetch(src).then(r => r.json())]).then(([, data]) => {
+      if (!box.isConnected) return;
+      if (!window.lottie) throw new Error('lottie');
+      const ip = Number(data.ip) || 0, op = Number(data.op) || 0;
+      const anim = window.lottie.loadAnimation({ container: el, renderer: 'svg', loop: false, autoplay: false, animationData: data });
+      anim.setSpeed(Number(b.speed) || 1);
+      const ctl = { anim, ip, op, fr: Number(data.fr) || 30, target: null };
+      lottieSteps[b.id] = ctl;
+      anim.addEventListener('complete', () => { if (ctl.target != null) lsStop(b, box, ctl.target); });
+      const st = sbState(b);
+      // Bewegung reduzieren: der Schritt steht sofort auf seinem Endbild und gilt als gesehen
+      if (reducedMotion() && !st.seen.includes(st.at)) { st.seen.push(st.at); report(); }
+      // Wiederkommen: Endbild des zuletzt gesehenen Schritts; noch nicht gesehen: Anfang des Schritts
+      const show = () => { if (ctl.target == null) lsStop(b, box, st.seen.includes(st.at) ? lsEndAbs(b, st.at) : lsStartAbs(b, st.at, ctl)); };
+      show();
+      anim.addEventListener('DOMLoaded', show);
+      sbUpdate(b, box);
+      updateConditions(); renderFooter();
+    }).catch(() => { if (box.isConnected) fail(); });
+  }
+  // Anzeige der Leiste nachziehen, ohne neu zu zeichnen (der Fokus bleibt auf dem Knopf)
+  function sbUpdate(b, box) {
+    const bar = box && box.querySelector('[data-sb]');
+    if (!bar) return;
+    const n = stepCount(b), st = sbState(b), seen = st.seen.includes(st.at);
+    const ctl = b.type === 'lottie' ? lottieSteps[b.id] : null, fail = !!(ctl && ctl.fail);
+    bar.querySelector('[data-sb-pos]').textContent = T('sbSchritt').replace('{n}', st.at + 1).replace('{z}', n);
+    bar.querySelector('[data-sb-go="-1"]').setAttribute('aria-disabled', String(st.at <= 0));
+    bar.querySelector('[data-sb-go="1"]').setAttribute('aria-disabled', String(st.at >= n - 1));
+    const again = bar.querySelector('[data-sb-again]');
+    again.hidden = fail;
+    again.classList.toggle('kp-sec', seen);
+    again.textContent = seen ? '↺ ' + T('sbWiederholen') : '▶ ' + T('sbAbspielen');
+    const txt = box.querySelector('[data-sb-text]');
+    if (txt) { txt.innerHTML = stepText(b, st.at); txt.hidden = fail; }
+    box.querySelectorAll('[data-ls-i]').forEach(li => { const on = Number(li.dataset.lsI) === st.at; li.classList.toggle('on', on); if (on) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current'); });
+  }
+  // Stufen der Animation (anim): vor dem Schritt stehen, der Schritt selbst läuft (go) oder steht (still), danach verborgen
+  function animShow(box, at, play) {
+    box.querySelectorAll('[data-sw]').forEach(el => {
+      const k = Number(el.dataset.sw);
+      if (k > at) return el.removeAttribute('data-sw-on');
+      if (k < at || !play) return el.setAttribute('data-sw-on', 'still');
+      el.removeAttribute('data-sw-on');
+      void el.getBoundingClientRect(); // Neustart der Animation
+      el.setAttribute('data-sw-on', reducedMotion() ? 'still' : 'go');
+    });
+  }
+  // Weiter, Zurück, Wiederholen (Klick oder Tastatur)
+  function sbAct(b, box, kind) {
+    const n = stepCount(b);
+    if (!b || !box || !n) return;
+    const st = sbState(b);
+    if (kind === 'next' && st.at >= n - 1) return;
+    if (kind === 'prev' && st.at <= 0) return;
+    if (kind === 'next') st.at++;
+    if (kind === 'prev') st.at--;
+    const play = kind !== 'prev';
+    if (b.type === 'lottie') {
+      const ctl = lottieSteps[b.id];
+      if (play) { if (!st.seen.includes(st.at)) st.seen.push(st.at); if (ctl && ctl.anim) lsPlay(b, box, st.at); }
+      else if (ctl && ctl.anim) lsStop(b, box, lsEndAbs(b, st.at));
+      // Ersatzliste: wer die Schritte durchblättert, hat sie gesehen
+      if (ctl && ctl.fail && !st.seen.includes(st.at)) st.seen.push(st.at);
+    } else {
+      if (play && !st.seen.includes(st.at)) st.seen.push(st.at);
+      animShow(box, st.at, play);
+    }
+    state.self[b.id] = st;
+    sbUpdate(b, box);
+    uiSound('klick');
+    updateConditions(); renderFooter(); report();
   }
 
   // Lottie-Figuren: steht als Bild einer Figur (cast[].image, Haltung, Team, Begleitfigur) eine Lottie-Datei, läuft sie
@@ -3570,7 +4602,7 @@ function kursPlayer(course, opts) {
         url = u;
       });
     };
-    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduce = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) || calmOn();
     anim.goToAndStop(0, true); paint();
     if (reduce) return;
     // 15 Bilder je Sekunde reichen für Atmen und Gesten; außerhalb des Bildes und nach dem Seitenwechsel ruht die Figur
@@ -3683,18 +4715,187 @@ function kursPlayer(course, opts) {
     return `<p class="kp-cl-status ${all ? 'all' : ''}" data-crit-status role="status">${all ? T('kritAlle') : `${c.length} ${T('von')} ${n} ${T('kritErfuellt')}`}</p>`;
   }
 
+  // ---------- Laut sagen (sprechen, Webanalyse 29.10.2026, Empfehlung 6) ----------
+  // Die Person nimmt sich auf, hört sich an und prüft sich an Kriterien. Keine Spracherkennung, kein Dienst.
+  // Die Aufnahme bleibt nur im Arbeitsspeicher der Seite (spRec: Blob über eine blob:-Adresse), nie im Lernstand,
+  // im LMS, im localStorage oder in IndexedDB; render() gibt sie beim Seitenwechsel frei (Spuren stoppen, revokeObjectURL).
+  // Gespeichert wird nur state.self[id] = { done, crit, mode: 'audio' | 'text' }; der Textweg schreibt wie die Reflexion über saveText(id).
+  const spRec = {}, spWhy = {}, spView = {};
+  try { addEventListener('pagehide', () => Object.keys(spRec).forEach(spRelease)); } catch (e) { /* ohne Fenster */ }
+  const spMax = b => Math.max(5, Math.min(180, Number(b.maxSec) || 60));
+  const spWords = t => String(t || '').trim().split(/\s+/).filter(Boolean).length;
+  const spClock = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+  const spCan = () => !!(typeof navigator !== 'undefined' && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function' && typeof window.MediaRecorder === 'function');
+  function spRelease(id) {
+    const r = spRec[id]; if (!r) return;
+    delete spRec[id];
+    clearInterval(r.timer); cancelAnimationFrame(r.raf);
+    try { if (r.recorder && r.recorder.state !== 'inactive') { r.recorder.ondataavailable = null; r.recorder.onstop = null; r.recorder.stop(); } } catch (e) { /* schon beendet */ }
+    if (r.stream) r.stream.getTracks().forEach(t => { try { t.stop(); } catch (e) { /* schon beendet */ } });
+    if (r.ctx) { try { r.ctx.close(); } catch (e) { /* schon zu */ } }
+    if (r.url) { try { URL.revokeObjectURL(r.url); } catch (e) { /* schon frei */ } }
+  }
+  function spRefresh(b, focusSel) {
+    const box = root.querySelector(`[data-sp="${b.id}"]`);
+    if (!box) return;
+    refreshBlock(box, renderSprechen(b));
+    const f = focusSel && root.querySelector(`[data-sp="${b.id}"] ${focusSel}`);
+    if (f) { if (f.tabIndex < 0 && !/^(BUTTON|AUDIO|TEXTAREA|INPUT)$/.test(f.tagName)) f.tabIndex = -1; f.focus(); }
+  }
+  // Kein Mikrofon, keine Aufnahme im Browser oder Freigabe verweigert: automatisch auf den Textweg, mit Grund in einem Satz
+  function spFallback(b, key) {
+    spWhy[b.id] = key; spView[b.id] = 'text';
+    spRefresh(b, '[data-sp-text]');
+  }
+  function spStart(b) {
+    const id = b.id;
+    if (!spCan()) return spFallback(b, 'spKeinGeraet');
+    stopSound();
+    spRelease(id);
+    const r = spRec[id] = { id, phase: 'wait', page: state.current, ann: 0 };
+    spRefresh(b, '[data-sp-status]');
+    let ask;
+    try { ask = navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { ask = Promise.reject(e); }
+    Promise.resolve(ask).then(stream => {
+      if (spRec[id] !== r) { stream.getTracks().forEach(t => t.stop()); return; } // inzwischen verlassen
+      r.stream = stream; r.chunks = [];
+      let rec;
+      try { rec = new MediaRecorder(stream); } catch (e) { spRelease(id); return spFallback(b, 'spFehler'); }
+      r.recorder = rec;
+      rec.ondataavailable = e => { if (e.data && e.data.size) r.chunks.push(e.data); };
+      rec.onstop = () => {
+        clearInterval(r.timer); cancelAnimationFrame(r.raf);
+        stream.getTracks().forEach(t => { try { t.stop(); } catch (e) { /* schon beendet */ } });
+        if (r.ctx) { try { r.ctx.close(); } catch (e) { /* schon zu */ } r.ctx = null; }
+        if (spRec[id] !== r) return;
+        r.sec = Math.min(spMax(b), (Date.now() - r.t0) / 1000);
+        const blob = new Blob(r.chunks, { type: rec.mimeType || 'audio/webm' });
+        r.chunks = []; r.stream = null; r.recorder = null;
+        r.url = URL.createObjectURL(blob); r.phase = 'ready';
+        spRefresh(b, '[data-sp-audio]');
+      };
+      r.t0 = Date.now(); r.phase = 'rec';
+      rec.start();
+      spLevel(r, stream);
+      r.timer = setInterval(() => spTick(b), 250);
+      spRefresh(b, '[data-sp-stop]');
+    }).catch(err => {
+      if (spRec[id] !== r) return;
+      spRelease(id);
+      const n = err && err.name;
+      spFallback(b, n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError' ? 'spAbgelehnt' : n === 'NotFoundError' || n === 'OverconstrainedError' || n === 'DevicesNotFoundError' ? 'spKeinMikro' : 'spFehler');
+    });
+  }
+  function spStop(id, auto) {
+    const r = spRec[id]; if (!r) return;
+    if (r.phase === 'wait') { spRelease(id); const b = findBlock(id); if (b) spRefresh(b, '[data-sp-rec]'); return; }
+    if (r.recorder && r.recorder.state === 'recording') { r.auto = !!auto; clearInterval(r.timer); r.recorder.stop(); }
+  }
+  // Zeit und Ansage: die Zeit steht sichtbar, Screenreader hören höchstens alle 10 Sekunden den Stand
+  function spTick(b) {
+    const r = spRec[b.id]; if (!r || r.phase !== 'rec') return;
+    const sec = (Date.now() - r.t0) / 1000, max = spMax(b);
+    const box = root.querySelector(`[data-sp="${b.id}"]`);
+    const tm = box && box.querySelector('[data-sp-time]');
+    if (tm) tm.textContent = `${spClock(Math.min(sec, max))} / ${spClock(max)}`;
+    const ten = Math.floor(sec / 10);
+    if (ten > r.ann && sec < max) {
+      r.ann = ten;
+      const s = box && box.querySelector('[data-sp-status]');
+      if (s) s.textContent = T('spSekunden').replace('{n}', ten * 10);
+    }
+    if (sec >= max) spStop(b.id, true);
+  }
+  // Pegel: ruhiger Balken aus dem Mittel der Lautstärke (AnalyserNode), unter „Bewegung reduzieren“ nur die Zeit
+  function spLevel(r, stream) {
+    if (reducedMotion()) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      const ctx = r.ctx = new AC();
+      const an = ctx.createAnalyser(); an.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      let lvl = 0, last = 0;
+      const loop = ts => {
+        if (r.phase !== 'rec' || !r.ctx) return;
+        r.raf = requestAnimationFrame(loop);
+        if (ts - last < 100) return;
+        last = ts;
+        an.getByteTimeDomainData(buf);
+        let sum = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+        lvl = lvl * .6 + Math.min(1, Math.sqrt(sum / buf.length) * 4) * .4;
+        const el = root.querySelector(`[data-sp="${r.id}"] [data-sp-level]`);
+        if (el) el.style.setProperty('--lvl', lvl.toFixed(2));
+      };
+      r.raf = requestAnimationFrame(loop);
+    } catch (e) { r.ctx = null; }
+  }
+  function renderSprechen(b) {
+    const st = state.self[b.id] || {}, r = spRec[b.id] || {}, max = spMax(b);
+    const can = spCan();
+    const view = spView[b.id], said = !!st.done && st.mode === 'audio';
+    const text = !can || !!spWhy[b.id] || view === 'text' || (view !== 'audio' && st.mode === 'text');
+    const why = !can ? T('spKeinGeraet') : spWhy[b.id] ? T(spWhy[b.id]) : '';
+    // Figur, die die Situation stellt: aus der Besetzung (castId) oder direkt am Baustein (name, role, image)
+    const who = b.castId ? castOf({ castId: b.castId }) : b.name || (b.image && b.image.src) ? { name: b.name, role: b.role, look: 'image', image: b.image } : null;
+    const head = plainText(b.title) ? `<h2 class="kp-q">${accent(b.title)}</h2>${b.prompt ? `<p class="kp-sp-prompt">${esc(b.prompt)}</p>` : ''}` : `<h2 class="kp-q">${esc(b.prompt || '')}</h2>`;
+    const sit = plainText(b.intro) || who ? `<div class="kp-sp-sit${who ? ' kp-sp-hasface' : ''}">${who ? `<div class="kp-sp-face" aria-hidden="true">${castFace(who)}</div>` : ''}<div>${who && who.name ? `<p class="kp-sp-name">${esc(who.name)}${who.role ? `<span>${esc(who.role)}</span>` : ''}</p>` : ''}${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div></div>` : '';
+    let body = '';
+    if (text) {
+      const saved = loadText(b.id);
+      body = `${why ? `<p class="kp-sp-why">${icon('info')} ${esc(why)}</p>` : ''}
+        <textarea data-sp-text aria-label="${esc(plainText(b.prompt) || T('spLabel'))}" placeholder="${esc(b.placeholder || T('spSchreibPh'))}">${esc(typeof saved === 'string' ? saved : '')}</textarea>
+        <p class="kp-sp-missing" data-sp-missing hidden>${T('spDreiWoerter')}</p>
+        <div class="kp-quiz-actions"><button type="button" class="kp-btn" data-sp-save="${b.id}">${st.done && st.mode === 'text' ? T('spAktualisieren') : (b.sample && !st.done ? T('spSpeichernMuster') : T('spSpeichern'))}</button>${st.done && st.mode === 'text' ? `<span class="kp-saved" role="status">✔ ${T('spGespeichert')}</span>` : ''}${can && !spWhy[b.id] ? `<button type="button" class="kp-sp-switch" data-sp-mode="audio">${icon('mic')} ${T('spLieberSprechen')}</button>` : ''}</div>`;
+    } else if (r.phase === 'wait' || r.phase === 'rec') {
+      const rec = r.phase === 'rec', sec = rec ? Math.min(max, (Date.now() - r.t0) / 1000) : 0;
+      body = `<div class="kp-sp-rec${rec ? ' is-rec' : ''}">
+          <button type="button" class="kp-btn kp-sp-stop" data-sp-stop="${b.id}"${rec ? '' : ' disabled'}><span class="kp-sp-sq" aria-hidden="true"></span> ${T('spStopp')}</button>
+          <span class="kp-sp-state"><span class="kp-sp-dot" aria-hidden="true"></span>${rec ? T('spLaeuft') : T('spWarte')}</span>
+          <span class="kp-sp-time" data-sp-time>${spClock(sec)} / ${spClock(max)}</span>
+          ${rec ? `<span class="kp-sp-level" aria-hidden="true"><i data-sp-level></i></span>` : ''}
+        </div>
+        <p class="kp-sp-privacy">${icon('lock')} ${T('spPrivat')}</p>`;
+    } else if (r.phase === 'ready') {
+      body = `<div class="kp-sp-play"><p class="kp-label">${T('spDeine')} <span class="kp-sp-len">${spClock(r.sec || 0)}</span></p>
+          <audio controls preload="metadata" src="${esc(r.url)}" data-sp-audio aria-label="${esc(T('spDeine'))}"></audio>
+          ${said ? '' : `<p class="kp-sp-hint">${T('spAnhoeren')}</p>`}</div>
+        <div class="kp-quiz-actions"><button type="button" class="kp-btn kp-sec" data-sp-again="${b.id}">${icon('mic')} ${T('spNeu')}</button>${said ? '' : `<button type="button" class="kp-btn" data-sp-done="${b.id}">${icon('check')} ${T('spFertig')}</button>`}</div>
+        <p class="kp-sp-privacy">${icon('lock')} ${T('spPrivat')}</p>`;
+    } else if (said) {
+      body = `<p class="kp-sp-said">${icon('check')} ${T('spGesagt')}</p>
+        <div class="kp-quiz-actions"><button type="button" class="kp-btn kp-sec" data-sp-rec="${b.id}">${icon('mic')} ${T('spNochmal')}</button><button type="button" class="kp-sp-switch" data-sp-mode="text">${icon('pencil')} ${T('spLieberSchreiben')}</button></div>`;
+    } else {
+      body = `<div class="kp-sp-rec"><button type="button" class="kp-btn kp-sp-go" data-sp-rec="${b.id}">${icon('mic')} ${T('spAufnehmen')}</button>
+          <span class="kp-sp-max">${T('spHoechstens').replace('{m}', spClock(max))}</span>
+          <button type="button" class="kp-sp-switch" data-sp-mode="text">${icon('pencil')} ${T('spLieberSchreiben')}</button></div>
+        <p class="kp-sp-privacy">${icon('lock')} ${T('spPrivat')}</p>`;
+    }
+    const status = r.phase === 'rec' ? T('spLaeuft') : r.phase === 'wait' ? T('spWarte') : r.phase === 'ready' && !said ? (r.auto ? T('spZeitUm') + ' ' : '') + T('spBeendet').replace('{t}', spClock(r.sec || 0)) : '';
+    const sample = st.done && plainText(b.sample || '') || (st.done && b.sampleAudio)
+      ? `<div class="kp-note kp-text kp-sample kp-sp-sample"><strong>${T('zumVergleich')}</strong>${plainText(b.sample || '') ? res(b.sample) : ''}${b.sampleAudio ? `<p class="kp-label kp-sp-mlabel">${T('spMusterHoeren')}</p><audio controls preload="none" src="${esc(res(b.sampleAudio))}" aria-label="${esc(T('spMusterHoeren'))}"></audio>` : ''}</div>` : '';
+    return `<div class="kp-sp${text ? ' kp-sp-text' : ''}${r.phase === 'rec' ? ' is-rec' : ''}${st.done ? ' is-done' : ''}" data-sp="${b.id}">
+      <p class="kp-label">${icon('mic')} ${T('spLabel')}</p>
+      ${sit}${head}
+      ${body}
+      <p class="kp-sr" data-sp-status aria-live="polite">${esc(status)}</p>
+      ${sample}${st.done ? reflectCriteria(b) : ''}
+    </div>`;
+  }
+
   function renderPlan(b) {
     const saved = loadText(b.id) || [];
     const done = state.texts[b.id] != null;
     return `<div class="kp-plan" data-plan="${b.id}">
-      <p class="kp-label">Umsetzungsplan</p>
-      <h2 class="kp-q">${esc(b.title || 'Mein Umsetzungsplan')}</h2>
+      <p class="kp-label">${esc(T('planMarke'))}</p>
+      <h2 class="kp-q">${esc(b.title || T('planTitel'))}</h2>
       ${b.intro ? `<div class="kp-text" style="margin-bottom:14px">${res(b.intro)}</div>` : ''}
       ${(b.fields || []).map((f, i) => `<div class="kp-plan-row"><label for="pl-${b.id}-${i}">${esc(f.label)}</label>
         <textarea id="pl-${b.id}-${i}" data-plan-field="${i}" placeholder="${esc(f.placeholder || '')}">${esc(saved[i] || '')}</textarea></div>`).join('')}
       <div class="kp-quiz-actions">
-        <button class="kp-btn" data-plan-save="${b.id}">${done ? 'Aktualisieren' : 'Plan speichern'}</button>
-        <button class="kp-btn kp-sec" data-plan-print="${b.id}">Drucken oder als PDF sichern</button>
+        <button class="kp-btn" data-plan-save="${b.id}">${esc(done ? T('spAktualisieren') : T('planSpeichern'))}</button>
+        <button class="kp-btn kp-sec" data-plan-print="${b.id}">${esc(T('planDrucken'))}</button>
         ${done ? '<span class="kp-saved" role="status">✔ gespeichert</span>' : ''}
       </div></div>`;
   }
@@ -3702,12 +4903,12 @@ function kursPlayer(course, opts) {
   function renderSurvey(b) {
     const s = state.survey[b.id];
     const scale = Number(b.scale) || 5;
-    if (s) return `<div class="kp-survey"><p class="kp-label">Rückmeldung</p><h2 class="kp-q">${esc(b.thanks || T('umfrageDanke'))}</h2></div>`;
+    if (s) return `<div class="kp-survey"><p class="kp-label">${esc(T('rueckmeldungMarke'))}</p><h2 class="kp-q">${esc(b.thanks || T('umfrageDanke'))}</h2></div>`;
     return `<div class="kp-survey" data-survey="${b.id}">
-      <p class="kp-label">Rückmeldung</p><h2 class="kp-q">${esc(b.title || T('umfrageFrage'))}</h2>
+      <p class="kp-label">${esc(T('rueckmeldungMarke'))}</p><h2 class="kp-q">${esc(b.title || T('umfrageFrage'))}</h2>
       ${(b.statements || []).map((st, i) => `<div class="kp-survey-row"><span id="sv-${b.id}-${i}">${esc(st)}</span>
         <div class="kp-scale" role="radiogroup" aria-labelledby="sv-${b.id}-${i}">${Array.from({ length: scale }, (v, k) => `<label title="${k + 1}"><input type="radio" name="s-${b.id}-${i}" value="${k + 1}">${k + 1}</label>`).join('')}</div></div>`).join('')}
-      <p class="kp-scale-legend"><span>1 = ${esc(b.low || 'trifft nicht zu')}</span><span>${scale} = ${esc(b.high || 'trifft voll zu')}</span></p>
+      <p class="kp-scale-legend"><span>1 = ${esc(b.low || T('skalaNiedrig'))}</span><span>${scale} = ${esc(b.high || T('skalaHoch'))}</span></p>
       ${b.comment !== false ? `<div class="kp-plan-row" style="margin-top:14px"><label for="svc-${b.id}">${esc(b.commentLabel || T('umfrageKommentar'))}</label><textarea id="svc-${b.id}" data-survey-comment></textarea></div>` : ''}
       <div class="kp-quiz-actions"><button class="kp-btn" data-survey-send="${b.id}">Absenden</button></div></div>`;
   }
@@ -3729,7 +4930,7 @@ function kursPlayer(course, opts) {
   function certReady(b) {
     if (!graded().length) return { ok: true };
     const s = score();
-    if (s.open) return { ok: false, why: 'Das Zertifikat steht bereit, sobald alle Testfragen beantwortet sind.' };
+    if (s.open) return { ok: false, why: T('zertBereit') };
     if (b.requirePass !== false && s.pct < passScore) return { ok: false, why: T('zertAb').replace('{p}', passScore).replace('{s}', s.pct) };
     return { ok: true, s };
   }
@@ -3778,6 +4979,14 @@ function kursPlayer(course, opts) {
   }
   function echoText(kind, id) {
     if (kind === 'warum') { const w = loadText(id + '~why'); return typeof w === 'string' ? w.trim() : ''; }
+    const sb = findBlock(id);
+    if (sb && sb.type === 'sprechen') {
+      // Laut sagen: geschriebener Text, nach einer Aufnahme nur „aufgenommen“ (die Aufnahme selbst wird nie gespeichert)
+      const ss = state.self[id] || {};
+      if (!ss.done) return '';
+      const tx = ss.mode === 'text' ? loadText(id) : null;
+      return ss.mode === 'text' ? (typeof tx === 'string' ? tx.trim() : '') : T('spAufgenommen');
+    }
     const t = loadText(id);
     if (typeof t === 'string') return t.trim();
     if (Array.isArray(t)) return t.map(x => String(x || '').trim()).filter(Boolean).join(' · ');
@@ -3790,6 +4999,7 @@ function kursPlayer(course, opts) {
       if (b.mode === 'choice') return plainText((b.options || [])[st.v] || '');
       if (b.mode === 'range' && Array.isArray(st.v)) return st.v[0] + '–' + st.v[1] + u;
       if (b.mode === 'slider') return st.v + u;
+      if (b.mode === 'piktogramm') return pkLabel(b, Number(st.v) || 0, pkTotal(b));
       return String(st.v || '').trim();
     }
     if (b && (b.type === 'branch' || (b.options && !b.type))) return i >= 0 ? plainText(((b.options || [])[i] || {}).text || '') : '';
@@ -4008,23 +5218,30 @@ function kursPlayer(course, opts) {
           add(pi, T('deinZiel'), loadText(b.id + '~ziel')); add(pi, T('deinFall'), loadText(b.id + '~fall'));
         }
         if (b.type === 'markieren' && (state.self[b.id] || {}).done) add(pi, b.title || b.intro || T('markiert'), echoText('antwort', b.id));
-        if (b.type === 'kartenstapel' && (state.self[b.id] || {}).done) { const d = deckResult(b); add(pi, b.title || T('deckTitel'), [T('deckErgebnis').replace('{k}', d.known.length).replace('{n}', d.cards.length)].concat(d.retry.map(c => '• ' + plainText(c.front))).join('\n')); }
+        if (b.type === 'kartenstapel' && b.spaced && deckSpaced(b)) {
+          // Mit Fächern: je Karte das Fach, ab Fach 4 „sitzt“, dazu die nächste Wiederholung
+          const nx = deckNextDay(b), fl = c => { const f = deckFach(b, c); return T('deckFach').replace('{f}', f) + (f >= 4 ? ', ' + T('deckSitzt') : ''); };
+          add(pi, b.title || T('deckTitel'), deckCards(b).map(c => '• ' + plainText(c.front) + ' (' + fl(c) + ')').concat(nx ? [T('deckNaechste').replace('{d}', fmtDayNum(nx))] : []).join('\n'));
+        } else if (b.type === 'kartenstapel' && (state.self[b.id] || {}).done) { const d = deckResult(b); add(pi, b.title || T('deckTitel'), [T('deckErgebnis').replace('{k}', d.known.length).replace('{n}', d.cards.length)].concat(d.retry.map(c => '• ' + plainText(c.front))).join('\n')); }
         if (b.type === 'reflection') add(pi, b.prompt || b.title || T('reflexion'), loadText(b.id));
+        if (b.type === 'sprechen') { const ss = state.self[b.id] || {}; if (ss.done) add(pi, b.prompt || b.title || T('spLabel'), ss.mode === 'text' ? loadText(b.id) : T('spLautGesagt')); }
         if (b.type === 'text' && b.copy && String(b.copy).trim()) add(pi, b.copyTitle || T('promptVorlage'), echoPlain(String(b.copy)));
         if (b.type === 'kurzfrage') { add(pi, b.question, echoText('antwort', b.id)); add(pi, b.askMore, loadText(b.id + '~text')); if (kfHasFact(b) && typeof (state.self[b.id] || {}).v === 'number') add(pi, T('kfFakt'), plainText(b.fact) + (b.factSource ? ` (${T('quelle')}: ${b.factSource})` : '')); }
         if (b.type === 'actionplan') { const v = loadText(b.id) || []; (b.fields || []).forEach((f, k) => add(pi, f.label, v[k])); }
-        if (b.type === 'predict') add(pi, b.question || b.title, echoText('antwort', b.id));
+        if (b.type === 'predict') add(pi, b.question || b.prompt || b.title, echoText('antwort', b.id));
         const dec = b.type === 'branch' ? b : b.decision && (b.decision.options || []).length ? b.decision : null;
         if (dec) { add(pi, dec.prompt || b.title, echoText('antwort', dec.id)); add(pi, T('deineBegruendung'), why(dec.id)); }
         if (b.type === 'quiz' && b.explain) add(pi, b.question, why(b.id));
+        if (b.type === 'table' && b.look === 'ausfuellen') { const ts = state.self[b.id] || {}; if (ts.n) add(pi, b.title || T('tabelle'), T('tfErgebnis').replace('{r}', ts.r || 0).replace('{n}', tfModel(b).gaps.length)); }
+        if (b.type === 'hotspots' && b.mode === 'folge') { const hs = hfState(b); if (hs.done) add(pi, String(b.title || '').replace(/\*(.+?)\*/g, '$1') || T('hfLernbuch'), hfSumText(b, hs)); }
         if (b.type === 'checklist') { const c = (state.self[b.id] || {}).c || []; if (c.length) add(pi, b.title || T('checkliste'), c.map(i => '✓ ' + plainText((b.items || [])[i] || '')).join('\n')); }
       });
       if (nt) { cur = 'notiz'; add(pi, T('deineNotiz'), nt); }
     });
     return out;
   }
-  const hasLernbuch = () => !!set.notes || pages.some(p => (p.blocks || []).some(b => ['ueberdich', 'kurzfrage', 'reflection', 'actionplan', 'predict', 'branch', 'checklist', 'markieren', 'kartenstapel'].includes(b.type)
-    || (b.decision && (b.decision.options || []).length) || (b.type === 'quiz' && b.explain)));
+  const hasLernbuch = () => !!set.notes || pages.some(p => (p.blocks || []).some(b => ['ueberdich', 'kurzfrage', 'reflection', 'sprechen', 'actionplan', 'predict', 'branch', 'checklist', 'markieren', 'kartenstapel'].includes(b.type)
+    || (b.type === 'table' && b.look === 'ausfuellen') || (b.type === 'hotspots' && b.mode === 'folge') || (b.decision && (b.decision.options || []).length) || (b.type === 'quiz' && b.explain)));
   // Wiedereinstieg: der eigene letzte Satz statt nur „weiter, wo du warst“
   function lastOwnWords(loc) {
     const list = lernbuchEntries(loc).filter(e => e.label !== T('deinZiel'));
@@ -4043,11 +5260,11 @@ function kursPlayer(course, opts) {
     if (fall) row(T('deinFall'), `<p>${esc(fall)}</p>`);
     const sch = [];
     pages.forEach(p => (p.blocks || []).forEach(b => {
-      if (b.type !== 'predict' || b.mode !== 'slider') return;
+      if (b.type !== 'predict' || (b.mode !== 'slider' && b.mode !== 'piktogramm')) return;
       const st = state.self[b.id] || {};
       if (!st.done || typeof st.v !== 'number') return;
-      const u = b.unit ? ' ' + b.unit : '';
-      const q = plainText(b.question || b.title || '');
+      const u = b.mode === 'piktogramm' ? ' ' + pkUnit(b, pkTotal(b)) : b.unit ? ' ' + b.unit : '';
+      const q = plainText(b.question || b.prompt || b.title || '');
       if (b.compareRef) { const f = state.self[b.compareRef] || {}; if (f.done && typeof f.v === 'number') sch.push(`<li><span>${esc(q)}</span><em>${T('wegVorher')} ${f.v}${u} · ${T('wegHeute')} ${st.v}${u}</em></li>`); }
       else if (b.actual != null && b.actual !== '') sch.push(`<li><span>${esc(q)}</span><em>${T('deineSchaetzung')} ${st.v}${u} · ${T('wegWirklich')} ${esc(String(b.actual))}${u}</em></li>`);
     }));
@@ -4071,10 +5288,15 @@ function kursPlayer(course, opts) {
   }
   // Willkommenskarte zum Lernbuch: poppt beim ersten Öffnen über der Startseite auf und erklärt Notizen, Sammeln und Mitnehmen
   const lbwKey = 'kurs-lernbuch-intro-' + (course.id || 'kurs');
+  let lbwWait = false;
   function lbwSeen() { try { return (opts.preview ? sessionStorage : localStorage).getItem(lbwKey) === '1'; } catch (e) { return true; } }
   function lbwMark() { try { (opts.preview ? sessionStorage : localStorage).setItem(lbwKey, '1'); } catch (e) { /* kein Speicher */ } }
+  // Nie zwei Startfenster übereinander: läuft die Bedienhilfe gerade, wartet die Karte, bis sie fertig ist;
+  // erscheint die Karte zuerst, startet die Bedienhilfe erst nach ihrem Schließen (tourAfterLbw)
+  let tourAfterLbw = false;
   function lernbuchWelcome() {
     if (document.querySelector('.kp-lbw')) return;
+    if (document.querySelector('.driver-popover')) { const tm = setTimeout(lernbuchWelcome, 800); mediaTimers.push(tm); return; }
     const rows = [set.notes ? ['pencil', 'lbwNotizT', 'lbwNotiz'] : null, ['book', 'lbwSammeltT', 'lbwSammelt'], ['mail', 'lbwMailT', 'lbwMail']].filter(Boolean);
     const box = document.createElement('div');
     box.className = 'kp-lbw';
@@ -4090,10 +5312,28 @@ function kursPlayer(course, opts) {
       <ul class="kp-lbw-list">${rows.map((r, i) => `<li style="--kp-i:${i}"><span class="kp-lbw-ico">${icon(r[0])}</span><span><strong>${T(r[1])}</strong><span>${T(r[2])}</span></span></li>`).join('')}</ul>
       <div class="kp-lbw-actions"><button type="button" class="kp-btn" data-lbw-close>${T('lbwLos')}</button>${set.notes ? `<button type="button" class="kp-btn kp-sec" data-lbw-notes>${T('lbwProbieren')}</button>` : ''}</div>
       <p class="kp-lbw-where">${icon('menu')} ${T('lbwWo')}</p></div>`;
-    const close = () => { lbwMark(); box.classList.add('out'); document.removeEventListener('keydown', onKey); setTimeout(() => box.remove(), reducedMotion() ? 0 : 250); };
-    const onKey = e => { if (e.key === 'Escape') close(); };
+    // Fokus bleibt in der Karte (UX-Prüfung 07.11.2026, WCAG 2.4.3 und 2.4.11): der Kurs dahinter ist inert, Tab läuft im Kasten im Kreis,
+    // beim Schließen geht der Fokus dorthin zurück, wo er vorher war
+    const opener = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+    const wasInert = root.inert;
+    root.inert = true;
+    const close = tour => {
+      root.inert = wasInert;
+      if (opener && opener.isConnected && box.contains(document.activeElement)) { try { opener.focus({ preventScroll: true }); } catch (e) { /* weg */ } }
+      lbwMark(); box.classList.add('out'); document.removeEventListener('keydown', onKey); setTimeout(() => box.remove(), reducedMotion() ? 0 : 250);
+      if (tourAfterLbw) { tourAfterLbw = false; if (tour !== false && !tourSeen()) { const tm = setTimeout(startTour, reducedMotion() ? 50 : 400); mediaTimers.push(tm); } }
+    };
+    const onKey = e => {
+      if (e.key === 'Escape') return close();
+      if (e.key !== 'Tab') return;
+      const f = [...box.querySelectorAll('button, a[href], input, textarea, select')].filter(x => !x.disabled);
+      if (!f.length) return;
+      const i = f.indexOf(document.activeElement);
+      if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && (i === f.length - 1 || i < 0)) { e.preventDefault(); f[0].focus(); }
+    };
     box.addEventListener('click', e => {
-      if (e.target.closest('[data-lbw-notes]')) { close(); openDrawer('notes'); const ta = root.querySelector('#kp-drawer [data-notes]'); if (ta) ta.focus(); return; }
+      if (e.target.closest('[data-lbw-notes]')) { close(false); openDrawer('notes'); const ta = root.querySelector('#kp-drawer [data-notes]'); if (ta) ta.focus(); return; }
       if (e.target === box || e.target.closest('[data-lbw-close]')) close();
     });
     document.addEventListener('keydown', onKey);
@@ -4152,10 +5392,12 @@ function kursPlayer(course, opts) {
     const nuggets = pages.flatMap(p => (p.blocks || []).filter(kfHasFact)).slice(0, 2).map(x => `${T('kalenderNugget')} ${plainText(x.question)}\n\n\n${T('kalenderAufloesung')}: ${plainText(x.fact)}`);
     // Transferstrecke: jeder Termin ein anderer Impuls (abrufen, anwenden, weitergeben) statt dreimal derselbe Text
     const imp = certImpulses(b);
+    // Kartenstapel mit Fächern: der Termin erinnert daran, den Kurs zu öffnen (die Karten werden über die Tage fällig)
+    const spacedDeck = pages.some(p => (p.blocks || []).some(x => x.type === 'kartenstapel' && x.spaced));
     const descOf = x => {
       const kind = x.kind || (x.text ? '' : 'abruf');
       const head = x.text || (kind === 'anwenden' ? T('impulsAnwenden') : kind === 'teilen' ? T('impulsTeilen') : T('impulsAbruf'));
-      return [head, plan ? `${T('deinVorsatz')}: ${plan}` : '', kind === 'abruf' && fragen.length ? `${T('kalenderFragen')}\n${fragen.join('\n')}` : '', kind === 'anwenden' && nuggets.length ? '\n' + nuggets.join('\n\n') : ''].filter(Boolean).join('\n');
+      return [head, plan ? `${T('deinVorsatz')}: ${plan}` : '', spacedDeck ? T('kalenderFaellig') : '', kind === 'abruf' && fragen.length ? `${T('kalenderFragen')}\n${fragen.join('\n')}` : '', kind === 'anwenden' && nuggets.length ? '\n' + nuggets.join('\n\n') : ''].filter(Boolean).join('\n');
     };
     const ev = (d, sum, desc, i) => `BEGIN:VEVENT\r\nUID:${course.id || 'kurs'}-${b.id}-${i}-${day(d)}@kurs\r\nDTSTAMP:${stamp}\r\nDTSTART;VALUE=DATE:${day(d)}\r\nDTEND;VALUE=DATE:${day(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1))}\r\nSUMMARY:${clean(sum)}\r\nDESCRIPTION:${clean(desc)}\r\nEND:VEVENT`;
     const events = imp.map((x, i) => ev(new Date(start.getFullYear(), start.getMonth(), start.getDate() + (+x.days || 1)), `${x.title || title} (${i + 1}/${imp.length})`, descOf(x), i));
@@ -4207,12 +5449,12 @@ function kursPlayer(course, opts) {
     return `<div class="kp-cert ${motif ? 'kp-cert-motif' : ''}" data-cert="${b.id}">
       ${motif ? `<div class="kp-cert-pic${/\.svg($|\?)|^data:image\/svg/i.test(motif) ? ' kp-cert-drawing' : ''}" aria-hidden="true"><img src="${esc(motif)}" alt="" loading="lazy"></div>` : ''}
       <div class="kp-cert-body">
-      <div class="kp-cert-icon" aria-hidden="true">${icon('trophy', 'kp-ico-lg')}</div>
+      ${b.certIcon === '' ? '' : `<div class="kp-cert-icon" aria-hidden="true">${icon(b.certIcon || 'trophy', 'kp-ico-lg')}</div>`}
       <h2 class="kp-q">${esc(b.title || 'Teilnahmezertifikat')}</h2>
       ${st.ok ? `${learnerName() ? `<p class="kp-cert-name">${esc(learnerName())}</p>` : `<div><input type="text" data-cert-name placeholder="${esc(T('zertName'))}" aria-label="${esc(T('zertName'))}"></div>`}
         ${planCard(b)}
         ${b.anlass ? `<label class="kp-cert-anlass"><span>${esc(T('anlassFrage'))}</span><input type="date" data-cert-anlass="${b.id}" value="${esc(an)}"><small>${esc(T('anlassHinweis'))}</small></label>` : ''}
-        <div class="kp-quiz-actions kp-cert-actions"><button class="kp-btn" data-cert-open="${b.id}">Zertifikat anzeigen und drucken</button>
+        <div class="kp-quiz-actions kp-cert-actions"><button class="kp-btn" data-cert-open="${b.id}">${esc(T('zertDrucken'))}</button>
         ${b.calendar !== false ? `<button class="kp-btn kp-sec" data-cert-ics="${b.id}">${icon('calendar')} ${T('kalenderKnopf')}</button>` : ''}
         ${b.lead ? `<a class="kp-btn kp-sec" data-cert-lead="${b.id}" href="${esc(certLeadMailto(b))}">${icon('mail')}${esc(T('fuehrungKnopf'))}</a>` : ''}</div>
         ${b.calendar !== false ? `<p class="kp-cert-hint">${esc(hint)}</p>` : ''}
@@ -4267,7 +5509,7 @@ function kursPlayer(course, opts) {
         </div>
         <div class="main">${logo}
           <h1>${esc(b.title || 'Teilnahmezertifikat')}</h1>
-          <div class="muted">Hiermit wird bestätigt, dass</div>
+          <div class="muted">${T('zertBestaetigt')}</div>
           <div><span class="name">${esc(name || ' ')}</span></div>
           <div class="muted">den Kurs</div>
           <div class="course-t">${esc(plainTitle(course.title))}</div>
@@ -4347,7 +5589,7 @@ function kursPlayer(course, opts) {
       </article>`;
     }).join('');
     if (b.look === 'ueberblick') return renderUeberblick(b, liste, own, maxOk);
-    const leer = '<p class="kp-lock">Noch keine Kapitel. Kapitel vergibst du in den Seiteneinstellungen.</p>';
+    const leer = '<p class="kp-lock">Noch keine Kapitel. Kapitel vergibst du in den Folieneinstellungen.</p>';
     // Überblick als Startseite (Vorbild bildungsinnovator „ChatGPT Basics“, „Digitale Wissensquellen“): oben Dauer und zwei
     // Fortschrittsringe (gelesen, geübt) mit „Weiter“, darunter die Kapitel als Fotokarten über die ganze Breite
     if (b.look === 'start') {
@@ -4467,12 +5709,33 @@ function kursPlayer(course, opts) {
     </svg>`;
   }
 
+  // Zitat-Animationen gelten in allen Stilen für Kernsätze auf einem Band in der Hauptfarbe oder dunkel (Bewegung nur mit Effekten „hochwertig“)
+  const quoteAnim = b => ['primary', 'dark'].includes((b.design || {}).bg);
+  // Jedes Wort in ein eigenes span (Tags bleiben, also auch das Akzentwort), Verzögerung über --w
+  function qWords(html) {
+    let w = 0;
+    return String(html).split(/(<[^>]+>)/).map(part => (part.startsWith('<') ? part : part.split(/(\s+)/).map(x => (!x || /^\s+$/.test(x) ? x : `<span class="kp-qw" style="--w:${w++}">${x}</span>`)).join(''))).join('');
+  }
   function renderStatement(b) {
     // Stimme mit Foto (Vorbild „Alicia organisiert die Daten“): Foto oben, dunkles Namensschild ragt hinein, das Zitat darunter
     if (b.style === 'foto') return `<div class="kp-statement kp-statement-foto">
       <figure class="kp-st-foto">${b.image && b.image.src ? `<img src="${esc(res(b.image.src))}" alt="${esc(b.image.alt || '')}" loading="lazy"${focusStyle(b.image)}>` : ''}${b.author || b.eyebrow ? `<figcaption class="kp-st-label">${esc(b.eyebrow || b.author)}</figcaption>` : ''}</figure>
       <p class="kp-statement-text">${accent(b.text)}</p>
       ${b.author && b.eyebrow ? `<p class="kp-author">${esc(b.author)}${b.authorRole ? `<span>${esc(b.authorRole)}</span>` : ''}</p>` : (b.authorRole ? `<p class="kp-author"><span>${esc(b.authorRole)}</span></p>` : '')}
+      ${b.sub ? `<div class="kp-text kp-statement-sub">${res(b.sub)}</div>` : ''}
+    </div>`;
+    // Zitatband mit Person (Vorbild Fernhill „No magic words required“): freigestelltes Foto rechts, ragt oben aus dem Band heraus
+    if (b.style === 'person') return `<div class="kp-statement kp-statement-person${b.image && b.image.src ? ' kp-stp-has' : ''}"${quoteAnim(b) ? ' data-quote-in' : ''}>
+      <div class="kp-stp-text">${eyebrow(b.eyebrow)}<p class="kp-statement-text">${quoteAnim(b) ? qWords(accent(b.text)) : accent(b.text)}</p>${b.author ? `<p class="kp-author">${esc(b.author)}${b.authorRole ? `<span>${esc(b.authorRole)}</span>` : ''}</p>` : ''}${b.sub ? `<div class="kp-text kp-statement-sub">${res(b.sub)}</div>` : ''}</div>
+      ${b.image && b.image.src ? `<img class="kp-stp-img" src="${esc(res(b.image.src))}" alt="${esc(b.image.alt || '')}" loading="lazy">` : ''}
+    </div>`;
+    // Zitatband in der Mitte (Vorbild Fernhill): Welle oben, große Anführungszeichen links oben und rechts unten, Text wird scharf,
+    // Marker hinter dem Schlüsselwort, Strich darunter; in allen Stilen auf Hauptfarbe oder dunkel
+    if (quoteAnim(b) && (b.style || 'center') === 'center') return `<div class="kp-statement kp-statement-center kp-fq" data-quote-in>
+      <svg class="kp-fq-wave" viewBox="0 0 1200 72" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path pathLength="1" d="M0 52 C 220 52, 330 14, 560 22 S 900 60, 1200 18"/></svg>
+      <span class="kp-fq-mark kp-fq-open" aria-hidden="true">“</span><span class="kp-fq-mark kp-fq-close" aria-hidden="true">”</span>
+      ${eyebrow(b.eyebrow)}<p class="kp-statement-text">${accent(b.text)}</p><i class="kp-fq-rule" aria-hidden="true"></i>
+      ${b.author ? `<p class="kp-author">${esc(b.author)}${b.authorRole ? `<span>${esc(b.authorRole)}</span>` : ''}</p>` : ''}
       ${b.sub ? `<div class="kp-text kp-statement-sub">${res(b.sub)}</div>` : ''}
     </div>`;
     return `<div class="kp-statement kp-statement-${b.style || 'center'}">
@@ -4607,12 +5870,18 @@ function kursPlayer(course, opts) {
     const items = (b.items || []).filter(x => String(x || '').trim());
     const col = 'var(--kp-primary)', acc = 'var(--kp-accent)';
     const preset = b.preset || 'arrow';
+    // In Schritten (stepwise): jede Stufe trägt data-sw und erscheint erst mit ihrem Schritt; die Verzögerung zählt ab dem Schritt
+    const swN = animStages(b), sw = swN > 0;
+    const swSt = sw ? sbState(b) : null;
+    if (sw && reducedMotion() && !swSt.seen.includes(swSt.at)) swSt.seen.push(swSt.at);
+    const SW = i => (!sw || i >= swN ? '' : ` data-sw="${i}"${i < swSt.at || (i === swSt.at && swSt.seen.includes(i)) ? ' data-sw-on="still"' : ''}`);
+    const dl = (i, per, base) => Math.round(((base || 0) + (sw ? 0 : i * per)) * 100) / 100;
     let art = '';
     if (preset === 'arrow') {
       art = `<svg viewBox="0 0 ${Math.max(300, items.length * 150)} 120" class="kp-anim-svg" aria-hidden="true">
         ${items.map((t, i) => {
           const x = 30 + i * 150;
-          return `<g class="kp-anim-step" style="--d:${i * 0.25}s">
+          return `<g class="kp-anim-step"${SW(i)} style="--d:${dl(i, 0.25)}s">
             <circle cx="${x + 30}" cy="46" r="26" fill="none" stroke="${col}" stroke-width="3" class="kp-draw" pathLength="1"/>
             <text x="${x + 30}" y="53" text-anchor="middle" font-size="20" fill="${col}" font-weight="700">${i + 1}</text>
             ${i < items.length - 1 ? `<path d="M${x + 62} 46 H${x + 132}" stroke="${acc}" stroke-width="3" fill="none" class="kp-draw" pathLength="1" marker-end="url(#kp-arrow)"/>` : ''}
@@ -4622,7 +5891,7 @@ function kursPlayer(course, opts) {
     } else if (preset === 'bars') {
       const vals = items.map((t, i) => Number(String(t).match(/(\d+)/) ? String(t).match(/(\d+)/)[1] : (i + 1) * 25));
       const max = Math.max(1, ...vals);
-      art = `<div class="kp-anim-bars">${items.map((t, i) => `<div class="kp-anim-bar" style="--h:${Math.round(vals[i] / max * 100)}%;--d:${i * 0.15}s"><b>${esc(String(vals[i]))}</b><i></i><span>${esc(String(t).replace(/\s*\d+\s*%?/, '').trim() || 'Wert ' + (i + 1))}</span></div>`).join('')}</div>`;
+      art = `<div class="kp-anim-bars">${items.map((t, i) => `<div class="kp-anim-bar"${SW(i)} style="--h:${Math.round(vals[i] / max * 100)}%;--d:${dl(i, 0.15)}s"><b>${esc(String(vals[i]))}</b><i></i><span>${esc(String(t).replace(/\s*\d+\s*%?/, '').trim() || 'Wert ' + (i + 1))}</span></div>`).join('')}</div>`;
     } else if (preset === 'pulse') {
       art = `<svg viewBox="0 0 120 120" class="kp-anim-svg kp-anim-pulse" aria-hidden="true">
         <circle cx="60" cy="60" r="26" fill="${acc}" opacity=".9"/>
@@ -4630,7 +5899,7 @@ function kursPlayer(course, opts) {
         <circle cx="60" cy="60" r="26" fill="none" stroke="${acc}" stroke-width="3" class="kp-ring kp-ring2" />
         <path d="M60 46v22M60 76v2" stroke="#fff" stroke-width="6" stroke-linecap="round"/></svg>`;
     } else if (preset === 'check') {
-      art = `<ul class="kp-anim-check">${items.map((t, i) => `<li style="--d:${i * 0.2}s"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5" fill="none" stroke="${col}" stroke-width="3" stroke-linecap="round" class="kp-draw" pathLength="1"/></svg><span>${esc(t)}</span></li>`).join('')}</ul>`;
+      art = `<ul class="kp-anim-check">${items.map((t, i) => `<li${SW(i)} style="--d:${dl(i, 0.2)}s"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5" fill="none" stroke="${col}" stroke-width="3" stroke-linecap="round" class="kp-draw" pathLength="1"/></svg><span>${esc(t)}</span></li>`).join('')}</ul>`;
     } else if (preset === 'compare') {
       art = `<div class="kp-anim-compare"><div class="kp-anim-side"><span>${esc(items[0] || 'Vorher')}</span></div><div class="kp-anim-morph">→</div><div class="kp-anim-side after"><span>${esc(items[1] || 'Nachher')}</span></div></div>`;
     } else if (preset === 'matrix') {
@@ -4641,7 +5910,7 @@ function kursPlayer(course, opts) {
         <line x1="34" y1="300" x2="34" y2="14" stroke="currentColor" stroke-width="2" opacity=".3"/>
         ${q.map((t, i) => {
           const [x, y] = pos[i], ls = wrapLines(t, 20), top = i === 1;
-          return `<g class="kp-anim-step" style="--d:${i * 0.18}s">
+          return `<g class="kp-anim-step"${SW(i)} style="--d:${dl(i, 0.18)}s">
             <rect x="${x}" y="${y}" width="176" height="124" rx="10" fill="${top ? acc : col}" fill-opacity="${top ? '.18' : '.08'}" stroke="${top ? acc : 'none'}" stroke-width="2"/>
             <text x="${x + 88}" y="${y + 66}" text-anchor="middle" font-size="15" font-weight="600" fill="currentColor">${ls.map((l, k) => `<tspan x="${x + 88}" dy="${k ? 19 : (ls.length > 1 ? -9 : 0)}">${esc(l)}</tspan>`).join('')}</text></g>`;
         }).join('')}
@@ -4666,14 +5935,14 @@ function kursPlayer(course, opts) {
       art = `<svg viewBox="0 0 480 400" class="kp-anim-svg" aria-hidden="true">
         ${list.map((t, i) => {
           const e = ang(i + 1) - gap, [ax, ay] = pt(ang(i) + gap, R), [bx, by] = pt(e, R);
-          const rot = Math.round(Math.atan2(Math.cos(e), -Math.sin(e)) * 180 / Math.PI), d = 0.2 + i * 0.28;
-          return `<path d="M${ax} ${ay} A${R} ${R} 0 0 1 ${bx} ${by}" fill="none" stroke="${acc}" stroke-width="3" class="kp-draw" pathLength="1" style="--d:${d}s"/>
-            <g class="kp-anim-step" style="--d:${d + 0.7}s"><path d="M-7 -6 L4 0 L-7 6z" fill="${acc}" transform="translate(${bx} ${by}) rotate(${rot})"/></g>`;
+          const rot = Math.round(Math.atan2(Math.cos(e), -Math.sin(e)) * 180 / Math.PI), d = dl(i, 0.28, 0.2);
+          return `<path d="M${ax} ${ay} A${R} ${R} 0 0 1 ${bx} ${by}" fill="none" stroke="${acc}" stroke-width="3" class="kp-draw" pathLength="1"${SW(i)} style="--d:${d}s"/>
+            <g class="kp-anim-step"${SW(i)} style="--d:${Math.round((d + 0.7) * 100) / 100}s"><path d="M-7 -6 L4 0 L-7 6z" fill="${acc}" transform="translate(${bx} ${by}) rotate(${rot})"/></g>`;
         }).join('')}
         ${list.map((t, i) => {
           const c = Math.cos(ang(i)), side = Math.abs(c) > 0.3, anchor = side ? (c > 0 ? 'start' : 'end') : 'middle';
           const [x, y] = pt(ang(i), R), [lx, ly] = pt(ang(i), side ? 134 : 146), ls = wrapLines(t, side ? 12 : 18);
-          return `<g class="kp-anim-step" style="--d:${i * 0.28}s">
+          return `<g class="kp-anim-step"${SW(i)} style="--d:${dl(i, 0.28)}s">
             <circle cx="${x}" cy="${y}" r="26" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="2"/>
             <text x="${x}" y="${y + 6}" text-anchor="middle" font-size="17" font-weight="700" fill="currentColor">${i + 1}</text>
             <text x="${lx}" y="${ly + 5}" text-anchor="${anchor}" font-size="13" fill="currentColor">${ls.map((l, k) => `<tspan x="${lx}" dy="${k ? 16 : (ls.length > 1 ? -8 : 0)}">${esc(l)}</tspan>`).join('')}</text></g>`;
@@ -4685,8 +5954,8 @@ function kursPlayer(course, opts) {
         <line x1="20" y1="248" x2="420" y2="248" stroke="currentColor" stroke-width="2" opacity=".3"/>
         ${list.map((t, i) => {
           const h = Math.round((i + 1) / n * 190), x = 20 + i * w, last = i === n - 1;
-          return `<rect class="kp-anim-riser" style="--d:${i * 0.22}s" x="${x + 4}" y="${248 - h}" width="${w - 8}" height="${h}" rx="6" fill="${last ? acc : col}" fill-opacity="${last ? '.8' : '.14'}"/>
-            <text class="kp-anim-step" style="--d:${0.15 + i * 0.22}s" x="${x + w / 2}" y="${238 - h}" text-anchor="middle" font-size="13" fill="currentColor">${esc(String(t).slice(0, 18))}</text>`;
+          return `<rect class="kp-anim-riser"${SW(i)} style="--d:${dl(i, 0.22)}s" x="${x + 4}" y="${248 - h}" width="${w - 8}" height="${h}" rx="6" fill="${last ? acc : col}" fill-opacity="${last ? '.8' : '.14'}"/>
+            <text class="kp-anim-step"${SW(i)} style="--d:${dl(i, 0.22, 0.15)}s" x="${x + w / 2}" y="${238 - h}" text-anchor="middle" font-size="13" fill="currentColor">${esc(String(t).slice(0, 18))}</text>`;
         }).join('')}</svg>`;
     } else if (preset === 'curve') {
       const zones = items.slice(0, 3), zx = [110, 223, 350];
@@ -4716,15 +5985,16 @@ function kursPlayer(course, opts) {
         const m = String(t).match(/^([^:]{1,24}):\s*([\s\S]+)$/), who = m ? m[1].trim() : '', txt = m ? m[2] : String(t);
         if (who && first == null) first = who;
         const mine = who && who !== first;
-        return `<div class="kp-msg${mine ? ' kp-msg-me' : ''}" style="--d:${i * 1.2}s">${who ? `<small>${esc(who)}</small>` : ''}<div class="kp-msg-bubble"><span class="kp-msg-typing" aria-hidden="true"><i></i><i></i><i></i></span><p>${esc(txt)}</p></div></div>`;
+        return `<div class="kp-msg${mine ? ' kp-msg-me' : ''}"${SW(i)} style="--d:${dl(i, 1.2)}s">${who ? `<small>${esc(who)}</small>` : ''}<div class="kp-msg-bubble"><span class="kp-msg-typing" aria-hidden="true"><i></i><i></i><i></i></span><p>${esc(txt)}</p></div></div>`;
       }).join('')}</div></div>`;
     } else {
       art = `<div class="kp-anim-count" data-count-to="${esc(String(items[0] || '100').replace(/\D/g, '') || '100')}"><b>0</b><span>${esc(b.unit || '')}</span></div>`;
     }
-    return `<figure class="kp-anim kp-anim-${preset}" data-anim>
+    const fig = `<figure class="kp-anim kp-anim-${preset}${sw ? ' kp-anim-sw' : ''}" data-anim>
       ${b.title ? `<figcaption class="kp-anim-title">${accent(b.title)}</figcaption>` : ''}
       ${art}
       ${b.caption ? `<p class="kp-caption">${esc(b.caption)}</p>` : ''}</figure>`;
+    return sw ? `<div class="kp-anim-steps" data-steps-of="${b.id}">${fig}${stepBarHtml(b)}</div>` : fig;
   }
 
   // Motion-Zeitleiste: zeitgesteuerte Einblendungen mit Abspielen und Pause
@@ -4745,8 +6015,85 @@ function kursPlayer(course, opts) {
       </div></div>`;
   }
 
+  // Schätzen mit Piktogrammen (Vorbild Articulate-Challenge „Snapshots“): erst Symbole einfärben, dann färben sich die echten Werte.
+  // Technisch ein Regler mit einem Tabstopp (role="slider"); die Symbole selbst sind nicht fokussierbar.
+  const PK_TOTALS = [10, 20, 50, 100];
+  const pkTotal = b => (PK_TOTALS.includes(Number(b.total)) ? Number(b.total) : 10);
+  const pkNum = v => { const s = String(v == null ? '' : v).replace(',', '.').replace(/[^\d.-]/g, ''); return s.trim() === '' ? NaN : Number(s); };
+  const pkRound = v => Math.round(v * 10) / 10;
+  const pkUnit = (b, n) => (b.unit && String(b.unit).trim() && String(b.unit).trim() !== '%' ? String(b.unit).trim() : `${T('von')} ${n}`);
+  const pkLabel = (b, v, n) => `${fmtNum(pkRound(v))} ${pkUnit(b, n)}`;
+  let pkFresh = ''; // gerade festgelegt: nur dann färben sich die echten Werte gestaffelt ein
+  function pkCells(b, n, fill) {
+    const ic = icon(b.icon && ICONS[b.icon] ? b.icon : 'user');
+    let h = '';
+    for (let k = 0; k < n; k++) {
+      const f = Math.max(0, Math.min(1, fill - k));
+      h += `<span class="kp-pk-cell${f >= 0.999 ? ' on' : f > 0 ? ' part' : ''}" data-pk-i="${k}" style="--i:${k}${f > 0 && f < 0.999 ? `;--f:${Math.round(f * 100)}%` : ''}">${ic}</span>`;
+    }
+    return h;
+  }
+  const pkGrid = (b, n, fill, cls, label) => `<div class="kp-pk-grid ${cls}" role="img" aria-label="${esc(label)}" style="--pk-cols:${Math.min(10, n)}">${pkCells(b, n, fill)}</div>`;
+  function pkRow(b, n, v, label, cls) {
+    return `<div class="kp-pk-row"><p class="kp-pk-rowhead"><span class="kp-label">${esc(label)}</span><b>${esc(pkLabel(b, v, n))}</b></p>${pkGrid(b, n, v, cls, label + ': ' + pkLabel(b, v, n))}</div>`;
+  }
+  function pkSet(g, v) {
+    const n = Number(g.getAttribute('aria-valuemax')) || 10;
+    v = Math.max(0, Math.min(n, Math.round(v)));
+    const b = findBlock(g.dataset.pkSlider);
+    g.setAttribute('aria-valuenow', v);
+    g.setAttribute('aria-valuetext', pkLabel(b || {}, v, n));
+    g.setAttribute('data-pk-touched', '');
+    g.classList.remove('kp-pk-missing');
+    g.querySelectorAll('[data-pk-i]').forEach(c => c.classList.toggle('on', Number(c.dataset.pkI) < v));
+    const box = g.closest('[data-predict]');
+    const out = box && box.querySelector('[data-pk-out]');
+    if (out) out.textContent = pkLabel(b || {}, v, n);
+    const miss = box && box.querySelector('[data-pk-miss]');
+    if (miss) miss.hidden = true;
+  }
+  function renderPredictPicto(b, st) {
+    const n = pkTotal(b);
+    const head = `<p class="kp-eyebrow">${iconOr(b.eyebrowIcon, 'bulb')} ${esc(b.eyebrow || T('denkpause'))}</p><p class="kp-q" id="pkq-${b.id}">${accent(b.prompt)}</p>`;
+    if (!st.done) {
+      const v = typeof st.v === 'number' ? Math.max(0, Math.min(n, st.v)) : 0;
+      return `<div class="kp-predict kp-predict-pk" data-predict="${b.id}">${head}
+        <div class="kp-pk-grid kp-pk-input" role="slider" tabindex="0" data-pk-slider="${b.id}" aria-labelledby="pkq-${b.id}" aria-valuemin="0" aria-valuemax="${n}" aria-valuenow="${v}" aria-valuetext="${esc(pkLabel(b, v, n))}" style="--pk-cols:${Math.min(10, n)}">${pkCells(b, n, v)}</div>
+        <p class="kp-pk-val" aria-hidden="true">${T('deineSchaetzung')}: <b data-pk-out>${esc(pkLabel(b, v, n))}</b></p>
+        <p class="kp-pk-help">${T('pkHilfe')}</p>
+        <p class="kp-pk-miss" data-pk-miss role="alert" hidden>${T('pkWaehlen')}</p>
+        <div class="kp-quiz-actions"><button class="kp-btn" data-predict-go="${b.id}">${esc(b.revealLabel || T('festlegen'))}</button></div>
+      </div>`;
+    }
+    const v = Math.max(0, Math.min(n, Number(st.v) || 0));
+    const a = pkNum(b.actual), hasA = isFinite(a);
+    const first = b.compareRef ? (state.self[b.compareRef] || {}) : {};
+    const then = first.done && typeof first.v === 'number' ? Math.max(0, Math.min(n, first.v)) : null;
+    const anim = pkFresh === b.id && !reducedMotion();
+    pkFresh = '';
+    let diff = '';
+    if (hasA) {
+      const d = pkRound(v - Math.max(0, Math.min(n, a)));
+      diff = `<p class="kp-pk-diff" data-pk-diff>${Math.abs(d) < 0.05 ? T('pkGenau') : (d > 0 ? T('pkHoch') : T('pkTief')).replace('{n}', fmtNum(Math.abs(d)))}</p>`;
+    }
+    return `<div class="kp-predict kp-predict-pk" data-predict="${b.id}">${head}
+      <div class="kp-predict-reveal" role="status" tabindex="-1">
+        <div class="kp-pk-rows">
+          ${then != null ? pkRow(b, n, then, T('amAnfang'), 'kp-pk-mine kp-pk-then') : ''}
+          ${pkRow(b, n, v, then != null ? T('heute') : T('deineSchaetzung'), 'kp-pk-mine')}
+          ${hasA ? pkRow(b, n, Math.max(0, Math.min(n, a)), b.actualLabel || T('tatsaechlich'), 'kp-pk-real' + (anim ? ' kp-pk-anim' : '')) : ''}
+        </div>
+        ${hasA ? `<p class="kp-pk-legend" aria-hidden="true"><span><i class="kp-pk-key kp-pk-key-mine"></i>${T('pkLegendeDu')}</span><span><i class="kp-pk-key kp-pk-key-real"></i>${esc(T('pkLegendeReal').replace('{x}', String(b.actualLabel || T('tatsaechlich')).toLowerCase()))}</span></p>` : ''}
+        ${diff}
+        <div class="kp-text">${res(b.reveal)}</div>
+        ${b.source ? `<p class="kp-pk-src">${T('quelle')}: ${esc(b.source)}</p>` : ''}
+      </div>
+    </div>`;
+  }
+
   function renderPredict(b) {
     const st = state.self[b.id] || {};
+    if (b.mode === 'piktogramm') return renderPredictPicto(b, st);
     let input = '';
     if (b.mode === 'choice') {
       input = `<div class="kp-answers">${(b.options || []).map((o, i) => `<label class="kp-answer ${st.done && st.v === i ? 'kp-chosen' : ''}"><input type="radio" name="pr-${b.id}" value="${i}" ${st.v === i ? 'checked' : ''} ${st.done ? 'disabled' : ''}><span>${esc(o)}</span></label>`).join('')}</div>`;
@@ -4775,7 +6122,7 @@ function kursPlayer(course, opts) {
       const hits = all.filter(x => Number(x.actual) >= state.self[x.id].v[0] && Number(x.actual) <= state.self[x.id].v[1]).length;
       const u = b.unit ? ' ' + esc(b.unit) : '';
       return `<div class="kp-predict" data-predict="${b.id}">
-        <p class="kp-eyebrow">${icon('bulb')} ${esc(b.eyebrow || 'Denkpause')}</p>
+        <p class="kp-eyebrow">${iconOr(b.eyebrowIcon, 'bulb')} ${esc(b.eyebrow || T('denkpause'))}</p>
         <p class="kp-q">${accent(b.prompt)}</p>
         <div class="kp-predict-reveal" role="status">
           <p class="kp-range-verdict ${hit ? 'ok' : 'no'}">${hit ? T('bereichDrin') : T('bereichDaneben')}</p>
@@ -4807,7 +6154,7 @@ function kursPlayer(course, opts) {
       </div>`;
     }
     return `<div class="kp-predict" data-predict="${b.id}">
-      <p class="kp-eyebrow">${icon('bulb')} ${esc(b.eyebrow || 'Denkpause')}</p>
+      <p class="kp-eyebrow">${iconOr(b.eyebrowIcon, 'bulb')} ${esc(b.eyebrow || T('denkpause'))}</p>
       <p class="kp-q">${accent(b.prompt)}</p>
       ${input}
       ${st.done ? `<div class="kp-predict-reveal" role="status">
@@ -4821,14 +6168,14 @@ function kursPlayer(course, opts) {
     // recall: erst überlegen, dann aufdecken (Abrufen statt Lesen, Roediger & Karpicke 2006); Stand in state.self[id].open
     const items = b.items || [];
     // Zeilen (Vorbild Rise „Kurz zusammengefasst“): je Kernaussage eine getönte Zeile mit Pfeil im Kreis, ohne Aufdecken
-    if (b.look === 'zeilen') return `<div class="kp-takeaways kp-tk-zeilen" data-takeaways="${b.id}">${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}<ul class="kp-tk-rows">${items.map((it, i) => `<li class="fx-reveal" style="--kp-i:${i}"><span class="kp-tk-arrow" aria-hidden="true">${icon('arrow')}</span><div>${it.title ? `<strong>${esc(it.title)}</strong>` : ''}${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}</div></li>`).join('')}</ul>${b.print === true ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tk-print="${b.id}">${icon('book')} Als Merkkarte drucken oder speichern</button></div>` : ''}</div>`;
+    if (b.look === 'zeilen') return `<div class="kp-takeaways kp-tk-zeilen" data-takeaways="${b.id}">${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}<ul class="kp-tk-rows">${items.map((it, i) => `<li class="fx-reveal" style="--kp-i:${i}"><span class="kp-tk-arrow" aria-hidden="true">${icon('arrow')}</span><div>${it.title ? `<strong>${esc(it.title)}</strong>` : ''}${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}</div></li>`).join('')}</ul>${b.print === true ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tk-print="${b.id}">${icon('book')} ${esc(T('tkDrucken'))}</button></div>` : ''}</div>`;
     const open = b.recall ? ((state.self[b.id] || {}).open || []) : null;
     const body = it => (plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : '');
     return `<div class="kp-takeaways ${b.recall ? 'kp-tk-recall' : ''}" data-takeaways="${b.id}">
       ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
       ${b.recall ? `<p class="kp-tk-hint" data-tk-status>${esc(T('aufdeckenHinweis'))} <b>${esc(T('aufgedeckt').replace('{n}', open.length).replace('{z}', items.length))}</b></p>` : ''}
       <ol class="kp-tk-list">${items.map((it, i) => `<li class="fx-reveal ${open && !open.includes(i) ? 'kp-tk-closed' : ''}"><span class="kp-tk-num" aria-hidden="true">${i + 1}</span><div><h3>${esc(it.title)}</h3>${open && !open.includes(i) ? (plainText(it.html) ? `<button class="kp-btn kp-sec kp-tk-open" data-tk-open="${i}" aria-expanded="false">${T('aufdecken')}</button>` : '') : body(it)}</div></li>`).join('')}</ol>
-      ${b.print !== false ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tk-print="${b.id}">${icon('book')} Als Merkkarte drucken oder speichern</button></div>` : ''}
+      ${b.print !== false ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tk-print="${b.id}">${icon('book')} ${esc(T('tkDrucken'))}</button></div>` : ''}
     </div>`;
   }
 
@@ -4846,7 +6193,7 @@ function kursPlayer(course, opts) {
     // Eingeklappt: Quellen werden selten gelesen und machen sonst jede Seite laenger; eine Fussnote klappt sie auf
     const list = (b.items || []).filter(s => String(s).trim());
     return `<details class="kp-sources">
-      <summary class="kp-sources-title">${esc(b.title || 'Quellen')} (${list.length})</summary>
+      <summary class="kp-sources-title">${esc(b.title || T('quellenTitel'))} (${list.length})</summary>
       <ol>${list.map((s, i) => `<li id="kp-src-${i + 1}" tabindex="-1">${esc(s).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')}</li>`).join('')}</ol>
     </details>`;
   }
@@ -4881,7 +6228,11 @@ function kursPlayer(course, opts) {
     state.toasted = state.toasted || {};
     if (state.toasted[prev.chapter]) return;
     state.toasted[prev.chapter] = true;
+    // Wer eine Lernkarte verlässt, hat kein Kapitel geschafft: die Karte ist der Ausgangspunkt, nicht ein Kapitel
+    if ((prev.blocks || []).some(b => b.type === 'hotspots' && b.map)) return;
     uiSound('kapitel');
+    // Zurück auf einer Lernkarte mit Begleitfigur: die Figur sagt, was geschafft ist und was kommt, der Pin federt; keine zweite Karte darüber
+    if ((cur.blocks || []).some(b => b.type === 'hotspots' && b.map && b.mapGuide && (b.mapGuide.castId || b.mapGuide.name || (b.mapGuide.image && b.mapGuide.image.src)))) return;
     if (set.milestone !== 'kurz') return milestoneCard(prev.chapter);
     const t = document.createElement('div');
     t.className = 'kp-toast';
@@ -4941,7 +6292,7 @@ function kursPlayer(course, opts) {
   }
   // Fehlt die Videodatei, steht der Sprechtext da; in der Vorschau mit dem Hinweis „Video folgt“
   function videoDummy(say, poster, cls) {
-    if (!plainText(say)) return `<div class="kp-photo-empty ${cls || ''}">${icon('play')}<span>Noch kein Video</span></div>`;
+    if (!plainText(say)) return `<div class="kp-photo-empty ${cls || ''}">${icon('play')}<span>${esc(T('nochKeinVideo'))}</span></div>`;
     return `<div class="kp-video-dummy ${cls || ''}">${poster ? `<img src="${esc(res(poster))}" alt="">` : ''}<div class="kp-vd-in"><span class="kp-vd-lb">${icon('play')} ${T(opts.preview ? 'videoFolgt' : 'sprechtext')}</span>
       <blockquote>„${esc(plainText(say))}“</blockquote>${opts.preview ? `<small>${T('videoFolgtHinweis')}</small>` : ''}</div></div>`;
   }
@@ -4960,7 +6311,7 @@ function kursPlayer(course, opts) {
         const media = p.image && p.image.src ? `<img loading="lazy" decoding="async" src="${esc(res(p.image.src))}" alt="${esc(p.image.alt || p.name || '')}"${focusStyle(p.image)}>${p.image.ai ? `<span class="kp-ai-badge">${T('kiBild')}</span>` : ''}` : avatarSvg(p.look || 'a1', p.pose, true);
         const who = `${esc(p.name || '')}${p.role ? ', ' + esc(p.role) : ''}`;
         return `<div class="kp-voice fx-reveal" style="--kp-i:${i}"><div class="kp-voice-media kp-voice-b${i % 3}">${media}</div>
-          <div class="kp-voice-box">${m.audio ? guideAudio({ id: b.id + '-' + i, audio: m.audio }, T('anhoerenName') + ': ' + name, true) : `<p class="kp-voice-who">${who}</p>`}
+          <div class="kp-voice-box">${m.audio ? guideAudio({ id: b.id + '-' + i, audio: m.audio, audioAi: m.audioAi }, T('anhoerenName') + ': ' + name, true) : `<p class="kp-voice-who">${who}</p>`}
             ${plainText(p.html) ? `<details class="kp-person-more kp-voice-read"><summary><span>${esc(T('zumNachlesen'))}${m.audio && p.name ? `<span class="kp-sr">: ${esc(name)}</span>` : ''}</span><span class="kp-person-plus" aria-hidden="true"></span></summary><div class="kp-text">${res(p.html)}</div></details>` : ''}</div></div>`;
       }).join('');
       return `<div class="kp-team kp-team-voice">
@@ -5106,15 +6457,26 @@ function kursPlayer(course, opts) {
     return `<div class="kp-bn-ask" data-bn-ask="${b.id}">
       <p class="kp-bn-q" id="${qid}">${esc(plainText(a.question))}</p>
       <div class="kp-bn-opts" role="radiogroup" aria-labelledby="${qid}">${opts.map((o, i) => `<label class="kp-bn-opt"><input type="radio" name="bn-${b.id}" value="${i}"${v === i ? ' checked' : ''}${v != null ? ' disabled' : ''}><span>${esc(plainText(o.text))}</span></label>`).join('')}</div>
-      ${v == null ? `<div class="kp-bn-act"><button type="button" class="kp-btn kp-bn-ok" data-bn-ok="${b.id}" disabled>${esc(a.button || 'OK')} <span aria-hidden="true">›</span></button></div>`
+      ${v == null ? `<div class="kp-bn-act"><button type="button" class="kp-btn kp-bn-ok" data-bn-ok="${b.id}" disabled>${esc(a.button || T('okKnopf'))} <span aria-hidden="true">›</span></button></div>`
         : `<p class="kp-bn-reply" data-bn-reply role="status">${esc(reply || T('danke'))}</p>`}
     </div>`;
   }
+  // Große Zahl als Piktogramm: derselbe Anteil als gefüllte Symbole neben der Zahl (Prozent oder Anzahl von total)
+  function bnPicto(b) {
+    if (b.look !== 'piktogramm') return '';
+    const n = pkTotal(b);
+    let v = pkNum(b.value);
+    if (!isFinite(v)) return '';
+    if (/%/.test(String(b.unit || '') + String(b.value || ''))) v = v / 100 * n;
+    v = Math.max(0, Math.min(n, v));
+    return pkGrid(b, n, v, 'kp-pk-real kp-bn-pk', `${fmtNum(pkRound(v))} ${T('von')} ${n}`);
+  }
   function renderBignumber(b) {
     const style = b.image && b.image.src ? ` style="background-image:linear-gradient(rgba(12,18,28,.72),rgba(12,18,28,.72)),url('${esc(res(b.image.src))}')"` : '';
-    return `<div class="kp-bignum ${b.image && b.image.src ? 'kp-bignum-photo' : ''}${b.look === 'leuchten' ? ' kp-bignum-glow' : ''}${bnAsk(b) ? ' kp-bignum-hasask' : ''}"${style}>
+    return `<div class="kp-bignum ${b.image && b.image.src ? 'kp-bignum-photo' : ''}${b.look === 'leuchten' ? ' kp-bignum-glow' : ''}${bnPicto(b) ? ' kp-bignum-pk' : ''}${bnAsk(b) ? ' kp-bignum-hasask' : ''}"${style}>
       ${eyebrow(b.eyebrow)}
-      <p class="kp-bignum-value"><span>${esc(b.value || '')}</span>${b.unit ? `<em>${esc(b.unit)}</em>` : ''}</p>
+      ${bnPicto(b) ? `<div class="kp-bn-pkrow"><p class="kp-bignum-value"><span>${esc(b.value || '')}</span>${b.unit ? `<em>${esc(b.unit)}</em>` : ''}</p>${bnPicto(b)}</div>`
+        : `<p class="kp-bignum-value"><span>${esc(b.value || '')}</span>${b.unit ? `<em>${esc(b.unit)}</em>` : ''}</p>`}
       ${b.html ? `<div class="kp-text kp-bignum-text">${res(b.html)}</div>` : ''}
       ${bnAskHtml(b)}
       ${b.source ? `<p class="kp-bignum-source">${esc(b.source)}</p>` : ''}</div>`;
@@ -5123,18 +6485,331 @@ function kursPlayer(course, opts) {
   // Punkte im Bild: Stellen zum Erkunden (ohne Bewertung)
   // Suchbild-Runden: gleiches Format, je Runde ein neues Bild mit neuen Stellen (Kernschleife). Stand je Runde in st.rs[r], die Runde in st.r.
   function hsRound(b, st) {
-    const rounds = (b.rounds || []).filter(x => x && x.image && x.image.src);
+    const rounds = b.panorama ? [] : (b.rounds || []).filter(x => x && x.image && x.image.src);
     if (!rounds.length) return { R: 0, r: -1, list: b.points || [], img: b.image && b.image.src, seen: st.seen || {}, hint: b.hint };
     const r = Math.min(Math.max(0, Number(st.r) || 0), rounds.length - 1);
     return { R: rounds.length, r, list: rounds[r].points || [], img: rounds[r].image.src, seen: ((st.rs || {})[r]) || {}, hint: rounds[r].hint || b.hint };
   }
   function hsMarkSeen(b, st, i, v) {
     const rd = hsRound(b, st);
-    if (!rd.R) return { v, seen: Object.assign({}, st.seen, { [i]: true }), r: st.r, rs: st.rs };
+    // Punkt mit offener Vermutung: öffnen ja, gesehen erst nach der Vermutung (g und all bleiben im Stand)
+    const keep = { g: st.g, all: st.all };
+    if (rd.list[i] && !rd.list[i].target && !b.map && guessPending(b, hsGKey(rd, i), rd.list[i])) return Object.assign({}, st, { v });
+    if (!rd.R) return Object.assign(keep, { v, seen: Object.assign({}, st.seen, { [i]: true }), r: st.r, rs: st.rs });
     const rs = Object.assign({}, st.rs); rs[rd.r] = Object.assign({}, rs[rd.r], { [i]: true });
-    return { v, r: rd.r, rs };
+    return Object.assign(keep, { v, r: rd.r, rs });
+  }
+  const mgShut = {}; // Begleitfigur auf der Karte: zugeklappt bis sie etwas Neues sagt
+
+  // ---------- 360°-Rundgang (hotspots.panorama, Webanalyse 29.10.2026, Empfehlung 9) ----------
+  // Rundumfoto im 2 : 1-Format (equirektangular) als Zylinder ohne WebGL: der Ausschnitt zeigt rund 90° (am Handy 70°),
+  // das Bild liegt als Hintergrund mit repeat-x darunter, deshalb läuft die Ansicht über 0/360° ohne Sprung weiter.
+  // Senkrecht nur ±15 % der Bildhöhe. Punkte: x in % der vollen 360°, y in % der Höhe; außerhalb des Ausschnitts hidden
+  // (also nicht fokussierbar). Die Leiste „Punkte im Raum“ erreicht jeden Punkt ohne Drehen. Blickrichtung je Block in
+  // panoView (nicht im Lernstand), damit sie beim Neuzeichnen nach einem Klick bleibt; gesehene Punkte wie bei hotspots in st.seen.
+  const panoView = {};
+  let panoDragged = false, panoWired = false;
+  const panoNorm = a => ((Number(a) || 0) % 360 + 360) % 360;
+  const panoYawOf = pt => panoNorm((Number(pt.x) || 0) * 3.6);
+  const panoPitchOf = pt => Math.max(-0.15, Math.min(0.15, (Number(pt.y) || 50) / 100 - 0.5));
+  function panoState(b) { return panoView[b.id] || (panoView[b.id] = { yaw: panoNorm(b.start), pitch: 0, ar: 2 }); }
+  const panoDoor = pt => (pt && pt.target ? pageIndexById(pt.target) : -1);
+  function panoStops(b) { const list = b.points || []; return list.map((pt, i) => i).filter(i => panoDoor(list[i]) < 0); }
+  function panoCountText(b) {
+    const stops = panoStops(b), seen = (state.self[b.id] || {}).seen || {};
+    return T('panoStand').replace('{n}', stops.filter(i => seen[i]).length).replace('{m}', stops.length);
+  }
+  // ohne Bild oder bei Ladefehler stehen alle Erklärungen als Liste da; dann gilt jeder Punkt als gesehen
+  function panoSeenAll(b) {
+    const st = state.self[b.id] || {}, seen = Object.assign({}, st.seen);
+    panoStops(b).forEach(i => { seen[i] = true; });
+    state.self[b.id] = Object.assign({}, st, { seen });
+  }
+  function renderHsPano(b) {
+    const list = b.points || [];
+    const st = state.self[b.id] || {};
+    const open = st.v;
+    const seen = st.seen || {};
+    const mode = b.mode === 'popover' ? 'popover' : 'karte';
+    const marker = b.marker === 'nummer' ? 'nummer' : 'punkt';
+    const src = b.image && b.image.src ? res(b.image.src) : '';
+    const done = (pt, i) => { const d = panoDoor(pt); return d >= 0 ? state.visited.has(d) : !!seen[i]; };
+    const stops = panoStops(b);
+    const cur = open != null && list[open] && panoDoor(list[open]) < 0 ? list[open] : null;
+    const uid = 'pano-' + String(b.id).replace(/\W/g, '_');
+    const head = b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : '';
+    const name = (pt, i) => pt.title || T('panoPunkt').replace('{n}', i + 1);
+    const fallback = `<ul class="kp-pano-fb">${list.map((pt, i) => panoDoor(pt) >= 0
+      ? `<li class="kp-pano-fb-door"><button type="button" class="kp-btn kp-sec" data-hs="${b.id}" data-i="${i}">${esc(name(pt, i))} →</button></li>`
+      : `<li><h3>${esc(name(pt, i))}</h3><div class="kp-text">${res(pt.html || '')}</div></li>`).join('')}</ul>`;
+    if (!src) {
+      panoSeenAll(b);
+      return `<div class="kp-pano kp-pano-failed" data-hotspots="${b.id}" data-pano="${b.id}">${head}
+        <p class="kp-pano-note">${esc(T('panoOhneBild'))}</p>${fallback}
+        ${stops.length ? `<p class="kp-pano-count" data-pano-count aria-live="polite">${esc(panoCountText(b))}</p>` : ''}</div>`;
+    }
+    const dots = list.map((pt, i) => {
+      const door = panoDoor(pt) >= 0, isOpen = !door && open === i, ok = done(pt, i);
+      const sign = door ? (ok ? '✓' : '→') : marker === 'nummer' ? String(i + 1) : (isOpen ? '×' : '+');
+      return `<button type="button" class="kp-hs-dot kp-pano-dot kp-hs-m-${marker}${isOpen ? ' open' : ''}${ok ? ' seen' : ''}${door ? ' kp-hs-door' : ''}" data-hs="${b.id}" data-i="${i}" data-pano-x="${Number(pt.x) || 0}" data-pano-y="${Number(pt.y) || 50}" hidden ${door ? '' : `aria-expanded="${isOpen}"`} aria-label="${esc(name(pt, i))}${door ? ', ' + esc(T('panoTuer')) + (ok ? ', ' + esc(T('besucht')) : '') : ''}">${sign}</button>`;
+    }).join('');
+    const ask = cur && guessPending(b, String(open), cur);
+    const body = cur ? (ask ? `${cur.title ? `<h3>${esc(cur.title)}</h3>` : ''}${guessAskHtml(b, String(open), cur)}`
+      : `${cur.image && cur.image.src ? `<img loading="lazy" decoding="async" class="kp-hs-detail" src="${esc(res(cur.image.src))}" alt="${esc(cur.image.alt || '')}">` : ''}${cur.title ? `<h3>${esc(cur.title)}</h3>` : ''}${guessResHtml(b, String(open), cur)}<div class="kp-text">${res(cur.html || '')}</div>`) : '';
+    const pop = cur && mode === 'popover' ? `<div class="kp-hs-pop kp-pano-pop${ask ? ' kp-hs-ask' : ''}" data-pano-pop="${open}" hidden${ask ? '' : ' role="status"'}>${body}</div>` : '';
+    const info = cur && mode !== 'popover' ? `<div class="kp-hs-info kp-pano-info${ask ? ' kp-hs-ask' : ''}"${ask ? '' : ' role="status"'}>${body}</div>` : '';
+    const chips = list.map((pt, i) => {
+      const door = panoDoor(pt) >= 0, ok = done(pt, i);
+      return `<li><button type="button" class="kp-pano-go${ok ? ' is-seen' : ''}${open === i && !door ? ' is-open' : ''}${door ? ' is-door' : ''}" data-pano-go="${b.id}" data-i="${i}">${door ? '<span class="kp-pano-go-ico" aria-hidden="true">→</span>' : ''}<span>${esc(name(pt, i))}</span>${door ? `<span class="kp-sr">, ${esc(T('panoTuer'))}</span>` : ''}${ok ? `<span class="kp-pano-go-ok" aria-hidden="true">${icon('check')}</span><span class="kp-sr">, ${esc(door ? T('besucht') : T('panoGesehen'))}</span>` : ''}</button></li>`;
+    }).join('');
+    return `<div class="kp-pano kp-pano-${mode}" data-hotspots="${b.id}" data-pano="${b.id}" data-pano-src="${esc(src)}">${head}
+      <div class="kp-pano-stage">
+        <div class="kp-pano-view" data-pano-view="${b.id}" tabindex="0" role="group" aria-roledescription="${esc(T('panoRolle'))}" aria-label="${esc(plainTitle(b.title || '') || (b.image && b.image.alt) || T('panoRolle'))}" aria-describedby="${uid}-hilfe">
+          <div class="kp-pano-img" role="img" aria-label="${esc((b.image && b.image.alt) || '')}"></div>${dots}
+        </div>${pop}
+        <p class="kp-sr" id="${uid}-hilfe">${esc(T('panoHilfe'))}</p>
+      </div>
+      <div class="kp-pano-ctrl">
+        <button type="button" class="kp-btn kp-sec kp-pano-turn" data-pano-turn="${b.id}" data-dir="-1" aria-label="${esc(T('panoLinks'))}">◀ ${esc(T('panoDrehen'))}</button>
+        <span class="kp-pano-compass" aria-hidden="true"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18"/><path class="kp-pano-cone" d="M20 20 L7.3 7.3 A18 18 0 0 1 32.7 7.3 Z"/><circle class="kp-pano-hub" cx="20" cy="20" r="3"/></svg><span data-pano-deg></span></span>
+        <button type="button" class="kp-btn kp-sec kp-pano-turn" data-pano-turn="${b.id}" data-dir="1" aria-label="${esc(T('panoRechts'))}">${esc(T('panoDrehen'))} ▶</button>
+        <p class="kp-sr" data-pano-live aria-live="polite"></p>
+      </div>
+      ${b.hint ? `<p class="kp-hs-hint kp-pano-hint">${esc(b.hint)}</p>` : ''}
+      <div class="kp-pano-listwrap"><p class="kp-pano-list-h" id="${uid}-liste">${esc(T('panoPunkteImRaum'))}</p>
+        <ul class="kp-pano-list" aria-labelledby="${uid}-liste">${chips}</ul>
+        ${stops.length ? `<p class="kp-pano-count" data-pano-count aria-live="polite">${esc(panoCountText(b))}</p>` : ''}${guessSkipHtml(b)}</div>
+      ${info}
+      <div class="kp-pano-fallback" data-pano-fallback hidden><p class="kp-pano-note">${esc(T('panoLadefehler'))}</p>${fallback}</div>
+    </div>`;
+  }
+  // Ausschnitt berechnen: Bildbreite = Ausschnittsbreite · 360 / Blickwinkel; ist das Bild dann zu niedrig, wird es höher
+  // gezogen (der Blickwinkel wird kleiner). top verschiebt senkrecht um pitch, ohne über die Bildkanten zu laufen.
+  function panoGeo(box, v) {
+    const view = box.querySelector('[data-pano-view]');
+    const W = view ? view.clientWidth : 0, H = view ? view.clientHeight : 0;
+    const fov = W && W < 600 ? 70 : 90, ar = v.ar || 2;
+    let IW = W * 360 / fov, IH = IW / ar;
+    if (IH < H) { IH = H; IW = H * ar; }
+    const top = Math.min(0, Math.max(H - IH, H / 2 - IH * (0.5 + v.pitch)));
+    return { view, W, H, IW, IH, top };
+  }
+  function panoApply(box, announce) {
+    const b = box && findBlock(box.dataset.pano);
+    if (!b) return;
+    const v = panoState(b), g = panoGeo(box, v);
+    if (!g.W || !g.H) return;
+    v.yaw = panoNorm(v.yaw);
+    const layer = g.view.querySelector('.kp-pano-img');
+    layer.style.backgroundSize = `${g.IW.toFixed(1)}px ${g.IH.toFixed(1)}px`;
+    layer.style.backgroundPosition = `${(g.W / 2 - v.yaw / 360 * g.IW).toFixed(1)}px ${g.top.toFixed(1)}px`;
+    box.dataset.yaw = String(Math.round(v.yaw) % 360);
+    const inView = [];
+    let popAt = null;
+    g.view.querySelectorAll('[data-pano-x]').forEach(dot => {
+      const d = panoNorm(Number(dot.dataset.panoX) * 3.6 - v.yaw + 180) - 180;
+      const x = g.W / 2 + d / 360 * g.IW, y = g.top + Number(dot.dataset.panoY) / 100 * g.IH;
+      const vis = x >= 12 && x <= g.W - 12 && y >= 12 && y <= g.H - 12;
+      if (!vis && dot === document.activeElement) g.view.focus({ preventScroll: true });
+      dot.hidden = !vis;
+      dot.style.left = x.toFixed(1) + 'px'; dot.style.top = y.toFixed(1) + 'px';
+      if (vis) { inView.push(dot.getAttribute('aria-label').split(',')[0]); if (dot.classList.contains('open')) popAt = [x, y]; }
+    });
+    const pop = box.querySelector('[data-pano-pop]');
+    if (pop) {
+      pop.hidden = !popAt;
+      if (popAt) { pop.style.left = popAt[0].toFixed(1) + 'px'; pop.style.top = popAt[1].toFixed(1) + 'px'; pop.classList.toggle('left', popAt[0] > g.W * 0.55); pop.classList.toggle('up', popAt[1] > g.H * 0.5); }
+    }
+    const cone = box.querySelector('.kp-pano-cone');
+    if (cone) cone.style.transform = `rotate(${v.yaw.toFixed(1)}deg)`;
+    const deg = box.querySelector('[data-pano-deg]');
+    if (deg) deg.textContent = T('panoBlick').replace('{g}', Math.round(v.yaw) % 360);
+    if (announce) {
+      const live = box.querySelector('[data-pano-live]');
+      if (live) live.textContent = T('panoBlick').replace('{g}', Math.round(v.yaw) % 360) + '. ' + (inView.length ? T('panoImBlick').replace('{p}', inView.join(', ')) : T('panoKeinPunkt'));
+    }
+  }
+  // weich drehen (400 ms, kürzester Weg), unter „Bewegung reduzieren“ sofort; Zeitgeber statt requestAnimationFrame,
+  // weil der Block beim Neuzeichnen ersetzt wird (die Ansicht wird je Schritt neu gesucht)
+  function panoTurn(id, to, done) {
+    const b = findBlock(id); if (!b) return;
+    const v = panoState(b), from = v.yaw, delta = panoNorm(to - from + 180) - 180;
+    const boxNow = () => root.querySelector(`[data-pano="${id}"]`);
+    clearTimeout(v.timer);
+    if (reducedMotion() || Math.abs(delta) < 0.5) { v.yaw = panoNorm(to); const bx = boxNow(); if (bx) panoApply(bx, true); if (done) done(); return; }
+    const t0 = Date.now(), dur = 400;
+    const step = () => {
+      const p = Math.min(1, (Date.now() - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      v.yaw = from + delta * e;
+      const bx = boxNow(); if (bx) panoApply(bx, p === 1);
+      if (p < 1) v.timer = setTimeout(step, 16); else { v.timer = null; if (done) done(); }
+    };
+    step();
+  }
+  function panoFail(box, b) {
+    box.classList.add('kp-pano-failed');
+    const fb = box.querySelector('[data-pano-fallback]'); if (fb) fb.hidden = false;
+    panoSeenAll(b);
+    const cnt = box.querySelector('[data-pano-count]'); if (cnt) cnt.textContent = panoCountText(b);
+    updateConditions(); renderFooter(); report();
+  }
+  function setupPano(box) {
+    const b = findBlock(box.dataset.pano), view = box.querySelector('[data-pano-view]');
+    if (!b || !view) return;
+    const v = panoState(b), src = box.dataset.panoSrc || '';
+    panoApply(box);
+    let shown = false;
+    const show = () => {
+      if (shown) return; shown = true;
+      const layer = view.querySelector('.kp-pano-img');
+      layer.style.backgroundImage = `url("${src.replace(/"/g, '%22')}")`;
+      box.classList.add('kp-pano-ready');
+      panoApply(box);
+    };
+    const im = new Image();
+    im.onload = () => { if (im.naturalWidth && im.naturalHeight) v.ar = im.naturalWidth / im.naturalHeight; show(); };
+    im.onerror = () => panoFail(box, b);
+    im.src = src;
+    if (v.to != null) { const to = v.to; v.to = null; panoTurn(b.id, to); }
+    // neu rechnen, wenn sich die Breite ändert (Fenster, Rollbalken, der erst nach dem Öffnen einer Erklärung erscheint)
+    if (window.ResizeObserver) { let lastW = view.clientWidth; new ResizeObserver(() => { if (view.isConnected && view.clientWidth !== lastW) { lastW = view.clientWidth; panoApply(box); } }).observe(view); }
+    else if (!panoWired) { panoWired = true; window.addEventListener('resize', () => root.querySelectorAll('[data-pano]:not(.kp-pano-failed)').forEach(x => panoApply(x))); }
+    // Ziehen mit Maus oder Finger dreht (touch-action: pan-y lässt das senkrechte Wischen der Seite); erst ab 5 px, damit
+    // ein Klick auf einen Punkt ein Klick bleibt
+    view.addEventListener('pointerdown', e => {
+      if (e.button > 0) return;
+      clearTimeout(v.timer);
+      const x0 = e.clientX, y0 = e.clientY, yaw0 = v.yaw, p0 = v.pitch, g = panoGeo(box, v);
+      let moved = false;
+      const move = ev => {
+        const dx = ev.clientX - x0, dy = ev.clientY - y0;
+        if (!moved && Math.hypot(dx, dy) < 5) return;
+        if (!moved) { moved = true; box.classList.add('is-drag'); try { view.setPointerCapture(e.pointerId); } catch (err) { /* ohne Capture */ } }
+        v.yaw = yaw0 - dx / g.IW * 360;
+        v.pitch = Math.max(-0.15, Math.min(0.15, p0 - dy / g.IH));
+        panoApply(box);
+      };
+      const up = () => {
+        view.removeEventListener('pointermove', move); view.removeEventListener('pointerup', up); view.removeEventListener('pointercancel', up);
+        box.classList.remove('is-drag');
+        if (!moved) return;
+        panoDragged = true; setTimeout(() => { panoDragged = false; }, 0);
+        panoApply(box, true);
+      };
+      view.addEventListener('pointermove', move); view.addEventListener('pointerup', up); view.addEventListener('pointercancel', up);
+    });
+  }
+
+  // ---------- Gefahren erkennen in einer Bildfolge (hotspots.mode „folge“, Webanalyse 29.10.2026, Empfehlung 8) ----------
+  // Vorbild Kineo „timedSequence“, aber ohne Zeitlimit (WCAG 2.2.1): Bild für Bild entscheidet die Person „Weiter“ oder
+  // „Hier wird es kritisch“ und zeigt dann auf die Stelle. Runden ohne Punkte sind unkritisch, Runden mit Punkten kritische
+  // Momente (die Punkte sind die Gefahrenstellen, Rechtecke aus x/y als Mitte und w/h, unsichtbar bis zur Auflösung).
+  // Stand state.self[id] = { at, res: { Bild: 'hit' | 'late' | 'miss' }, fa, done }: hit beim ersten Zeigen, late im zweiten
+  // Versuch, miss übersehen oder zweimal daneben; fa zählt Fehlalarme; done, sobald die Zusammenfassung einmal stand.
+  // Zeigemodus, Versuche und die letzte Meldung stehen nur in hfUi (nicht im Lernstand).
+  let hfUi = {};
+  const HF_TOL = 3;
+  function hfRounds(b) { return (b.rounds || []).filter(x => x && x.image && x.image.src); }
+  function hfRect(pt) { const x = Number(pt.x), y = Number(pt.y), w = Number(pt.w) || 20, h = Number(pt.h) || 20; const cx = isNaN(x) ? 50 : x, cy = isNaN(y) ? 50 : y; return { l: cx - w / 2, r: cx + w / 2, t: cy - h / 2, b: cy + h / 2, w, h }; }
+  function hfHitAt(pts, x, y) { return (pts || []).findIndex(pt => { const q = hfRect(pt); return x >= q.l - HF_TOL && x <= q.r + HF_TOL && y >= q.t - HF_TOL && y <= q.b + HF_TOL; }); }
+  // Tastaturweg: 3 × 3 Felder; ein Feld trifft, wenn es sich mit einer Gefahrenstelle überschneidet
+  function hfCellHit(pts, k) { const c = k % 3, r = Math.floor(k / 3), l = c * 100 / 3, t = r * 100 / 3; return (pts || []).findIndex(pt => { const q = hfRect(pt); return q.l < l + 100 / 3 && q.r > l && q.t < t + 100 / 3 && q.b > t; }); }
+  function hfState(b) { const st = state.self[b.id] || {}; return { at: Math.max(0, Number(st.at) || 0), res: st.res || {}, fa: Number(st.fa) || 0, fx: Array.isArray(st.fx) ? st.fx : [], done: !!st.done }; }
+  function hfScore(b, st) {
+    const rounds = hfRounds(b), crit = rounds.map((rd, i) => i).filter(i => (rounds[i].points || []).length);
+    return { crit, hit: crit.filter(i => st.res[i] === 'hit' || st.res[i] === 'late').length, fa: st.fa };
+  }
+  function hfSumText(b, st) {
+    const s = hfScore(b, st);
+    return T('hfErgebnis').replace('{n}', s.hit).replace('{m}', s.crit.length) + ', ' + (s.fa === 1 ? T('hfEinFehlalarm') : T('hfFehlalarme').replace('{n}', s.fa));
+  }
+  function hfMarks(pts, fresh) {
+    return (pts || []).map(pt => { const q = hfRect(pt); return `<span class="kp-hf-mark${fresh ? ' kp-hf-draw' : ''}" aria-hidden="true" style="left:${q.l}%;top:${q.t}%;width:${q.w}%;height:${q.h}%"></span>`; }).join('');
+  }
+  function renderHsFolge(b) {
+    const rounds = hfRounds(b), R = rounds.length, st = hfState(b), ui = hfUi[b.id] || {};
+    const head = b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : '';
+    if (!R) return `<div class="kp-hf" data-hf="${b.id}">${head}<div class="kp-photo-empty">${icon('eye')}<span>Noch keine Bilder</span></div></div>`;
+    if (st.at >= R) {
+      // Zusammenfassung: Zahlen, dann je kritischem Moment Vorschaubild, Ergebnis und Erklärung
+      const s = hfScore(b, st);
+      const label = r => r === 'hit' ? T('hfErkannt') : r === 'late' ? T('hfSpaet') : T('hfUebersehenKurz');
+      return `<div class="kp-hf kp-hf-end" data-hf="${b.id}">${head}
+        <p class="kp-hf-sum" data-hf-sum tabindex="-1" aria-live="polite">${esc(hfSumText(b, st))}</p>
+        <ul class="kp-hf-list">${s.crit.map(i => { const rd = rounds[i], r = st.res[i] || 'miss', pts = rd.points || [];
+          return `<li class="kp-hf-item kp-hf-${r === 'miss' ? 'no' : 'ok'}"><span class="kp-hf-thumb"><img loading="lazy" decoding="async" src="${esc(res(rd.image.src))}" alt="${esc(rd.image.alt || '')}">${hfMarks(pts, false)}</span>
+            <div class="kp-hf-itxt"><p class="kp-hf-ires"><span class="kp-hf-badge" aria-hidden="true">${r === 'miss' ? '×' : '✓'}</span>${esc(label(r))}${rd.caption ? ` <span class="kp-hf-icap">${esc(rd.caption)}</span>` : ''}</p>
+            ${pts.map(pt => `${pt.title ? `<p class="kp-hf-ititle">${esc(pt.title)}</p>` : ''}<div class="kp-text">${res(pt.html || '')}</div>`).join('')}</div></li>`; }).join('')}</ul>
+        <div class="kp-quiz-actions"><button type="button" class="kp-btn kp-sec" data-hf-again="${b.id}">${esc(T('nochEinmal'))}</button></div></div>`;
+    }
+    const at = st.at, rd = rounds[at], pts = rd.points || [], r = st.res[at];
+    const zeigen = !!ui.zeigen && !r;
+    const names = String(T('hfFeldNamen')).split('|');
+    const cells = zeigen ? Array.from({ length: 9 }, (v, k) => `<button type="button" class="kp-hf-cell kp-hf-cell-${k}" data-hf-cell="${k}" data-block="${b.id}">${esc(T('hfHierZeigen').replace('{f}', names[k] || String(k + 1)))}</button>`).join('') : '';
+    const tap = ui.tap && !r ? `<span class="kp-hf-tap" aria-hidden="true" style="left:${ui.tap[0]}%;top:${ui.tap[1]}%">×</span>` : '';
+    const msgKind = r ? (r === 'miss' ? 'no' : 'ok') : ui.kind || '';
+    let msg = '';
+    if (r) {
+      const lead = ui.msg || (r === 'hit' ? T('hfRichtig') : r === 'late' ? T('hfRichtigSpaet') : T('hfUebersehen'));
+      msg = `<p class="kp-hf-lead">${esc(lead)}</p>${pts.map(pt => `${pt.title ? `<p class="kp-hf-ititle">${esc(pt.title)}</p>` : ''}<div class="kp-text">${res(pt.html || '')}</div>`).join('')}`;
+    } else if (ui.msg) msg = `<p class="kp-hf-lead">${esc(ui.msg)}</p>`;
+    else if (zeigen) msg = `<p class="kp-hf-lead">${esc(T('hfZeigen'))}</p>`;
+    const btns = r ? `<button type="button" class="kp-btn" data-hf-next="${b.id}">${esc(at < R - 1 ? T('weiter') : T('hfAuswertung'))}</button>`
+      : zeigen ? `<button type="button" class="kp-btn kp-sec" data-hf-cancel="${b.id}">${esc(T('hfAbbrechen'))}</button>`
+      : `<button type="button" class="kp-btn kp-sec" data-hf-next="${b.id}">${esc(T('weiter'))}</button><button type="button" class="kp-btn kp-hf-alarm" data-hf-alarm="${b.id}">${icon('alert')}${esc(T('hfKritisch'))}</button>`;
+    return `<div class="kp-hf${zeigen ? ' is-zeigen' : ''}${r ? ' is-res' : ''}" data-hf="${b.id}">${head}
+      <div class="kp-hf-frame"><div class="kp-hf-stage${ui.fresh ? ' kp-hf-fresh' : ''}" data-hf-stage="${b.id}">
+        <img src="${esc(res(rd.image.src))}" alt="${esc(rd.image.alt || '')}">
+        ${r ? hfMarks(pts, !!ui.drawn) : ''}${tap}${cells}</div></div>
+      <div class="kp-hf-bar">
+        <p class="kp-hf-count" data-hf-status aria-live="polite"><b>${esc(T('hfBild').replace('{n}', at + 1).replace('{m}', R))}</b>${rd.caption ? `<span class="kp-hf-cap">${esc(rd.caption)}</span>` : ''}</p>
+        ${rd.hint || b.hint ? `<p class="kp-hf-hint">${esc(rd.hint || b.hint)}</p>` : ''}
+      </div>
+      <div class="kp-hf-fb${msgKind ? ' kp-hf-fb-' + msgKind : ''}" data-hf-fb tabindex="-1" aria-live="polite">${msg}</div>
+      <div class="kp-quiz-actions kp-hf-actions">${btns}</div></div>`;
+  }
+  function hfRefresh(b, focusSel) {
+    const el = root.querySelector(`[data-hf="${b.id}"]`);
+    if (!el) return;
+    refreshBlock(el, renderHsFolge(b));
+    const ui = hfUi[b.id]; if (ui) { ui.fresh = false; ui.drawn = false; }
+    updateConditions(); renderFooter(); report();
+    const f = focusSel && root.querySelector(`[data-hf="${b.id}"] ${focusSel}`);
+    if (f) f.focus({ preventScroll: true });
+  }
+  // Zeigen: Treffer (erster oder zweiter Versuch), daneben, Fehlalarm auf einem unkritischen Bild
+  function hfPoint(b, hit) {
+    const rounds = hfRounds(b), st = hfState(b), ui = hfUi[b.id] || (hfUi[b.id] = {});
+    const rd = rounds[st.at]; if (!rd || st.res[st.at]) return;
+    const crit = (rd.points || []).length > 0;
+    if (!crit) {
+      // Höchstens ein Fehlalarm je Bild: wer auf demselben unkritischen Bild noch einmal meldet, bekommt die Meldung, zählt aber nicht doppelt
+      if (!st.fx.includes(st.at)) { st.fa += 1; st.fx = st.fx.concat(st.at); }
+      state.self[b.id] = st;
+      Object.assign(ui, { zeigen: false, tries: 0, tap: null, msg: T('hfFehlalarm'), kind: 'warn' });
+      uiSound('falsch');
+      return hfRefresh(b, '[data-hf-fb]');
+    }
+    if (hit >= 0) {
+      st.res = Object.assign({}, st.res, { [st.at]: ui.tries ? 'late' : 'hit' }); state.self[b.id] = st;
+      Object.assign(ui, { zeigen: false, tap: null, msg: ui.tries ? T('hfRichtigSpaet') : T('hfRichtig'), kind: 'ok', drawn: true });
+      uiSound('richtig');
+      return hfRefresh(b, '[data-hf-fb]');
+    }
+    ui.tries = (ui.tries || 0) + 1;
+    if (ui.tries < 2) {
+      Object.assign(ui, { msg: T('hfDaneben'), kind: 'no' });
+      uiSound('falsch');
+      return hfRefresh(b, '[data-hf-fb]');
+    }
+    st.res = Object.assign({}, st.res, { [st.at]: 'miss' }); state.self[b.id] = st;
+    Object.assign(ui, { zeigen: false, tap: null, msg: T('hfAufloesung'), kind: 'no', drawn: true });
+    uiSound('falsch');
+    return hfRefresh(b, '[data-hf-fb]');
   }
   function renderHotspots(b) {
+    if (b.mode === 'folge') return renderHsFolge(b);
+    if (b.panorama) return renderHsPano(b);
     const st = state.self[b.id] || {};
     const rd = hsRound(b, st);
     const img = rd.img;
@@ -5166,6 +6841,19 @@ function kursPlayer(course, opts) {
         <button class="kp-hs-step" data-hs-step="${b.id}" data-dir="1" aria-label="${T('naechsterPunkt')}">›</button>
       </div>`;
     };
+    // Kartenstand (Vorbild Moto City „1/5“ mit Fahne): fest oben rechts im Bild statt als Zeile darunter
+    const doors = b.map ? list.map((pt, i) => i).filter(i => doorTo(list[i]) >= 0) : [];
+    const doneN = doors.filter(i => mapDone(list[i])).length;
+    const score = b.map && b.mapScore !== false && doors.length > 1;
+    // Neu erkundete Orte seit dem letzten Blick auf die Karte: Pin federt, die Begleitfigur sagt etwas dazu
+    let fresh = [];
+    if (b.map && doors.length) {
+      const before = Array.isArray(st.md) ? st.md : null;
+      const nowDone = doors.filter(i => mapDone(list[i]));
+      if (before) fresh = nowDone.filter(i => !before.includes(i));
+      if (!before || fresh.length || nowDone.length !== before.length) { st.md = nowDone; state.self[b.id] = st; }
+    }
+    const freshAt = i => fresh.includes(i);
     const points = list.map((pt, i) => {
       const p = pos(pt);
       const door = doorTo(pt) >= 0;
@@ -5180,7 +6868,7 @@ function kursPlayer(course, opts) {
         const num = list.slice(0, i + 1).filter(x => doorTo(x) >= 0).length;
         const stateTxt = locked ? T('ortGesperrt') : done ? T('ortErkundet') : next ? T('ortNaechster') : T('oeffnen');
         const side = Number(pt.labelSide === 'links' || (pt.labelSide !== 'rechts' && p.x > 62));
-        return `<button class="kp-map-pin kp-tm-pin${side ? ' kp-tm-left' : ''}${locked ? ' kp-map-locked' : ''}${done ? ' kp-map-done' : ''}${next ? ' kp-map-next' : ''}" data-hs="${b.id}" data-i="${i}" style="left:${p.x}%;top:${p.y}%" aria-label="${num}. ${esc(pt.title || 'Thema ' + num)}, ${esc(stateTxt)}"${locked ? ' aria-disabled="true"' : ''}>
+        return `<button class="kp-map-pin kp-tm-pin${side ? ' kp-tm-left' : ''}${locked ? ' kp-map-locked' : ''}${done ? ' kp-map-done' : ''}${next ? ' kp-map-next' : ''}${freshAt(i) ? ' kp-map-new' : ''}" data-hs="${b.id}" data-i="${i}" style="left:${p.x}%;top:${p.y}%" aria-label="${num}. ${esc(pt.title || 'Thema ' + num)}, ${esc(stateTxt)}"${locked ? ' aria-disabled="true"' : ''}>
           <span class="kp-tm-num" aria-hidden="true">${locked ? icon('lock') : done ? icon('check') : num}</span>${pt.title ? `<span class="kp-tm-label" aria-hidden="true">${esc(pt.title)}</span>` : ''}
         </button>`;
       }
@@ -5189,7 +6877,7 @@ function kursPlayer(course, opts) {
         const locked = mapLocked(i), next = mapNext === i;
         const inner = locked ? icon('lock') : done ? icon('check') : '<i class="kp-map-dot"></i>';
         const stateTxt = locked ? T('ortGesperrt') : done ? T('ortErkundet') : next ? T('ortNaechster') : T('oeffnen');
-        return `<button class="kp-map-pin${locked ? ' kp-map-locked' : ''}${done ? ' kp-map-done' : ''}${next ? ' kp-map-next' : ''}" data-hs="${b.id}" data-i="${i}" style="left:${p.x}%;top:${p.y}%" aria-label="${esc(pt.title || 'Ort ' + (i + 1))}, ${esc(stateTxt)}"${locked ? ' aria-disabled="true"' : ''}>
+        return `<button class="kp-map-pin${locked ? ' kp-map-locked' : ''}${done ? ' kp-map-done' : ''}${next ? ' kp-map-next' : ''}${freshAt(i) ? ' kp-map-new' : ''}" data-hs="${b.id}" data-i="${i}" style="left:${p.x}%;top:${p.y}%" aria-label="${esc(pt.title || 'Ort ' + (i + 1))}, ${esc(stateTxt)}"${locked ? ' aria-disabled="true"' : ''}>
           ${pt.title ? `<span class="kp-map-flag">${esc(pt.title)}</span>` : ''}
           <span class="kp-map-marker" aria-hidden="true"><svg viewBox="0 0 40 52"><path d="M20 50C20 50 4 31 4 19a16 16 0 0 1 32 0c0 12-16 31-16 31z"/></svg><span class="kp-map-ico">${inner}</span></span>
         </button>`;
@@ -5199,9 +6887,10 @@ function kursPlayer(course, opts) {
         ? `<span class="kp-hs-label ${p.x > 60 ? 'left' : ''}" style="left:${p.x}%;top:${p.y}%" aria-hidden="true">${esc(pt.title)}</span>` : '';
       return `<button class="kp-hs-dot kp-hs-m-${marker} ${isOpen ? 'open' : ''} ${done ? 'seen' : ''} ${door ? 'kp-hs-door' : ''}" data-hs="${b.id}" data-i="${i}"
         style="left:${p.x}%;top:${p.y}%" ${door ? '' : `aria-expanded="${isOpen}"`} aria-label="${esc(pt.title || 'Punkt ' + (i + 1))}${door ? ', ' + T('oeffnen') + (done ? ', ' + T('besucht') : '') : ''}">${sign}</button>${flag}
-        ${isOpen && mode === 'popover' ? `<div class="kp-hs-pop ${p.x > 60 ? 'left' : ''} ${p.y > 60 ? 'up' : ''}" style="left:${p.x}%;top:${p.y}%" role="status">
+        ${isOpen && mode === 'popover' ? (guessPending(b, hsGKey(rd, i), pt) ? `<div class="kp-hs-pop kp-hs-ask ${p.x > 60 ? 'left' : ''} ${p.y > 60 ? 'up' : ''}" style="left:${p.x}%;top:${p.y}%">
+          ${pt.title ? `<h3>${esc(pt.title)}</h3>` : ''}${guessAskHtml(b, hsGKey(rd, i), pt)}${navBar()}</div>` : `<div class="kp-hs-pop ${p.x > 60 ? 'left' : ''} ${p.y > 60 ? 'up' : ''}" style="left:${p.x}%;top:${p.y}%" role="status">
           ${pt.image && pt.image.src ? `<img loading="lazy" decoding="async" src="${esc(res(pt.image.src))}" alt="${esc(pt.image.alt || '')}">` : ''}
-          ${pt.title ? `<h3>${esc(pt.title)}</h3>` : ''}<div class="kp-text">${res(pt.html)}</div>${navBar()}</div>` : ''}`;
+          ${pt.title ? `<h3>${esc(pt.title)}</h3>` : ''}${guessResHtml(b, hsGKey(rd, i), pt)}<div class="kp-text">${res(pt.html)}</div>${navBar()}</div>`) : ''}`;
     }).join('');
     // Spotlight legt einen Schleier über das Bild und lässt nur die gewählte Stelle frei
     const p = cur ? pos(cur) : null;
@@ -5218,22 +6907,42 @@ function kursPlayer(course, opts) {
       ? `<svg class="kp-hs-lines kp-hs-lines-${b.connect}" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${b.connect === 'netz'
         ? list.slice(1).map((pt, i) => seg(list[0], pt, doneAt(pt, i + 1))).join('')
         : list.slice(1).map((pt, i) => seg(list[i], pt, doneAt(pt, i + 1))).join('')}</svg>` : '';
-    const count = list.length ? `<span class="kp-hs-count">${list.filter(doneAt).length} ${T('von')} ${list.length} ${b.map ? T('orteErkundet') : T('entdeckt')}</span>` : '';
+    const scoreHtml = score ? `<div class="kp-map-score${doneN === doors.length ? ' kp-map-score-all' : ''}" role="status"><span class="kp-ms-flag" aria-hidden="true">${icon('flag')}</span><span aria-hidden="true"><b>${doneN}</b>/${doors.length}</span><span class="kp-sr">${esc(T('mapStand'))}: ${doneN} ${T('von')} ${doors.length} ${T('orteErkundet')}</span><i class="kp-ms-bar" aria-hidden="true" style="--w:${Math.round(doneN / doors.length * 100)}%"></i></div>` : '';
+    // Begleitfigur auf der Karte (Vorbild Moto City: Porträt mit Sprechblase unten links); sagt, was als Nächstes dran ist
+    const mg = b.map && b.mapGuide && (b.mapGuide.castId || b.mapGuide.name || (b.mapGuide.image && b.mapGuide.image.src)) ? castOf(b.mapGuide) : null;
+    let guideHtml = '', guideLow = '';
+    if (mg && doors.length) {
+      const nextPt = mapNext >= 0 ? list[mapNext] : null;
+      const justPt = fresh.length ? list[fresh[fresh.length - 1]] : null;
+      const say = doneN === doors.length ? (b.mapGuide.outro || T('mapFertig'))
+        : !doneN ? (b.mapGuide.intro || T('mapStart'))
+        : [justPt ? (justPt.doneSay || T('mapGeschafft').replace('{ort}', justPt.title || '')) : '', nextPt ? (nextPt.say || T('mapWeiter').replace('{ort}', nextPt.title || '')) : ''].filter(Boolean).join(' ');
+      const shut = mgShut[b.id] === say;
+      const face = castFace(mg);
+      const name = mg.name || '';
+      const one = low => `<div class="kp-map-guide${low ? ' kp-mg-low' : ''}${shut ? ' kp-mg-shut' : ''}${fresh.length ? ' kp-mg-fresh' : ''}" data-map-guide="${b.id}"${mg.color ? ` style="--kp-shirt:${esc(mg.color)}"` : ''}>
+        <button type="button" class="kp-mg-face${/\.svg(\?|$)|^data:image\/svg/i.test(String((mg.image || {}).src || '')) ? ' kp-mg-illu' : ''}" data-mg-toggle="${b.id}" aria-expanded="${!shut}" aria-label="${esc((name ? name + ': ' : '') + T(shut ? 'mgZeigen' : 'mgZu'))}">${face}</button>
+        <div class="kp-mg-bubble" ${shut ? 'hidden' : ''}>${name ? `<b class="kp-mg-name">${esc(name)}</b>` : ''}<p class="kp-mg-say" data-mg-say ${low ? 'role="status"' : ''}>${esc(say)}</p><button type="button" class="kp-mg-close" data-mg-toggle="${b.id}" aria-label="${esc(T('mgZu'))}">×</button></div>
+      </div>`;
+      guideHtml = one(false); guideLow = one(true);
+    }
+    const count = score ? '' : list.length ? `<span class="kp-hs-count">${list.filter(doneAt).length} ${T('von')} ${list.length} ${b.map ? T('orteErkundet') : T('entdeckt')}</span>` : '';
     const frame = b.cover ? deviceFrame('') : deviceFrame((b.image || {}).frame);
     return `<div class="kp-hotspots kp-hs-${mode} kp-hs-mk-${marker} ${b.cover ? 'kp-hs-cover' : ''}${frame.open ? ' kp-framed' : ''}${b.map ? ' kp-map' : ''}${!b.map && /\.svg(\?|$)|^data:image\/svg/i.test(String(img || '')) ? ' kp-hs-drawing' : ''}${b.map && b.mapLook === 'themen' ? ' kp-tm' + (b.mapLabels === 'fokus' ? ' kp-tm-quiet' : '') : ''}" data-hotspots="${b.id}">
       ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
       ${frame.open}<div class="kp-hs-stage">
         <div class="kp-hs-zoom"${zoomStyle}>${img ? `<img src="${esc(res(img))}" alt="${esc((rd.R ? (b.rounds.filter(x => x && x.image && x.image.src)[rd.r].image.alt) : b.image.alt) || '')}">` : `<div class="kp-photo-empty">${icon('eye')}<span>Noch kein Bild</span></div>`}</div>
-        ${lines}${spot}${points}</div>${frame.close}
+        ${lines}${spot}${points}${scoreHtml}${guideHtml}</div>${frame.close}${scoreHtml || guideLow ? `<div class="kp-map-low">${scoreHtml.replace('kp-map-score', 'kp-map-score kp-ms-low').replace(' role="status"', '')}${guideLow}</div>` : ''}
       ${b.map && b.mapLook === 'themen' ? `<ol class="kp-tm-legend" aria-hidden="true">${list.map((pt, i) => doorTo(pt) < 0 ? '' : `<li${mapDone(pt) ? ' class="done"' : mapNext === i ? ' class="next"' : ''}>${esc(pt.title || '')}</li>`).join('')}</ol>` : ''}
       <div class="kp-hs-bar">
         ${rd.R ? `<span class="kp-hs-rounds" data-hs-round>${T('runde')} ${rd.r + 1} ${T('von')} ${rd.R}</span>` : ''}
         <p class="kp-hs-hint">${esc(rd.hint || 'Klick auf die Punkte im Bild.')}</p>
-        ${count}${rd.R && list.length && list.every(doneAt) ? (rd.r < rd.R - 1 ? `<button class="kp-btn" data-hs-next-round="${b.id}">${T('naechsteRunde')} →</button>` : `<span class="kp-feedback ok" role="status">${T('alleRunden')}</span>`) : list.length > 1 && !(b.map && list.every(pt => doorTo(pt) >= 0)) ? `<button class="kp-btn kp-sec kp-hs-tour" data-hs-tour="${b.id}">${open == null ? T('fuehrungStarten') : T('naechsterPunkt')}</button>` : ''}
+        ${guessSkipHtml(b)}${count}${rd.R && list.length && list.every(doneAt) ? (rd.r < rd.R - 1 ? `<button class="kp-btn" data-hs-next-round="${b.id}">${T('naechsteRunde')} →</button>` : `<span class="kp-feedback ok" role="status">${T('alleRunden')}</span>`) : list.length > 1 && !(b.map && list.every(pt => doorTo(pt) >= 0)) ? `<button class="kp-btn kp-sec kp-hs-tour" data-hs-tour="${b.id}">${open == null ? T('fuehrungStarten') : T('naechsterPunkt')}</button>` : ''}
       </div>
-      ${cur && mode !== 'popover' ? `<div class="kp-hs-info" role="status">
+      ${cur && mode !== 'popover' ? (guessPending(b, hsGKey(rd, open), cur) ? `<div class="kp-hs-info kp-hs-ask">
+        ${cur.title ? `<h3>${esc(cur.title)}</h3>` : ''}${guessAskHtml(b, hsGKey(rd, open), cur)}${navBar()}</div>` : `<div class="kp-hs-info" role="status">
         ${cur.image && cur.image.src ? `<img class="kp-hs-detail" src="${esc(res(cur.image.src))}" alt="${esc(cur.image.alt || '')}">` : ''}
-        ${cur.title ? `<h3>${esc(cur.title)}</h3>` : ''}<div class="kp-text">${res(cur.html)}</div>${navBar()}</div>` : ''}</div>`;
+        ${cur.title ? `<h3>${esc(cur.title)}</h3>` : ''}${guessResHtml(b, hsGKey(rd, open), cur)}<div class="kp-text">${res(cur.html)}</div>${navBar()}</div>`) : ''}</div>`;
   }
 
   // Regler zum Aufdecken (Vorbild „Eisberg der Eigenheiten“): je Reglerstellung ein Bildausschnitt (focus) oder eigenes Bild
@@ -5283,6 +6992,304 @@ function kursPlayer(course, opts) {
     if (range) { range.value = at; range.setAttribute('aria-valuetext', (b.stops[at] || {}).label || ''); }
     box.querySelectorAll('[data-rv-to]').forEach(t => { const i = Number(t.dataset.rvTo); t.classList.toggle('on', i === at); t.classList.toggle('seen', !!st.seen[i]); t.setAttribute('aria-pressed', String(i === at)); });
     updateConditions(); renderFooter(); report();
+  }
+
+  // 3D-Modell (glTF/glb) mit dem Web-Baustein <model-viewer> (Google, Apache 2.0): drehen, zoomen, Teile über Nummern
+  // am Modell erkunden, Führung mit Vor und Zurück, Animation der Datei, AR auf Handy und Tablet. Das Modell wird nie neu
+  // gezeichnet (m3dGo tauscht nur Klassen, Text und Kamera), sonst lädt die Datei bei jedem Klick neu.
+  const m3dPts = b => (b.points || []).filter(pt => pt && Array.isArray(pt.pos) && pt.pos.length === 3);
+  const m3dVec = v => (Array.isArray(v) ? v.map(x => (Number(x) || 0).toFixed(4) + 'm').join(' ') : '');
+  function m3dDone(b) {
+    const pts = m3dPts(b), seen = (state.self[b.id] || {}).seen || {};
+    if (!pts.length) return true;
+    return pts.every((pt, i) => { const d = pt.target ? pageIndexById(pt.target) : -1; return d >= 0 ? state.visited.has(d) : !!seen[i]; });
+  }
+  function m3dInfo(b, i) {
+    const pts = m3dPts(b), pt = pts[i];
+    if (!pt) return `<p class="kp-m3d-start">${esc(T('m3dStart'))}</p>`;
+    const d = pt.target ? pageIndexById(pt.target) : -1;
+    return `<p class="kp-m3d-num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</p>
+      <h3 class="kp-m3d-name" tabindex="-1">${esc(pt.title || T('m3dTeil').replace('{n}', i + 1))}</h3>
+      ${pt.text ? `<div class="kp-m3d-text">${res(pt.text)}</div>` : ''}
+      ${d >= 0 ? `<p><button type="button" class="kp-btn" data-goto="${d}">${esc(plainTitle(pages[d].title || ''))} →</button></p>` : ''}
+      ${b.tour !== false && pts.length > 1 ? `<div class="kp-m3d-nav"><button type="button" class="kp-btn kp-sec" data-m3d-step="${b.id}" data-dir="-1" ${i <= 0 ? 'disabled' : ''}>← ${esc(T('m3dZurueck'))}</button><button type="button" class="kp-btn" data-m3d-step="${b.id}" data-dir="1" ${i >= pts.length - 1 ? 'disabled' : ''}>${esc(T('m3dVor'))} →</button></div>` : ''}`;
+  }
+  function m3dStatus(b) {
+    const pts = m3dPts(b), seen = (state.self[b.id] || {}).seen || {};
+    const n = pts.filter((pt, i) => { const d = pt.target ? pageIndexById(pt.target) : -1; return d >= 0 ? state.visited.has(d) : !!seen[i]; }).length;
+    return T('m3dTeile').replace('{n}', n).replace('{z}', pts.length);
+  }
+  // ---------- Scribble-Video live im Kurs (Baustein scribble, 02.11.2026) ----------
+  // Der Renderer (js/scribble.js) zeichnet die .scribble.json Bild für Bild auf eine Leinwand, wie werkzeuge/scribble.mjs beim Rendern.
+  // Ton je Szene (doc.scenes[].audio als assets/…), Untertitel als Zeile unter dem Bild, Text zum Nachlesen, Vollbild.
+  // Renderer, Fotohände und Schriften liefert scorm.js als window.SCRIBBLE_RT (nur bei Kursen mit diesem Baustein),
+  // Figuren und Symbole stehen gekürzt im Baustein (b.lib). Erledigt: alle Szenen gesehen oder der Text zum Nachlesen geöffnet.
+  const scrRt = {};
+  const scrDoc = b => (b && b.doc && Array.isArray(b.doc.scenes) && b.doc.scenes.length ? b.doc : null);
+  const scrClock = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  const SCR_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>';
+  const SCR_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>';
+  const SCR_PREV = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6zM19 5.5v13L9.5 12z" fill="currentColor"/></svg>';
+  const SCR_NEXT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2zM5 5.5v13l9.5-6.5z" fill="currentColor"/></svg>';
+  function renderScribble(b) {
+    const d = scrDoc(b);
+    const head = b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : '';
+    const intro = plainText(b.intro) ? `<div class="kp-scr-intro">${res(b.intro)}</div>` : '';
+    if (!d) return `<div class="kp-scr kp-scr-none">${head}${intro}${opts.preview ? `<div class="kp-scr-empty">${esc(T('scrFolgt'))}</div>` : ''}</div>`;
+    const n = d.scenes.length, cc = b.captions !== false;
+    const read = d.scenes.map(sc => (plainText(sc.narration) ? `<li>${esc(sc.narration)}</li>` : '')).join('');
+    const ai = d.stimme && d.stimme.synthetisch ? `<span class="kp-ai-voice" title="${esc(T('kiStimme'))}">${esc(T('kiStimmeKurz'))}<span class="kp-sr"> · ${esc(T('kiStimme'))}</span></span>` : '';
+    return `<div class="kp-scr" data-scr="${b.id}">
+      ${head}${intro}
+      <div class="kp-scr-player">
+      <div class="kp-scr-stage" data-scr-stage>
+        <canvas class="kp-scr-canvas" data-scr-canvas width="1600" height="900" role="img" aria-label="${esc((b.title ? plainTitle(b.title) + '. ' : '') + T('scrBild'))}"></canvas>
+        <button type="button" class="kp-scr-big" data-scr-big hidden>${SCR_PLAY}<span>${esc(T('scrStart'))}</span></button>
+        <p class="kp-scr-load" data-scr-load>${esc(T('scrLaden'))}</p>
+        <p class="kp-scr-cap" data-scr-cap aria-hidden="true" hidden></p>
+      </div>
+      <div class="kp-scr-bar">
+        <button type="button" class="kp-scr-btn kp-scr-main" data-scr-toggle aria-label="${esc(T('scrAbspielen'))}" title="${esc(T('scrAbspielen'))}" disabled>${SCR_PLAY}</button>
+        <button type="button" class="kp-scr-btn" data-scr-step data-dir="-1" aria-label="${esc(T('scrVorige'))}" title="${esc(T('scrVorige'))}" disabled>${SCR_PREV}</button>
+        <button type="button" class="kp-scr-btn" data-scr-step data-dir="1" aria-label="${esc(T('scrNaechste'))}" title="${esc(T('scrNaechste'))}" disabled>${SCR_NEXT}</button>
+        <input type="range" class="kp-scr-seek" data-scr-seek min="0" max="1000" step="1" value="0" aria-label="${esc(T('scrStelle'))}" disabled>
+        <span class="kp-scr-time" data-scr-time>0:00</span>
+        <span class="kp-scr-scene" data-scr-scene aria-live="polite">${esc(T('scrSzene').replace('{n}', 1).replace('{m}', n))}</span>
+        <button type="button" class="kp-scr-btn kp-scr-txt" data-scr-cc aria-pressed="${cc}">${esc(T('scrUntertitel'))}</button>
+        ${vidFsOk() ? `<button type="button" class="kp-scr-btn" data-scr-full aria-label="${esc(T('vollbild'))}" title="${esc(T('vollbild'))}">${icon('expand')}</button>` : ''}
+        ${ai}
+      </div>
+      </div>
+      <details class="kp-scr-read" data-scr-read><summary>${esc(T('scrNachlesen'))}</summary><ol>${read}</ol></details>
+    </div>`;
+  }
+  // Figuren und Symbole des Bausteins zu den globalen Tafeln des Renderers legen (mehrere Scribbles teilen sie)
+  function scrMergeLib(lib) {
+    if (!lib) return;
+    if (lib.peeps) { const P = window.OPEN_PEEPS = window.OPEN_PEEPS || { pose: {}, face: {}, hair: {}, beard: {}, glasses: {} }; Object.keys(lib.peeps).forEach(k => { P[k] = Object.assign(P[k] || {}, lib.peeps[k]); }); }
+    if (lib.icons) window.STREAMLINE_FREEHAND = Object.assign(window.STREAMLINE_FREEHAND || {}, lib.icons);
+  }
+  let scrFontsP = null;
+  function scrFonts() {
+    if (scrFontsP) return scrFontsP;
+    const F = (window.SCRIBBLE_RT || {}).fonts || {};
+    const add = (fam, url, w) => { try { const f = new FontFace(fam, `url(${url})`, { weight: w }); document.fonts.add(f); return f.load().catch(() => null); } catch (e) { return Promise.resolve(null); } };
+    scrFontsP = Promise.all([F.caveat ? add('Caveat', F.caveat, '400 700') : null, F.inter ? add('Inter', F.inter, '100 900') : null]);
+    return scrFontsP;
+  }
+  const scrImg = src => new Promise(r => { if (!src) return r(null); const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = src; });
+  const scrDur = src => new Promise(r => { let fin = false; const done = v => { if (!fin) { fin = true; r(v); } }; const a = new Audio(); a.preload = 'metadata'; a.onloadedmetadata = () => done(isFinite(a.duration) ? a.duration : 0); a.onerror = () => done(0); setTimeout(() => done(0), 6000); a.src = src; });
+  // Bild- und Tonquellen im Dokument auf die Dateien des Kurses umstellen
+  function scrResolve(d) {
+    const c = JSON.parse(JSON.stringify(d));
+    c.style = Object.assign({}, c.style, { subtitles: false });
+    (c.scenes || []).forEach(sc => { if (sc.audio) sc.audio = res(sc.audio); (sc.elements || []).forEach(el => { if (el.src) el.src = res(el.src); }); });
+    if (c.style.logo && typeof c.style.logo === 'object' && c.style.logo.src) c.style.logo = Object.assign({}, c.style.logo, { src: res(c.style.logo.src) });
+    return c;
+  }
+  async function setupScribble(box) {
+    if (box.dataset.ready) return;
+    box.dataset.ready = '1';
+    const b = findBlock(box.dataset.scr), d = b && scrDoc(b);
+    const load = box.querySelector('[data-scr-load]');
+    const fail = () => { box.classList.add('kp-scr-fail'); if (load) load.textContent = T('scrOhne'); };
+    if (!d || typeof ScribbleScene !== 'function') return fail();
+    const rt = scrRt[b.id] = { b, box, t: 0, playing: false, audio: null, audioScene: -1, seen: new Set((state.self[b.id] || {}).s || []), played: {} };
+    mediaTimers.push({ stop: () => scrPause(rt) });
+    try {
+      await scrFonts();
+      scrMergeLib(b.lib);
+      const doc = scrResolve(d);
+      const durations = await Promise.all(doc.scenes.map(sc => (sc.audio ? scrDur(sc.audio) : Promise.resolve(0))));
+      const H = (window.SCRIBBLE_RT || {}).hand || {};
+      const assets = {};
+      const custom = d.style && d.style.hand && typeof d.style.hand === 'object' && d.style.hand.src;
+      if (custom) { const im = await scrImg(res(d.style.hand.src)); if (im) assets.hand = { img: im, tip: d.style.hand.tip || [0, 0], scale: d.style.hand.scale || 0.75 }; doc.style.hand = 'foto'; }
+      else if (d.style && d.style.hand === false) { /* ohne Hand */ }
+      else for (const [k, key] of [['stift', 'hand'], ['zeig', 'zeig'], ['flach', 'flach']]) { const h = H[k]; const im = h && await scrImg(h.src); if (im) assets[key] = { img: im, tip: h.tip, scale: h.scale }; }
+      rt.scene = await new ScribbleScene(doc, typeof SCRIBBLE_SYMBOLS !== 'undefined' ? SCRIBBLE_SYMBOLS : {}, durations, assets).prepare();
+      rt.doc = doc;
+    } catch (e) { return fail(); }
+    if (!box.isConnected) return;
+    rt.canvas = box.querySelector('[data-scr-canvas]');
+    rt.ctx = rt.canvas.getContext('2d');
+    rt.total = rt.scene.tl.total;
+    const sizeIt = () => { const w = Math.min(1920, Math.round(rt.canvas.clientWidth * Math.min(2, window.devicePixelRatio || 1))) || 1280; if (Math.abs(rt.canvas.width - w) > 8) { rt.canvas.width = w; rt.canvas.height = Math.round(w * 9 / 16); } scrDraw(rt); };
+    if (typeof ResizeObserver === 'function') { rt.ro = new ResizeObserver(sizeIt); rt.ro.observe(rt.canvas); }
+    // Standbild vor dem Start: das Ende der ersten Szene (dort steht schon etwas auf der Tafel)
+    rt.t = (state.self[b.id] || {}).at || 0;
+    rt.poster = !rt.t;
+    sizeIt();
+    if (load) load.hidden = true;
+    box.classList.add('kp-scr-ready');
+    box.querySelectorAll('[data-scr-toggle], [data-scr-step], [data-scr-seek]').forEach(el => { el.disabled = false; });
+    const big = box.querySelector('[data-scr-big]'); if (big) big.hidden = false;
+    scrUi(rt);
+  }
+  function scrSceneAt(rt, t) { const sc = rt.scene.tl.scenes; let i = sc.findIndex(s => t < s.t1); return i < 0 ? sc.length - 1 : i; }
+  function scrDraw(rt) {
+    if (!rt.scene || !rt.ctx) return;
+    const t = rt.poster ? Math.max(0, rt.scene.tl.scenes[0].t1 - 0.05) : rt.t;
+    try { rt.scene.draw(rt.ctx, Math.min(t, rt.total - 0.001), rt.canvas.width, rt.canvas.height); } catch (e) { /* Zeichnen fehlgeschlagen: Standbild bleibt */ }
+    const cap = rt.box.querySelector('[data-scr-cap]');
+    if (cap) {
+      const on = rt.b.captions !== false && rt.box.querySelector('[data-scr-cc]').getAttribute('aria-pressed') === 'true';
+      const cue = !rt.poster && on ? (rt.scene.cues || []).find(c => rt.t >= c.t0 && rt.t < c.t1) : null;
+      cap.hidden = !cue; if (cue && cap.textContent !== cue.text) cap.textContent = cue.text;
+    }
+  }
+  function scrUi(rt) {
+    const box = rt.box, i = scrSceneAt(rt, rt.t), n = rt.scene.tl.scenes.length;
+    const tg = box.querySelector('[data-scr-toggle]');
+    if (tg) { tg.innerHTML = rt.playing ? SCR_PAUSE : SCR_PLAY; const l = T(rt.playing ? 'scrPause' : 'scrAbspielen'); tg.setAttribute('aria-label', l); tg.title = l; }
+    const sk = box.querySelector('[data-scr-seek]');
+    if (sk && document.activeElement !== sk) sk.value = Math.round(rt.t / rt.total * 1000);
+    if (sk) sk.setAttribute('aria-valuetext', `${scrClock(rt.t)} / ${scrClock(rt.total)}`);
+    const tm = box.querySelector('[data-scr-time]'); if (tm) tm.textContent = `${scrClock(rt.t)} / ${scrClock(rt.total)}`;
+    const sc = box.querySelector('[data-scr-scene]'); const txt = T('scrSzene').replace('{n}', i + 1).replace('{m}', n); if (sc && sc.textContent !== txt) sc.textContent = txt;
+    box.classList.toggle('kp-scr-playing', rt.playing);
+  }
+  // Ton der laufenden Szene an die Zeit anlegen (beim Start, nach dem Springen, beim Szenenwechsel)
+  function scrAudio(rt) {
+    const i = scrSceneAt(rt, rt.t), s = rt.scene.tl.scenes[i], src = rt.doc.scenes[i].audio;
+    if (rt.audioScene === i && rt.audio && !rt.audio.paused) return;
+    if (rt.audio) { rt.audio.pause(); rt.audio = null; }
+    rt.audioScene = i;
+    if (!src || !rt.playing) return;
+    const a = new Audio(src);
+    a.volume = audioPrefs.vol;
+    const off = rt.t - s.t0;
+    a.addEventListener('loadedmetadata', () => { if (off < a.duration) { a.currentTime = Math.max(0, off); if (rt.playing && rt.audio === a) a.play().catch(() => {}); } }, { once: true });
+    rt.audio = a;
+  }
+  function scrTick(rt, now) {
+    if (!rt.playing) return;
+    const dt = Math.min(0.25, (now - rt.last) / 1000); rt.last = now;
+    const i0 = scrSceneAt(rt, rt.t);
+    rt.t = Math.min(rt.total, rt.t + dt);
+    rt.played[i0] = (rt.played[i0] || 0) + dt;
+    const s0 = rt.scene.tl.scenes[i0];
+    if (rt.played[i0] >= s0.len * 0.8) scrSeen(rt, i0);
+    if (scrSceneAt(rt, rt.t) !== i0) scrAudio(rt);
+    scrDraw(rt); scrUi(rt);
+    if (rt.t >= rt.total) { scrSeen(rt, rt.scene.tl.scenes.length - 1); scrPause(rt); rt.t = rt.total; scrUi(rt); return; }
+    rt.raf = requestAnimationFrame(x => scrTick(rt, x));
+  }
+  function scrPlay(rt) {
+    if (!rt.scene || rt.playing) return;
+    Object.values(scrRt).forEach(o => { if (o !== rt) scrPause(o); });
+    stopSound();
+    if (rt.t >= rt.total - 0.05) rt.t = 0;
+    rt.poster = false; rt.playing = true; rt.last = performance.now(); rt.audioScene = -1;
+    const big = rt.box.querySelector('[data-scr-big]'); if (big) big.hidden = true;
+    scrAudio(rt); scrUi(rt);
+    rt.raf = requestAnimationFrame(x => scrTick(rt, x));
+  }
+  function scrPause(rt) {
+    if (!rt) return;
+    rt.playing = false; cancelAnimationFrame(rt.raf);
+    if (rt.audio) { rt.audio.pause(); rt.audio = null; }
+    rt.audioScene = -1;
+    if (rt.scene) { scrUi(rt); scrSave(rt); }
+  }
+  function scrSeek(rt, t) {
+    rt.poster = false;
+    rt.t = Math.max(0, Math.min(rt.total, t));
+    if (rt.playing) { rt.audioScene = -1; scrAudio(rt); rt.last = performance.now(); }
+    scrDraw(rt); scrUi(rt);
+  }
+  function scrSeen(rt, i) {
+    if (rt.seen.has(i)) return;
+    rt.seen.add(i);
+    scrSave(rt);
+    if (rt.seen.size >= rt.scene.tl.scenes.length) scrFinish(rt.b);
+  }
+  function scrSave(rt) {
+    const st = state.self[rt.b.id] = Object.assign({}, state.self[rt.b.id] || {});
+    st.s = [...rt.seen].sort((x, y) => x - y);
+    st.at = rt.t >= rt.total - 0.5 ? 0 : Math.round(rt.t * 10) / 10;
+  }
+  function scrFinish(b) {
+    const st = state.self[b.id] = Object.assign({}, state.self[b.id] || {});
+    if (st.done) return;
+    st.done = true;
+    updateConditions(); renderFooter(); report();
+  }
+  function renderModell3d(b) {
+    const st = state.self[b.id] || {}, pts = m3dPts(b), seen = st.seen || {}, cur = st.cur == null ? -1 : Number(st.cur);
+    const doneAt = (pt, i) => { const d = pt.target ? pageIndexById(pt.target) : -1; return d >= 0 ? state.visited.has(d) : !!seen[i]; };
+    const reduce = reducedMotion();
+    const hs = pts.map((pt, i) => `<button type="button" slot="hotspot-${i}" class="kp-m3d-hs${i === cur ? ' on' : ''}${doneAt(pt, i) ? ' seen' : ''}" data-position="${m3dVec(pt.pos)}" data-normal="${m3dVec(pt.normal || [0, 0, 1])}" data-visibility-attribute="visible" data-m3d-pt="${i}" data-block="${b.id}" aria-label="${esc((i + 1) + ': ' + (pt.title || ''))}">${i + 1}</button>`).join('');
+    const src = res(b.src || '');
+    const mv = src ? `<model-viewer class="kp-m3d-mv" data-m3d-mv src="${esc(src)}" alt="${esc(b.alt || T('m3dModell'))}" camera-controls touch-action="pan-y" ${b.autoRotate !== false && !reduce ? 'auto-rotate auto-rotate-delay="1200" rotation-per-second="18deg"' : ''} ${b.orbit ? `camera-orbit="${esc(b.orbit)}"` : ''} shadow-intensity="1" exposure="1.05" interaction-prompt="none" ${b.anim ? `animation-name="${esc(b.animName || '')}"` : ''} ${b.ar ? 'ar ar-modes="webxr scene-viewer quick-look"' : ''} ${b.poster ? `poster="${esc(res(b.poster))}"` : ''}>${hs}${b.ar ? `<button type="button" slot="ar-button" class="kp-btn kp-m3d-ar">${esc(T('m3dAr'))}</button>` : ''}<div slot="progress-bar"></div></model-viewer>` : '';
+    return `<div class="kp-m3d${b.stageBg === 'dunkel' ? ' kp-m3d-dark' : ''}" data-m3d="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      ${b.hint ? `<p class="kp-hs-hint kp-m3d-hint">${esc(b.hint)}</p>` : ''}
+      <div class="kp-m3d-grid">
+        <div class="kp-m3d-stage">
+          ${mv}
+          <p class="kp-m3d-fallback" data-m3d-fallback hidden>${esc(T('m3dOhne'))}</p>
+          <p class="kp-m3d-help">${esc(T('m3dHinweis'))}</p>
+          <div class="kp-m3d-tools">
+            ${b.anim ? `<button type="button" class="kp-m3d-tool" data-m3d-anim="${b.id}" aria-pressed="false">▶ ${esc(T('m3dAnimStart'))}</button>` : ''}
+            <button type="button" class="kp-m3d-tool" data-m3d-reset="${b.id}">↺ ${esc(T('m3dReset'))}</button>
+          </div>
+          ${b.credit ? `<p class="kp-credit kp-m3d-credit">${esc(b.credit)}</p>` : ''}
+        </div>
+        <div class="kp-m3d-side">
+          ${pts.length ? `<ol class="kp-m3d-list">${pts.map((pt, i) => `<li><button type="button" class="kp-m3d-item${i === cur ? ' on' : ''}${doneAt(pt, i) ? ' seen' : ''}" data-m3d-pt="${i}" data-block="${b.id}" aria-pressed="${i === cur}"><span class="kp-m3d-dot" aria-hidden="true">${i + 1}</span><span>${esc(pt.title || T('m3dTeil').replace('{n}', i + 1))}</span></button></li>`).join('')}</ol>
+          <p class="kp-m3d-status" data-m3d-status aria-live="polite">${esc(m3dStatus(b))}</p>` : ''}
+          <div class="kp-m3d-info" data-m3d-info aria-live="polite">${m3dInfo(b, cur)}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+  // Teil i zeigen: Kamera dreht auf das Teil (Richtung aus der Normalen oder eigener orbit), Text und Marken tauschen
+  function m3dGo(b, box, i, focus) {
+    const pts = m3dPts(b);
+    if (!b || !box || !pts.length) return;
+    i = Math.min(Math.max(0, Number(i) || 0), pts.length - 1);
+    const pt = pts[i], st = state.self[b.id] || {};
+    st.cur = i; st.seen = Object.assign({}, st.seen || {}, { [i]: true }); state.self[b.id] = st;
+    box.querySelectorAll('[data-m3d-pt]').forEach(el => {
+      const k = Number(el.dataset.m3dPt), on = k === i, p2 = pts[k] || {}, d = p2.target ? pageIndexById(p2.target) : -1;
+      el.classList.toggle('on', on); el.classList.toggle('seen', d >= 0 ? state.visited.has(d) : !!st.seen[k]);
+      if (el.classList.contains('kp-m3d-item')) el.setAttribute('aria-pressed', String(on));
+    });
+    box.classList.add('kp-m3d-used');
+    const info = box.querySelector('[data-m3d-info]');
+    if (info) { info.innerHTML = m3dInfo(b, i); if (focus) { const h = info.querySelector('.kp-m3d-name'); if (h) h.focus({ preventScroll: true }); } }
+    const stat = box.querySelector('[data-m3d-status]');
+    if (stat) stat.textContent = m3dStatus(b);
+    const mv = box.querySelector('[data-m3d-mv]');
+    if (mv && mv.loaded) {
+      mv.autoRotate = false;
+      mv.cameraTarget = m3dVec(pt.pos);
+      if (pt.orbit) mv.cameraOrbit = pt.orbit;
+      else {
+        const n = pt.normal || [0, 0, 1], len = Math.hypot(n[0], n[1], n[2]) || 1;
+        const theta = Math.atan2(n[0] / len, n[2] / len) * 180 / Math.PI, phi = Math.min(150, Math.max(30, Math.acos(n[1] / len) * 180 / Math.PI));
+        let r = 'auto';
+        try { const dm = mv.getDimensions(); r = (Math.max(dm.x, dm.y, dm.z) * 1.7).toFixed(3) + 'm'; } catch (e) { /* ohne Maße */ }
+        mv.cameraOrbit = `${theta.toFixed(1)}deg ${phi.toFixed(1)}deg ${r}`;
+      }
+    }
+    updateConditions(); renderFooter(); report();
+  }
+  function setupModell3d(box) {
+    if (box.dataset.ready) return;
+    box.dataset.ready = '1';
+    const mv = box.querySelector('[data-m3d-mv]'), fb = box.querySelector('[data-m3d-fallback]');
+    const fail = () => { box.classList.add('kp-m3d-fail'); if (fb) fb.hidden = false; };
+    if (!mv || !window.customElements || !customElements.get('model-viewer')) return fail();
+    mv.addEventListener('error', fail);
+    // Ohne Bedienung dreht sich das Modell; der erste Griff hält es an
+    ['pointerdown', 'wheel', 'keydown'].forEach(ev => mv.addEventListener(ev, () => { mv.autoRotate = false; box.classList.add('kp-m3d-used'); }, { once: true, passive: true }));
+    mv.addEventListener('load', () => {
+      box.classList.add('kp-m3d-ready');
+      const b = findBlock(box.dataset.m3d), st = b && state.self[b.id];
+      if (b && st && st.cur != null && st.cur >= 0) m3dGo(b, box, st.cur);
+    });
   }
 
   // Schichten: Ebenen über einem Bild ein- und ausblenden
@@ -5393,9 +7400,246 @@ function kursPlayer(course, opts) {
     return true;
   }
 
+  // ---------- Wischen im Stapel (Webanalyse 29.10.2026, Empfehlung 10) ----------
+  // Am Handy entscheiden Menschen Karten gewohnt per Wischen (7taps-Kartenformat). Die Lernwirkung kommt aus Entscheidung und
+  // Rückmeldung, die Geste ist nur ein bequemer zweiter Weg: am Ende klickt sie denselben Knopf, der sichtbar bleibt und der Weg
+  // für Tastatur und Maus ist (WCAG 2.5.7). Wischen nur mit Finger und Stift (pointerType touch, pen): mit der Maus liegt der
+  // Knopf einen Klick entfernt, Ziehen würde das Markieren von Text stören, und beim Sortieren zieht die Maus wie bisher.
+  // b.swipe === false schaltet ab. Ab 30 % der Kartenbreite oder schneller Bewegung löst es aus, darunter federt die Karte zurück.
+  let swipeEat = null, swipeFiring = false, swipeTipMem = false;
+  const swipeTipKey = () => 'kurs-wischen-' + (course.id || 'kurs');
+  function swipeTipSeen() { if (swipeTipMem) return true; try { return localStorage.getItem(swipeTipKey()) === '1'; } catch (e) { return false; } }
+  function swipeTipDone() {
+    root.querySelectorAll('[data-swipe-tip]').forEach(t => { t.hidden = true; });
+    if (swipeTipMem) return;
+    swipeTipMem = true; try { localStorage.setItem(swipeTipKey(), '1'); } catch (e) { /* kein Speicher */ }
+  }
+  const coarsePointer = () => { try { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); } catch (e) { return false; } };
+  // Daten für die Wischfläche: Knopf links und rechts (Selektor im Baustein) und ihre Beschriftungen; der Baustein selbst trägt
+  // data-swipe-n mit der Zahl der schon entschiedenen Karten (für den Hinweis)
+  const swipeAttrs = (l, r, ll, rl) => ` data-swipe data-swipe-l="${esc(l)}" data-swipe-r="${esc(r)}" data-swipe-ll="${esc(ll)}" data-swipe-rl="${esc(rl)}"`;
+  const swipeN = n => ` data-swipe-n="${Number(n) || 0}"`;
+  const swipeTip = () => `<p class="kp-swipe-tip" data-swipe-tip hidden>${T('wischHinweis')}</p>`;
+  function swipeable(el, o) {
+    if (!el || el.__swipe) return;
+    el.__swipe = true;
+    el.classList.add('kp-swipe');
+    const host = o.host || el.parentElement;
+    const lab = (side, txt) => { const sp = document.createElement('span'); sp.className = 'kp-swipe-lab kp-swipe-lab-' + side; sp.setAttribute('aria-hidden', 'true'); sp.innerHTML = side === 'l' ? `<b>←</b>${esc(txt || '')}` : `${esc(txt || '')}<b>→</b>`; el.appendChild(sp); return sp; };
+    const labL = lab('l', o.labelLeft), labR = lab('r', o.labelRight);
+    const reset = () => { el.style.transform = ''; labL.style.opacity = ''; labR.style.opacity = ''; el.classList.remove('kp-swiping', 'kp-swipe-armed', 'kp-swipe-back', 'kp-swipe-out'); if (host) host.classList.remove('kp-swipe-host'); el.__busy = false; };
+    const fire = fn => { swipeFiring = true; let ok = false; try { ok = fn() !== false; } finally { swipeFiring = false; } if (!ok && el.isConnected) reset(); };
+    el.addEventListener('pointerdown', e => {
+      if ((e.pointerType !== 'touch' && e.pointerType !== 'pen') || e.button > 0 || el.__busy || !e.isPrimary) return;
+      const x0 = e.clientX, y0 = e.clientY, w = Math.max(1, el.offsetWidth), still = reducedMotion(), id = e.pointerId;
+      const tOf = ev => ev.timeStamp || Date.now();
+      let mode = 0, dx = 0, track = [[tOf(e), x0]];
+      const show = () => {
+        const p = Math.min(1, Math.abs(dx) / (w * 0.3));
+        el.style.transform = `translateX(${Math.round(dx)}px)` + (still ? '' : ` rotate(${(Math.max(-1, Math.min(1, dx / w)) * 8).toFixed(2)}deg)`);
+        labL.style.opacity = dx < 0 ? p.toFixed(2) : '0'; labR.style.opacity = dx > 0 ? p.toFixed(2) : '0';
+        el.classList.toggle('kp-swipe-armed', p >= 1);
+      };
+      const off = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', cancel); };
+      const move = ev => {
+        if (ev.pointerId !== id) return;
+        const mx = ev.clientX - x0, my = ev.clientY - y0;
+        if (!mode) {
+          if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+          if (Math.abs(my) >= Math.abs(mx)) { mode = -1; off(); return; } // senkrecht: die Seite rollt
+          mode = 1; el.__busy = true;
+          el.classList.add('kp-swipe-used', 'kp-swiping'); if (host) host.classList.add('kp-swipe-host');
+          try { el.setPointerCapture(id); } catch (err) { /* ohne Capture */ }
+        }
+        dx = mx; track.push([tOf(ev), ev.clientX]); if (track.length > 8) track.shift();
+        if (ev.cancelable) ev.preventDefault();
+        show();
+      };
+      const cancel = ev => { if (ev.pointerId !== id) return; off(); if (mode === 1) reset(); };
+      const up = ev => {
+        if (ev.pointerId !== id) return;
+        off();
+        if (mode !== 1) return;
+        swipeEat = { el, until: Date.now() + 500 }; // der Klick nach dem Wischen zählt nicht
+        dx = ev.clientX - x0;
+        const t1 = tOf(ev), old = track.find(p => t1 - p[0] <= 120) || track[0];
+        const v = (ev.clientX - old[1]) / Math.max(16, t1 - old[0]); // px je ms
+        const dir = Math.abs(dx) >= w * 0.3 ? Math.sign(dx) : (Math.abs(v) >= 0.6 && Math.abs(dx) >= 24 && Math.sign(v) === Math.sign(dx) ? Math.sign(dx) : 0);
+        const fn = dir < 0 ? o.left : dir > 0 ? o.right : null;
+        if (!fn) {
+          if (still) return reset();
+          el.classList.remove('kp-swiping', 'kp-swipe-armed'); el.classList.add('kp-swipe-back');
+          el.style.transform = ''; labL.style.opacity = ''; labR.style.opacity = '';
+          setTimeout(() => { if (el.isConnected) reset(); }, 240);
+          return;
+        }
+        if (still) { reset(); el.__busy = true; return fire(fn); } // Bewegung reduzieren: sofort, ohne Hinausfliegen
+        el.classList.remove('kp-swiping'); el.classList.add('kp-swipe-out');
+        el.style.transform = `translateX(${dir * (w + 80)}px) rotate(${dir * 8}deg)`;
+        setTimeout(() => fire(fn), 220);
+      };
+      el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', cancel);
+    });
+  }
+  // Wischflächen eines Bereichs verdrahten (aus activateComponents, also auch nach refreshBlock) und den Hinweis zeigen:
+  // nur bei groben Zeigern (Finger), bis die erste Karte entschieden ist (danach für den ganzen Kurs nicht mehr)
+  function setupSwipes(scope) {
+    if ([...scope.querySelectorAll('[data-swipe-n]')].some(h => Number(h.dataset.swipeN) > 0)) swipeTipDone();
+    scope.querySelectorAll('[data-swipe]').forEach(el => {
+      const host = el.closest('[data-triage], [data-deck], [data-sortcats]') || el.parentElement;
+      const act = sel => () => { const btn = sel && host.querySelector(sel); if (!btn || btn.disabled) return false; btn.click(); return true; };
+      swipeable(el, { host, left: act(el.dataset.swipeL), right: act(el.dataset.swipeR), labelLeft: el.dataset.swipeLl, labelRight: el.dataset.swipeRl });
+      const tip = host.querySelector('[data-swipe-tip]');
+      if (tip) tip.hidden = !(coarsePointer() && !swipeTipSeen());
+    });
+  }
+
   // ---------- Sortieren, Prozess, Weiter-Sperre, Anhang ----------
+  // Sortieren vom Stapel (Vorbild Rise-Sortieraufgabe „Try your hand at German waste separation“, Kerstin 28.10.2026):
+  // oben liegt immer nur die oberste Karte, darunter die übrigen als Stapelkanten; unten die Behälter als gestrichelte Felder.
+  // Jede Karte wird beim Ablegen geprüft: richtig = sie bleibt im Behälter (Zähler), falsch = sie rüttelt und kommt unter den
+  // Stapel zurück. Fertig, wenn alle Karten liegen. Ziehen, Klick auf die Nummer oder Zifferntaste (WCAG 2.5.7).
+  function renderSortStapel(b) {
+    const st = state.self[b.id] || { place: {}, done: false };
+    const cats = b.categories || [], items = b.items || [];
+    const catAt = n => { const c = cats[n]; return c && typeof c === 'object' ? c.title : c; };
+    const order = state.pools['sort-' + b.id] || items.map((x, i) => i);
+    const open = order.filter(i => st.place[i] == null);
+    const top = open[0], it = items[top];
+    const miss = st.miss || {}, first = items.filter((x, i) => st.place[i] != null && !miss[i]).length;
+    const last = st.last;
+    const lastTxt = last ? (last.ok ? T('stapelRichtig').replace('{k}', items[last.i] ? items[last.i].text : '').replace('{c}', catAt(last.c) || '') + (items[last.i] && items[last.i].why ? ' ' + items[last.i].why : '')
+      : T('stapelFalsch').replace('{k}', items[last.i] ? items[last.i].text : '').replace('{c}', catAt(last.c) || '')) : '';
+    // Wischen geht nur mit genau zwei Behältern: links der erste, rechts der zweite (dieselben Knöpfe wie die Nummern)
+    const swipe = b.swipe !== false && cats.length === 2 && it ? swipeAttrs(`[data-sort-to="0"][data-item="${top}"]`, `[data-sort-to="1"][data-item="${top}"]`, catAt(0), catAt(1)) : '';
+    const card = it ? `<div class="kp-stk-pile" style="--rest:${Math.min(3, open.length - 1)}">
+        <div class="kp-sort-item kp-stk-card" draggable="true" data-sort-item="${top}" data-block="${b.id}" tabindex="0" aria-describedby="${b.id}-stk-hint"${swipe}>
+          ${it.image && it.image.src ? `<img class="kp-sort-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" draggable="false"${focusStyle(it.image)}>` : ''}
+          <span class="kp-sort-text">${esc(it.text)}</span><span class="kp-stk-grip" aria-hidden="true"></span>
+          <span class="kp-sort-move">${cats.map((c, ci) => `<button type="button" data-sort-to="${ci}" data-item="${top}" data-block="${b.id}" aria-label="${esc(T('stapelIn').replace('{c}', c.title))}">${ci + 1}</button>`).join('')}</span>
+        </div></div>` : '';
+    const bins = cats.map((c, ci) => { const n = order.filter(i => st.place[i] === ci).length;
+      return `<div class="kp-sort-cat kp-stk-bin${n ? ' has' : ''}" data-sort-cat="${ci}" data-block="${b.id}"><span class="kp-stk-bin-title">${esc(c.title)}</span>${n ? `<span class="kp-stk-bin-n" aria-label="${esc(T('stapelImBehaelter').replace('{n}', n))}">${n}</span>` : ''}</div>`; }).join('');
+    return `<div class="kp-sortcats kp-sort-stapel${st.done ? ' is-done' : ''}" data-sortcats="${b.id}" style="--n:${Math.max(1, cats.length)}"${b.swipe !== false && cats.length === 2 ? swipeN(items.length - open.length + Object.keys(miss).length) : ''}>
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      ${b.intro ? `<div class="kp-text kp-stk-intro">${res(b.intro)}</div>` : ''}
+      <p class="kp-sort-hint" id="${b.id}-stk-hint">${esc(b.hint || T('stapelHinweis'))}</p>
+      <div class="kp-stk-top">${st.done ? `<div class="kp-stk-fertig" role="status" tabindex="-1" data-stk-done><b>${esc(T('stapelFertig'))}</b><span>${esc(T('stapelErgebnis').replace('{n}', first).replace('{m}', items.length))}</span></div>` : card}
+        <p class="kp-stk-count">${esc(T('stapelRest').replace('{n}', open.length).replace('{m}', items.length))}</p>${swipe ? swipeTip() : ''}</div>
+      <div class="kp-sort-cats kp-stk-bins">${bins}</div>
+      <p class="kp-stk-live${last ? (last.ok ? ' ok' : ' no') : ''}" data-stk-live role="status" aria-live="polite">${esc(lastTxt)}</p>
+      ${st.done ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-sort-reset="${b.id}">${esc(T('nochEinmal'))}</button></div>` : ''}
+    </div>`;
+  }
+  // Eine Karte in eine Spalte legen: bei „stapel“ sofort prüfen, sonst nur merken
+  function sortPut(b, i, ci, box) {
+    const st = state.self[b.id] || { place: {}, done: false };
+    if (st.done) return;
+    if (b.look === 'stapel') {
+      const it = (b.items || [])[i], cat = (b.categories || [])[ci];
+      if (!it || !cat) return;
+      const ok = it.cat === (typeof cat === 'object' ? cat.title : cat);
+      st.miss = st.miss || {};
+      st.last = { i, c: ci, ok };
+      if (ok) {
+        st.place[i] = ci;
+        const order = state.pools['sort-' + b.id] || (b.items || []).map((x, k) => k);
+        if (order.every(k => st.place[k] != null)) st.done = true;
+        uiSound(st.done ? 'erledigt' : 'richtig');
+      } else {
+        st.miss[i] = (st.miss[i] || 0) + 1;
+        const order = (state.pools['sort-' + b.id] || (b.items || []).map((x, k) => k)).filter(k => k !== i);
+        order.push(i); state.pools['sort-' + b.id] = order;
+        uiSound('falsch');
+      }
+      state.self[b.id] = st;
+      const wrap = box && box.closest('[data-sortcats]');
+      refreshBlock(wrap || root.querySelector(`[data-sortcats="${b.id}"]`), renderSort(b));
+      const nb = root.querySelector(`[data-sortcats="${b.id}"]`);
+      if (nb) {
+        if (!ok) { const bin = nb.querySelector(`[data-sort-cat="${ci}"]`); if (bin && !reducedMotion()) { bin.classList.add('kp-stk-wrong'); setTimeout(() => bin.classList.remove('kp-stk-wrong'), 500); } }
+        else { const bin = nb.querySelector(`[data-sort-cat="${ci}"]`); if (bin && !reducedMotion()) { bin.classList.add('kp-stk-hit'); setTimeout(() => bin.classList.remove('kp-stk-hit'), 600); } }
+        const f = nb.querySelector(st.done ? '[data-stk-done]' : '.kp-stk-card'); if (f) f.focus({ preventScroll: true });
+      }
+      updateConditions(); renderFooter(); report();
+      return;
+    }
+    st.place[i] = ci;
+    state.self[b.id] = st;
+    refreshBlock(box ? box.closest('[data-sortcats]') : root.querySelector(`[data-sortcats="${b.id}"]`), renderSort(b));
+    // Ohne Maus (UX-Prüfung 07.11.2026, WCAG 2.4.3): nach dem Neuzeichnen steht der Fokus auf dem nächsten offenen Kärtchen,
+    // sind alle zugeordnet auf „Zuordnung prüfen“; eine Ansage nennt, wohin das Kärtchen gewandert ist
+    const nb = root.querySelector(`[data-sortcats="${b.id}"]`);
+    if (nb && box && box.matches && box.matches('[data-sort-to]')) {
+      const next = nb.querySelector('.kp-sort-pool [data-sort-item] [data-sort-to]:not([disabled])') || nb.querySelector('[data-sort-check]:not([disabled])') || nb.querySelector(`[data-sort-item="${i}"] [data-sort-to]:not([disabled])`);
+      if (next) next.focus({ preventScroll: true });
+      const it = (b.items || [])[i], cat = (b.categories || [])[ci];
+      let say = nb.querySelector('[data-sort-say]');
+      if (!say) { say = document.createElement('span'); say.className = 'kp-sr'; say.setAttribute('data-sort-say', ''); say.setAttribute('role', 'status'); nb.appendChild(say); }
+      say.textContent = T('sortAbgelegt').replace('{k}', plainText((it && it.text) || '')).replace('{c}', typeof cat === 'object' ? cat.title : (cat || ''));
+    }
+  }
+  // Liste mit Auswahl (sortcats.look „liste“, Vorbild Rise-Übung „Prepare to raise a concern“, 30.10.2026): je Punkt eine Zeile mit
+  // Auswahlfeld „Bereich wählen“, ein Prüfknopf für alle. Richtige Zeilen rasten ein, falsche bleiben änderbar; beim zweiten
+  // Fehlversuch steht der richtige Bereich dabei. Sind alle richtig, entsteht daraus die Checkliste nach Bereichen (drucken).
+  // Die Auswahl selbst zeichnet nicht neu (change-Handler), damit der Fokus im Feld bleibt.
+  const slCat = (b, n) => { const c = (b.categories || [])[n]; return c && typeof c === 'object' ? c.title : c; };
+  const slRight = (b, st, i) => st.place[i] != null && ((b.items || [])[i] || {}).cat === slCat(b, st.place[i]);
+  function slList(b) {
+    const items = b.items || [];
+    return (b.categories || []).map(c => { const its = items.filter(it => it.cat === c.title);
+      return its.length ? `<section class="kp-sl-group"><h3>${esc(c.title)}</h3><ul>${its.map(it => `<li>${esc(it.text)}</li>`).join('')}</ul></section>` : ''; }).join('');
+  }
+  function renderSortListe(b) {
+    const st = state.self[b.id] || { place: {} };
+    const items = b.items || [], cats = b.categories || [];
+    // Reihenfolge wie vorgegeben: die Punkte bauen meist aufeinander auf (gemischt nur mit shuffle)
+    const order = b.shuffle ? state.pools['sort-' + b.id] || items.map((x, i) => i) : items.map((x, i) => i);
+    const ok = st.ok || {}, tries = st.tries || 0;
+    const rows = order.map(i => { const it = items[i]; if (!it) return '';
+      const fixed = !!ok[i], wrong = tries && !fixed && st.checked;
+      const sel = `<select class="kp-sl-select" data-sl-pick="${i}" data-block="${b.id}" aria-label="${esc(T('slBereichFuer').replace('{k}', it.text))}"${fixed || st.done ? ' disabled' : ''}>
+          <option value="">${esc(b.placeholder || T('slWaehle'))}</option>${cats.map((c, ci) => `<option value="${ci}"${st.place[i] === ci ? ' selected' : ''}>${esc(c.title)}</option>`).join('')}</select>`;
+      const note = fixed ? (it.why ? `<p class="kp-sl-note ok"><span class="kp-sr">${esc(T('slRichtig'))} </span>${esc(it.why)}</p>` : `<span class="kp-sr">${esc(T('slRichtig'))}</span>`)
+        : wrong ? `<p class="kp-sl-note no">${tries >= 2 ? esc(T('slGehoertZu').replace('{c}', it.cat)) + (it.why ? ' ' + esc(it.why) : '') : esc(T('slNochNicht'))}</p>` : '';
+      return `<li class="kp-sl-row${fixed ? ' kp-right' : wrong ? ' kp-wrong' : ''}" data-sl-row="${i}"><span class="kp-sl-text">${esc(it.text)}</span>${sel}${note}</li>`; }).join('');
+    return `<div class="kp-sortcats kp-sort-liste${st.done ? ' is-done' : ''}" data-sortcats="${b.id}">
+      ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      ${b.intro ? `<div class="kp-text kp-sl-intro">${res(b.intro)}</div>` : ''}
+      <p class="kp-sort-hint">${esc(b.hint || T('slHinweis'))}</p>
+      <ul class="kp-sl-list">${rows}</ul>
+      <p class="kp-sl-live" data-sl-live role="status" aria-live="polite">${st.checked && !st.done ? esc(T('slStand').replace('{n}', Object.keys(ok).length).replace('{m}', items.length)) : ''}</p>
+      ${st.done ? `<div class="kp-sl-result" tabindex="-1" data-sl-done>
+          <h3 class="kp-sl-result-title">${esc(b.listTitle || T('slCheckliste'))}</h3><div class="kp-sl-groups">${slList(b)}</div>
+          ${plainText(b.after) ? `<div class="kp-text kp-sl-after">${res(b.after)}</div>` : ''}
+          <div class="kp-quiz-actions">${b.print !== false ? `<button type="button" class="kp-btn kp-sec" data-sl-print="${b.id}">${esc(T('slDrucken'))}</button>` : ''}<button type="button" class="kp-btn kp-sec" data-sort-reset="${b.id}">${esc(T('nochEinmal'))}</button></div></div>`
+        : `<div class="kp-quiz-actions"><button type="button" class="kp-btn" data-sl-check="${b.id}">${esc(b.checkLabel || T('slPruefen'))}</button></div>`}
+    </div>`;
+  }
+  function slCheck(b, box) {
+    const st = state.self[b.id] || { place: {} };
+    const items = b.items || [];
+    const open = items.map((x, i) => i).filter(i => st.place[i] == null);
+    const live = box.querySelector('[data-sl-live]');
+    if (open.length) {
+      if (live) live.textContent = T('slOffen').replace('{n}', open.length);
+      const f = box.querySelector(`[data-sl-pick="${open[0]}"]`); if (f) f.focus();
+      return;
+    }
+    st.ok = {}; items.forEach((x, i) => { if (slRight(b, st, i)) st.ok[i] = true; });
+    st.tries = (st.tries || 0) + 1; st.checked = true;
+    st.done = Object.keys(st.ok).length === items.length;
+    state.self[b.id] = st;
+    uiSound(st.done ? 'erledigt' : 'falsch');
+    refreshBlock(box, renderSort(b));
+    const nb = root.querySelector(`[data-sortcats="${b.id}"]`);
+    if (nb) { const f = st.done ? nb.querySelector('[data-sl-done]') : nb.querySelector('.kp-sl-row.kp-wrong select'); if (f) f.focus({ preventScroll: !st.done }); }
+    updateConditions(); renderFooter(); report();
+  }
   // Sortieren in Kategorien: mit Maus ziehen oder mit der Tastatur zuordnen
   function renderSort(b) {
+    if (b.look === 'stapel') return renderSortStapel(b);
+    if (b.look === 'liste') return renderSortListe(b);
     const st = state.self[b.id] || { place: {}, done: false };
     const cats = b.categories || [];
     const items = (b.items || []);
@@ -5413,23 +7657,23 @@ function kursPlayer(course, opts) {
       const right = st.done && st.place[i] != null && it.cat === catAt(st.place[i]);
       return `<li class="kp-sort-item ${st.done ? (right ? 'kp-right' : 'kp-wrong') : ''}" draggable="${st.done ? 'false' : 'true'}" data-sort-item="${i}" data-block="${b.id}" tabindex="0">
         ${ablage ? `<span class="kp-sort-grip" aria-hidden="true">${icon('move')}</span>` : ''}${pic}<span class="kp-sort-text">${esc(it.text)}</span>
-        ${st.done ? (right ? '<b aria-label="richtig">✔</b>' : `<b aria-label="falsch">✘ <span class="kp-sort-fix">${esc(it.cat)}</span></b>`) : `<span class="kp-sort-move">${cats.map((c, ci) => `<button data-sort-to="${ci}" data-item="${i}" data-block="${b.id}" title="Nach „${esc(c.title)}“" ${inCat === ci ? 'disabled' : ''}>${ci + 1}</button>`).join('')}</span>`}
+        ${st.done ? (right ? '<b aria-label="richtig">✔</b>' : `<b aria-label="falsch">✘ <span class="kp-sort-fix">${esc(it.cat)}</span></b>`) : `<span class="kp-sort-move">${cats.map((c, ci) => `<button type="button" data-sort-to="${ci}" data-item="${i}" data-block="${b.id}" aria-label="${esc(T('stapelIn').replace('{c}', c.title))}: ${esc(plainText(it.text || ''))}" title="${esc(T('stapelIn').replace('{c}', c.title))}" ${inCat === ci ? 'disabled' : ''}>${ci + 1}</button>`).join('')}</span>`}
       </li>`;
     };
     const boxes = cats.map((c, ci) => `<div class="kp-sort-cat" data-sort-cat="${ci}" data-block="${b.id}">
       <p class="kp-sort-cat-title"><span class="kp-num" aria-hidden="true">${ci + 1}</span>${esc(c.title)}</p>
-      <ul>${order.filter(i => st.place[i] === ci).map(i => chip(i, ci)).join('') || `<li class="kp-sort-empty">${ablage ? '' : 'Noch nichts zugeordnet'}</li>`}</ul></div>`).join('');
+      <ul>${order.filter(i => st.place[i] === ci).map(i => chip(i, ci)).join('') || `<li class="kp-sort-empty">${ablage ? '' : T('sortNochNichts')}</li>`}</ul></div>`).join('');
     const score = st.done ? items.filter((it, i) => st.place[i] != null && it.cat === catAt(st.place[i])).length : 0;
     return `<div class="kp-sortcats${ablage ? ' kp-sort-ablage' : ''}${bilder ? ' kp-sort-bilder' : ''}" data-sortcats="${b.id}" style="--n:${Math.max(1, cats.length)}">
       ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
       ${b.intro ? `<div class="kp-text" style="margin-bottom:12px">${res(b.intro)}</div>` : ''}
-      <p class="kp-sort-hint">${esc(b.hint || 'Zieh die Karten in die passende Spalte. Mit der Tastatur: Karte anwählen und die Nummer der Spalte drücken.')}</p>
-      <div class="kp-sort-pool"><ul>${open.map(i => chip(i, null)).join('') || `<li class="kp-sort-empty">${ablage ? '' : 'Alles zugeordnet'}</li>`}</ul></div>
+      <p class="kp-sort-hint">${esc(b.hint || T('sortHinweis'))}</p>
+      <div class="kp-sort-pool"><ul>${open.map(i => chip(i, null)).join('') || `<li class="kp-sort-empty">${ablage ? '' : T('allesZugeordnet')}</li>`}</ul></div>
       <div class="kp-sort-cats">${boxes}</div>
       ${st.done
-        ? `<div class="kp-feedback ${score === items.length ? 'ok' : 'neutral'}" role="status">${score} von ${items.length} richtig zugeordnet.${score === items.length ? '' : ' Die richtige Spalte steht jetzt hinter den falschen Karten.'}</div>
-           <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-sort-reset="${b.id}">Noch einmal</button></div>`
-        : `<div class="kp-quiz-actions"><button class="kp-btn" data-sort-check="${b.id}" ${open.length ? 'disabled' : ''}>${esc(b.checkLabel || (ablage ? 'OK' : 'Zuordnung prüfen'))}</button></div>`}
+        ? `<div class="kp-feedback ${score === items.length ? 'ok' : 'neutral'}" role="status">${esc(T('sortErgebnis').replace('{n}', score).replace('{m}', items.length))}${score === items.length ? '' : ' ' + esc(T('sortFalschHinweis'))}</div>
+           <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-sort-reset="${b.id}">${T('nochEinmal')}</button></div>`
+        : `<div class="kp-quiz-actions"><button class="kp-btn" data-sort-check="${b.id}" ${open.length ? 'disabled' : ''}>${esc(b.checkLabel || (ablage ? 'OK' : T('sortPruefen')))}</button>${open.length && !ablage ? `<span class="kp-sort-open" role="status">${esc(open.length === 1 ? T('sortOffenEins') : T('sortOffen').replace('{n}', open.length))}</span>` : ''}</div>`}
     </div>`;
   }
 
@@ -5617,7 +7861,7 @@ function kursPlayer(course, opts) {
         <div class="kp-mkc-side kp-on-dark">${eyebrow(b.eyebrow || T('mkcNeu'))}<span class="kp-mkc-tag">${T('mkcFrage')}</span><p class="kp-mkc-q">${esc(plainText(b.front))}</p>${o ? stand : ''}</div>
         <div class="kp-mkc-main"><div class="kp-mkc-card">${o
           ? `<div class="kp-mkc-face kp-mkc-back" tabindex="-1"><span class="kp-mkc-tag">${T('mkcAntwort')}</span><div class="kp-text">${res(b.back || '')}</div></div>`
-          : `<div class="kp-mkc-face kp-mkc-cover"><span class="kp-mkc-cover-ico" aria-hidden="true">${icon('flip')}</span><p class="kp-mkc-small">${esc(b.hint || T('mkcHinweis'))}</p><button type="button" class="kp-btn" data-mkc-flip="${b.id}">${T('mkcUmdrehen')}</button></div>`}</div></div>
+          : `<div class="kp-mkc-face kp-mkc-cover">${b.coverIcon === '' ? '' : `<span class="kp-mkc-cover-ico" aria-hidden="true">${icon(b.coverIcon || 'flip')}</span>`}<p class="kp-mkc-small">${esc(b.hint || T('mkcHinweis'))}</p><button type="button" class="kp-btn" data-mkc-flip="${b.id}">${T('mkcUmdrehen')}</button></div>`}</div></div>
       </div>`;
     }
     return `<div class="kp-mkc${o ? ' is-open' : ''}" data-mkc="${b.id}">
@@ -5638,6 +7882,45 @@ function kursPlayer(course, opts) {
     const r = (state.self[b.id] || {}).r || {}, cards = deckCards(b);
     return { cards, known: cards.filter(c => r[c.id] === 1), retry: cards.filter(c => r[c.id] === 0) };
   }
+  // Fällige Karten über Sitzungen (kartenstapel.spaced): Leitner-System mit fünf Fächern. Abstand in Tagen je Fach,
+  // Fach 1 morgen, dann jeweils doppelt so lang (verteiltes Lernen nach Cepeda u. a. 2006 und 2008, Abruf nach Roediger & Karpicke 2006).
+  const LEITNER_TAGE = [1, 2, 4, 8, 16];
+  // Heute als ganze Zahl (UTC-Tage seit 1970), damit der Lernstand klein bleibt; der Selbsttest verschiebt den Tag über opts.today oder window.__kursHeute
+  function todayNum() {
+    if (opts.today != null && isFinite(+opts.today)) return Math.floor(+opts.today);
+    try { if (window.__kursHeute != null && isFinite(+window.__kursHeute)) return Math.floor(+window.__kursHeute); } catch (e) { /* ohne Fenster */ }
+    return Math.floor(Date.now() / 864e5);
+  }
+  const fmtDayNum = d => new Date(d * 864e5).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+  // Fächer je Karte: { kartenId: [fach, fälligAmTag] } im Lernstand, zusätzlich im Browser (wie die Freitexte), falls das LMS keinen Platz hat
+  const lbKey = id => 'kurs-faecher-' + (course.id || 'kurs') + '-' + id;
+  function deckLb(b) {
+    const st = state.self[b.id] || {};
+    if (st.lb && typeof st.lb === 'object') return st.lb;
+    try { const o = JSON.parse(localStorage.getItem(lbKey(b.id)) || 'null'); if (o && typeof o === 'object') return o; } catch (e) { /* kein Speicher */ }
+    return {};
+  }
+  function deckLbSave(b, lb) {
+    (state.self[b.id] || (state.self[b.id] = {})).lb = lb;
+    try { localStorage.setItem(lbKey(b.id), JSON.stringify(lb)); } catch (e) { /* kein Speicher */ }
+  }
+  const deckSpaced = b => !!b.spaced && Object.keys(deckLb(b)).length > 0;
+  // Fällig sind Karten, deren Tag erreicht ist, und neue Karten, die noch in keinem Fach liegen
+  function deckDue(b) { const lb = deckLb(b), d = todayNum(); return deckCards(b).filter(c => !lb[c.id] || lb[c.id][1] <= d); }
+  function deckNextDay(b) { const lb = deckLb(b), d = todayNum(); const v = deckCards(b).map(c => lb[c.id] && lb[c.id][1]).filter(x => x > d); return v.length ? Math.min(...v) : 0; }
+  const deckFach = (b, c) => { const e = deckLb(b)[c.id]; return e ? e[0] : 1; };
+  const fachTag = (b, c) => { const f = deckFach(b, c); return `<span class="kp-deck-fach${f >= 4 ? ' is-sitzt' : ''}">${T('deckFach').replace('{f}', f)}${f >= 4 ? ' · ' + T('deckSitzt') : ''}</span>`; };
+  function deckFaecherHtml(b) {
+    const cnt = [0, 0, 0, 0, 0];
+    deckCards(b).forEach(c => { cnt[Math.min(5, Math.max(1, deckFach(b, c))) - 1]++; });
+    const max = Math.max(1, ...cnt), lab = cnt.map((n, i) => T('deckFach').replace('{f}', i + 1) + ': ' + n).join(', ');
+    return `<div class="kp-deck-boxes" role="img" aria-label="${esc(T('deckFaecherAria').replace('{l}', lab))}" data-deck-boxes>
+      <div class="kp-deck-boxbars">${cnt.map((n, i) => `<div class="kp-deck-box"><span class="kp-deck-box-n">${n}</span><span class="kp-deck-box-bar"><i style="--h:${Math.round(n / max * 100)}%"></i></span><span class="kp-deck-box-f">${i + 1}</span></div>`).join('')}</div>
+      <p class="kp-label">${T('deckFaecher')}</p></div>`;
+  }
+  function deckShuffle(ids) { const a = ids.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+  // Wie viele Karten sind kursweit fällig (für den Wiedereinstieg)? Nur Stapel, die schon Fächer haben
+  function dueDecks() { const out = []; pages.forEach((p, pi) => (p.blocks || []).forEach(b => { if (b.type === 'kartenstapel' && deckSpaced(b)) { const n = deckDue(b).length; if (n) out.push({ b, pi, n }); } })); return out; }
   // Schon aufgedeckte Karten bleiben sichtbar (Wunsch Kerstin 15.10.2026), die zuletzt bewertete oben
   function deckSeenHtml(ids, r, skip) {
     const list = ids.filter(id => id !== skip).map(id => findBlock(id)).filter(Boolean);
@@ -5648,14 +7931,28 @@ function kursPlayer(course, opts) {
     const st = state.self[b.id] || {}, cards = deckCards(b), n = cards.length;
     const head = b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : '';
     const gross = fillOf(b);
-    const wrap = inner => `<div class="kp-deck${gross ? ' kp-deck-gross' : ''}" data-deck="${b.id}">${head}${inner}</div>`;
+    const wrap = inner => `<div class="kp-deck${gross ? ' kp-deck-gross' : ''}" data-deck="${b.id}"${b.swipe !== false ? swipeN(Object.keys(st.r || {}).length) : ''}>${head}${inner}</div>`;
     if (!n) return wrap(`<p class="kp-label">${T('deckLeer')}</p>`);
+    // Fächer: an einem neuen Tag zuerst die fälligen Karten, nicht das Ergebnis von gestern
+    if (deckSpaced(b) && st.day !== todayNum()) {
+      const due = deckDue(b).length, nx = deckNextDay(b);
+      return wrap(`<div class="kp-deck-due" data-deck-due-box>
+        <div class="kp-deck-due-text"><p class="kp-deck-due-n" role="status" tabindex="-1">${due ? (due === 1 ? T('deckFaellig1') : T('deckFaellig').replace('{n}', due)) : T('deckNichtsFaellig').replace('{d}', nx ? fmtDayNum(nx) : '…')}</p>
+          <div class="kp-quiz-actions">${due ? `<button type="button" class="kp-btn" data-deck-due="${b.id}">${T('deckFaelligStart')}</button>` : `<button type="button" class="kp-btn kp-sec" data-deck-extra="${b.id}">${T('deckTrotzdem')}</button>`}</div>
+          ${due ? '' : `<p class="kp-label">${T('deckTrotzdemHinweis')}</p>`}</div>
+        ${deckFaecherHtml(b)}</div>`);
+    }
     if (st.done) {
       const d = deckResult(b);
-      return wrap(`<div class="kp-deck-done" tabindex="-1" role="status"><p class="kp-deck-score"><strong>${d.known.length}</strong> / ${n}</p><p class="kp-saved">${T('deckErgebnis').replace('{k}', d.known.length).replace('{n}', n)}</p></div>
-        ${d.retry.length ? `<p class="kp-label">${T('deckWiederholen')}</p><ul class="kp-deck-retry">${d.retry.map(c => `<li><strong>${esc(plainText(c.front))}</strong><div class="kp-text">${res(c.back || '')}</div></li>`).join('')}</ul>` : `<p>${T('deckAlle')}</p>`}
-        ${d.known.length && d.retry.length ? `<p class="kp-label">${T('deckGewusstAlle')}</p><ul class="kp-deck-retry kp-deck-seen-list" data-deck-seen>${d.known.map(c => `<li class="is-known"><strong>${esc(plainText(c.front))}</strong><div class="kp-text">${res(c.back || '')}</div></li>`).join('')}</ul>` : ''}
-        ${d.known.length && !d.retry.length ? `<ul class="kp-deck-retry kp-deck-seen-list" data-deck-seen>${d.known.map(c => `<li class="is-known"><strong>${esc(plainText(c.front))}</strong><div class="kp-text">${res(c.back || '')}</div></li>`).join('')}</ul>` : ''}
+      // Im Ergebnis zählen nur die Karten dieser Runde (bei fälligen Karten nicht der ganze Stapel)
+      const sp = !!b.spaced, inRound = c => (st.r || {})[c.id] != null;
+      if (sp) { d.known = d.known.filter(inRound); d.retry = d.retry.filter(inRound); }
+      const m = sp ? d.known.length + d.retry.length : n, ft = c => sp ? fachTag(b, c) : '', nx = sp ? deckNextDay(b) : 0;
+      return wrap(`<div class="kp-deck-done" tabindex="-1" role="status"><p class="kp-deck-score"><strong>${d.known.length}</strong> / ${m}</p><p class="kp-saved">${T('deckErgebnis').replace('{k}', d.known.length).replace('{n}', m)}</p>${nx && !st.extra ? `<p class="kp-label" data-deck-next>${T('deckNaechste').replace('{d}', fmtDayNum(nx))}</p>` : ''}${st.extra ? `<p class="kp-label">${T('deckTrotzdemHinweis')}</p>` : ''}</div>
+        ${sp ? deckFaecherHtml(b) : ''}
+        ${d.retry.length ? `<p class="kp-label">${T('deckWiederholen')}</p><ul class="kp-deck-retry">${d.retry.map(c => `<li>${ft(c)}<strong>${esc(plainText(c.front))}</strong><div class="kp-text">${res(c.back || '')}</div></li>`).join('')}</ul>` : `<p>${T('deckAlle')}</p>`}
+        ${d.known.length && d.retry.length ? `<p class="kp-label">${T('deckGewusstAlle')}</p><ul class="kp-deck-retry kp-deck-seen-list" data-deck-seen>${d.known.map(c => `<li class="is-known">${ft(c)}<strong>${esc(plainText(c.front))}</strong><div class="kp-text">${res(c.back || '')}</div></li>`).join('')}</ul>` : ''}
+        ${d.known.length && !d.retry.length ? `<ul class="kp-deck-retry kp-deck-seen-list" data-deck-seen>${d.known.map(c => `<li class="is-known">${ft(c)}<strong>${esc(plainText(c.front))}</strong><div class="kp-text">${res(c.back || '')}</div></li>`).join('')}</ul>` : ''}
         ${plainText(b.after) ? `<div class="kp-text">${res(b.after)}</div>` : ''}
         <div class="kp-quiz-actions"><button type="button" class="kp-btn kp-sec" data-deck-restart="${b.id}">${T('deckNeu')}</button></div>`);
     }
@@ -5664,21 +7961,24 @@ function kursPlayer(course, opts) {
       const fan = cards.slice(0, 5).map((c, i) => `<span class="kp-deck-fan-card" style="--i:${i};--n:${Math.min(5, n)}"></span>`).join('');
       return wrap(`${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
         <div class="kp-deck-start"><div class="kp-deck-fan" aria-hidden="true">${fan}</div>
-          <div><p class="kp-deck-count">${T('deckAnzahl').replace('{n}', n).replace('{g}', g)}</p><button type="button" class="kp-btn" data-deck-start="${b.id}">${T('deckStart')}</button></div></div>`);
+          <div><p class="kp-deck-count">${T('deckAnzahl').replace('{n}', n).replace('{g}', g)}</p>${b.spaced ? `<p class="kp-label kp-deck-lbhint">${T('deckFaecherHinweis')}</p>` : ''}<button type="button" class="kp-btn" data-deck-start="${b.id}">${T('deckStart')}</button></div></div>`);
     }
     const c = findBlock(st.q[0]) || cards[0];
     const r = st.r || {}, seen = Object.keys(r).length, k = Object.values(r).filter(v => v === 1).length;
-    const again = r[c.id] === 0;
-    return wrap(`<p class="kp-deck-stand" data-deck-stand>${T('deckStand').replace('{i}', Math.min(n, seen + (again ? 0 : 1))).replace('{n}', n).replace('{k}', k)}</p>
-      <div class="kp-deck-bar" aria-hidden="true"><i style="--w:${Math.round(seen / n * 100)}%"></i></div>
-      <div class="kp-mkc kp-deck-card${st.flip ? ' is-open' : ''}">
-        <div class="kp-mkc-card">${st.flip
+    const again = r[c.id] === 0, rn = b.spaced && st.n ? st.n : n;
+    // Wischen erst auf der Rückseite: rechts „Gewusst“, links „Noch nicht“; vorn dreht ein Tippen die Karte um
+    const swipe = st.flip && b.swipe !== false ? swipeAttrs('[data-deck-rate="0"]', '[data-deck-rate="1"]', T('deckNochNicht'), T('deckGewusst')) : '';
+    return wrap(`<p class="kp-deck-stand" data-deck-stand>${T('deckStand').replace('{i}', Math.min(rn, seen + (again ? 0 : 1))).replace('{n}', rn).replace('{k}', k)}</p>
+      <div class="kp-deck-bar" aria-hidden="true"><i style="--w:${Math.round(seen / rn * 100)}%"></i></div>
+      <div class="kp-mkc kp-deck-card${st.flip ? ' is-open' : ''}"${swipe}>
+        <div class="kp-mkc-card"${st.flip ? '' : ` data-deck-flip="${b.id}"`}>${st.flip
           ? `<div class="kp-mkc-face kp-mkc-back" tabindex="-1"><span class="kp-mkc-tag">${T('mkcAntwort')}</span><p class="kp-mkc-small">${esc(plainText(c.front))}</p><div class="kp-text">${res(c.back || '')}</div></div>`
           : `<div class="kp-mkc-face kp-mkc-front" tabindex="-1"><span class="kp-mkc-tag">${T('mkcFrage')}${again ? ` · ${T('deckKommtNochmal').replace(/\.$/, '')}` : ''}</span><p class="kp-mkc-q">${esc(plainText(c.front))}</p></div>`}</div>
         <div class="kp-mkc-foot kp-deck-actions">${st.flip
           ? `<button type="button" class="kp-btn" data-deck-rate="1" data-block="${b.id}">${T('deckGewusst')}</button><button type="button" class="kp-btn kp-sec" data-deck-rate="0" data-block="${b.id}">${T('deckNochNicht')}</button>`
           : `<span class="kp-label">${T('mkcHinweis')}</span><button type="button" class="kp-btn" data-deck-flip="${b.id}">${T('deckUmdrehen')}</button>`}</div>
       </div>
+      ${swipe ? swipeTip() : ''}
       ${deckSeenHtml(st.seen || Object.keys(r).reverse(), r, c.id)}`);
   }
   // Formular, das sich füllt: Klick auf die Kopfzeile füllt die Zeile mit dem Fall und erklärt sie (Vorbild Verarbeitungsverzeichnis)
@@ -5776,8 +8076,111 @@ function kursPlayer(course, opts) {
     </div>`;
   }
 
+  // Kommentare einordnen (triage.look „szene“, Vorbild Rise „Read the comment. Tap the correct category“, 30.10.2026): je Kommentar
+  // eine Szene mit Ort und Zeit, Sprechblase und den Personen im Raum; daneben die Einordnungen als Karten mit Symbol und Farbe.
+  // Falsch: die Karte bekommt ein Kreuz, darunter eine Denkfrage (hint), neuer Versuch. Richtig: Haken, Begründung, Warnzeichen.
+  // Stand: st.d[i] = richtige Wahl (erst dann gilt der Kommentar als erledigt), st.w[i] = Fehlversuche, st.end nach dem letzten.
+  const TSZ_ICONS = { ok: 'check', warn: 'search', bad: 'hand' };
+  function tszChoices(b) {
+    const raw = (b.choices || []).map(x => String(x || '').trim()).filter(Boolean);
+    const list = raw.length >= 2 ? raw : [b.labelTrue || T('triJa'), b.labelFalse || T('triNein')];
+    const tones = b.tones || (list.length === 2 ? ['ok', 'bad'] : list.length === 3 ? ['ok', 'warn', 'bad'] : []);
+    return list.map((text, k) => { const tone = ['ok', 'warn', 'bad'].includes(tones[k]) ? tones[k] : 'warn'; return { text, tone, icon: ((b.choiceIcons || [])[k]) || TSZ_ICONS[tone] }; });
+  }
+  const tszAnswer = (b, it) => (b.choices || []).filter(x => String(x || '').trim()).length >= 2 ? Number(it.answer) || 0 : it.keep !== false ? 0 : 1;
+  function tszPeople(it, show) {
+    const ps = (it.people || []).slice(0, 4).map(p => castOf(p || {}));
+    return ps.map(p => {
+      const src = p.look === 'image' || (!p.look && p.image) ? poseImage(p, p.pose) : '';
+      const fig = src ? `<img src="${esc(res(src))}" alt="">` : avatarSvg(p.look || 'a1', p.pose || 'neutral', true);
+      const label = [p.name, p.role].filter(Boolean).join(', ');
+      const mark = show && p.mark;
+      return `<div class="kp-tsz-person${mark ? ' is-marked' : ''}"${p.color ? ` style="--kp-shirt:${esc(p.color)}"` : ''}>
+        <span class="kp-tsz-fig" aria-hidden="true">${fig}</span>${label ? `<span class="kp-tsz-name">${esc(label)}</span>` : ''}
+        ${mark && p.note ? `<span class="kp-tsz-note">${esc(p.note)}</span>` : ''}</div>`;
+    }).join('');
+  }
+  // Foto-Fassung: die Personen stehen im Bild, darunter ihre Namen als Leiste; die Hervorhebung liegt als Ring auf dem Foto (people[].x/y)
+  function tszPhoto(it, show) {
+    const ps = (it.people || []).slice(0, 4).map(p => castOf(p || {}));
+    const rings = show ? ps.filter(p => p.mark && p.x != null && p.y != null).map(p => {
+      const x = Math.max(4, Math.min(96, Number(p.x))), y = Math.max(6, Math.min(94, Number(p.y)));
+      return `<span class="kp-tsz-ring" style="left:${x}%;top:${y}%" aria-hidden="true"></span>${p.note ? `<span class="kp-tsz-ringnote${x > 60 ? ' is-left' : ''}" style="left:${x}%;top:${y}%">${esc(p.note)}</span>` : ''}`;
+    }).join('') : '';
+    const chips = ps.map(p => {
+      const ini = String(p.name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+      const face = p.image && p.image.src ? `<img src="${esc(res(p.image.src))}" alt="">` : esc(ini);
+      return `<li class="kp-tsz-chip${show && p.mark ? ' is-marked' : ''}"><span class="kp-tsz-ini" aria-hidden="true">${face}</span><span><b>${esc(p.name || '')}</b>${p.role ? `<small>${esc(p.role)}</small>` : ''}</span>${show && p.mark && p.note && (p.x == null || p.y == null) ? `<em>${esc(p.note)}</em>` : ''}</li>`;
+    }).join('');
+    const im = it.image;
+    return `<div class="kp-tsz-pic"><img src="${esc(res(im.src))}" alt="${esc(im.alt || '')}"${focusStyle(im)}>${rings}${im.credit ? `<span class="kp-tsz-credit">${esc(im.credit)}</span>` : ''}</div>
+      ${chips ? `<ul class="kp-tsz-chips">${chips}</ul>` : ''}`;
+  }
+  function renderTriSzene(b) {
+    const items = b.items || [], n = items.length;
+    const st = state.self[b.id] || { d: {}, cur: 0 };
+    const w = st.w || {};
+    const ch = tszChoices(b);
+    const head = b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : '';
+    const firstRight = items.filter((x, i) => st.d[i] != null && !(w[i] || []).length).length;
+    if (!n) return `<div class="kp-tsz" data-triage="${b.id}">${head}<p class="kp-lock">${T('triLeer')}</p></div>`;
+    const prog = cur => `<div class="kp-tsz-prog" aria-hidden="true">${items.map((x, k) => `<i class="${st.d[k] != null ? (!(w[k] || []).length ? 'is-first' : 'is-done') : ''}${k === cur ? ' is-now' : ''}"></i>`).join('')}</div>`;
+    if (st.end && items.every((x, i) => st.d[i] != null)) {
+      return `<div class="kp-tsz" data-triage="${b.id}">${head}
+        <div class="kp-tsz-sum" tabindex="-1" data-tsz-sum role="status">
+          <span class="kp-tsz-sumring" style="--p:${Math.round(firstRight / n * 100)}" aria-hidden="true"><b>${firstRight}/${n}</b></span>
+          <div><p class="kp-tsz-sumt">${esc(T('tszFertig').replace('{n}', n))}</p>
+          <p>${esc(T('tszErsterVersuch').replace('{n}', firstRight).replace('{m}', n))}</p>${prog(-1)}
+          <div class="kp-quiz-actions"><button type="button" class="kp-btn kp-sec" data-tri-reset="${b.id}">${esc(T('nochEinmal'))}</button></div></div></div></div>`;
+    }
+    const open = items.map((x, i) => i).filter(i => st.d[i] == null);
+    const i = st.cur != null && items[st.cur] ? st.cur : (open.length ? open[0] : 0);
+    const it = items[i], ans = tszAnswer(b, it), done = st.d[i] != null, tried = w[i] || [];
+    const last = tried[tried.length - 1];
+    const photo = !!(it.image && it.image.src);
+    const btns = ch.map((c, k) => {
+      const right = done && k === ans, wrong = tried.includes(k);
+      return `<button type="button" class="kp-tsz-ch kp-tsz-${c.tone}${right ? ' is-right' : ''}${wrong ? ' is-wrong' : ''}${done && !right ? ' is-off' : ''}" data-tsz-go="${k}" data-i="${i}" data-block="${b.id}"${done || wrong ? ' aria-disabled="true"' : ''}>
+        <span class="kp-tsz-ico" aria-hidden="true">${icon(c.icon)}</span><span class="kp-tsz-lab">${esc(c.text)}</span>
+        ${right ? `<span class="kp-tsz-badge" aria-hidden="true">${icon('check')}</span><span class="kp-sr">${esc(T('richtig'))}</span>` : wrong ? `<span class="kp-tsz-badge" aria-hidden="true">✕</span><span class="kp-sr">${esc(T('falsch'))}</span>` : ''}</button>`;
+    }).join('');
+    const fb = done
+      ? `<div class="kp-tsz-fb ok" tabindex="-1" data-tsz-fb><span class="kp-tsz-fbico" aria-hidden="true">${icon('check')}</span><div><p class="kp-tsz-fbt">${esc(T('tszRichtig'))}</p>${it.feedback ? `<div class="kp-text">${res(it.feedback)}</div>` : ''}
+          ${it.flags ? `<p class="kp-tsz-flags"><b>${esc(b.flagsLabel || T('tszWarnzeichen'))}:</b> ${esc(it.flags)}</p>` : ''}</div></div>
+        <div class="kp-quiz-actions"><button type="button" class="kp-btn" data-tsz-next="${b.id}">${esc(open.length ? T('tszNaechster') : T('tszAuswertung'))} →</button></div>`
+      : last != null ? `<div class="kp-tsz-fb no" tabindex="-1" data-tsz-fb><span class="kp-tsz-fbico" aria-hidden="true">✕</span><div><p class="kp-tsz-fbt">${esc(T('tszNichtGanz'))}</p><div class="kp-text">${it.hint ? res(it.hint) : esc(T('tszNochmal'))}</div></div></div>` : '';
+    const tail = Math.max(8, Math.min(92, Number(it.tail) || (photo ? 30 : 18)));
+    return `<div class="kp-tsz${photo ? ' kp-tsz-foto' : ''}" data-triage="${b.id}">${head}
+      <p class="kp-tsz-task">${icon('pencil')}<span>${esc(b.question || T('tszAufgabe'))}</span></p>
+      <div class="kp-tsz-grid">
+        <figure class="kp-tsz-scene">
+          ${it.place ? `<figcaption class="kp-tsz-place">${icon('calendar')}<span>${esc(it.place)}</span></figcaption>` : ''}
+          <div class="kp-tsz-bubble" style="--tail:${tail}%">${it.sub ? `<p class="kp-tsz-who">${esc(it.sub)}</p>` : ''}<p class="kp-tsz-say">${esc(it.title || '')}</p></div>
+          ${photo ? tszPhoto(it, done || tried.length > 0) : `<div class="kp-tsz-people" style="--n:${Math.max(1, Math.min(4, (it.people || []).length))}">${tszPeople(it, done || tried.length > 0)}</div>`}
+        </figure>
+        <div class="kp-tsz-side">
+          <div class="kp-tsz-top"><p class="kp-tsz-count">${esc(T('tszKommentar').replace('{n}', i + 1).replace('{m}', n))}</p>${prog(i)}</div>
+          <div class="kp-tsz-choices" role="group" aria-label="${esc(b.question || T('tszAufgabe'))}" style="--n:${ch.length}">${btns}</div>
+          <div aria-live="polite">${fb}</div>
+        </div>
+      </div></div>`;
+  }
+  function tszGo(b, i, k, el) {
+    const st = state.self[b.id] || (state.self[b.id] = { d: {}, cur: 0 });
+    st.w = st.w || {};
+    const it = (b.items || [])[i];
+    if (!it || st.d[i] != null || (st.w[i] || []).includes(k)) return;
+    st.cur = i;
+    if (k === tszAnswer(b, it)) { st.d[i] = k; uiSound('richtig'); }
+    else { (st.w[i] = st.w[i] || []).push(k); uiSound('falsch'); }
+    report();
+    refreshBlock(el.closest('[data-triage]'), renderTriage(b));
+    const f = root.querySelector(`[data-triage="${b.id}"] [data-tsz-fb]`); if (f) f.focus({ preventScroll: true });
+    updateConditions(); renderFooter();
+  }
   // Stück für Stück entscheiden: links die Karten, rechts die offene Frage zur aktiven Karte
   function renderTriage(b) {
+    if (b.look === 'szene') return renderTriSzene(b);
     const items = b.items || [];
     const st = state.self[b.id] || { d: {}, cur: 0 };
     const ja = b.labelTrue || T('triJa');
@@ -5803,7 +8206,7 @@ function kursPlayer(course, opts) {
         : mail
         ? '<svg class="kp-tri-doc" viewBox="0 0 28 20" aria-hidden="true"><rect x="1.5" y="1.5" width="25" height="17" rx="2"/><path d="M2 3l12 9 12-9"/></svg>'
         : '<svg class="kp-tri-doc" viewBox="0 0 24 28" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="25" rx="2"/><path d="M6 9h12M6 14h12M6 19h8"/></svg>';
-      return `<button type="button" class="${cls}" data-tri-pick="${i}" data-block="${b.id}" ${w != null ? 'disabled' : ''} aria-pressed="${i === aktiv}">
+      return `<button type="button" class="${cls}" style="--kp-i:${Math.min(i, 8)}" data-tri-pick="${i}" data-block="${b.id}" ${w != null ? 'disabled' : ''} aria-pressed="${i === aktiv}">
         ${w != null ? `<span class="kp-tri-badge">${esc(nameOf(w))}</span>` : ''}
         ${icon2}
         ${mail && it.sub ? `<span class="kp-tri-from">${esc(it.sub)}</span>` : ''}
@@ -5813,7 +8216,7 @@ function kursPlayer(course, opts) {
         ${falsch ? `<span class="kp-tri-fix">${T('triRichtigWaere')} ${esc(soll)}</span>` : ''}
       </button>`;
     }).join('');
-    let panel;
+    let panel, swipe = '';
     if (!items.length) {
       panel = `<p class="kp-lock">${T('triLeer')}</p>`;
     } else if (fertig) {
@@ -5841,12 +8244,17 @@ function kursPlayer(course, opts) {
           <button type="button" class="kp-tri-yes" data-tri-go="j" data-i="${aktiv}" data-block="${b.id}">${esc(ja)}</button>
           <button type="button" class="kp-tri-no" data-tri-go="n" data-i="${aktiv}" data-block="${b.id}">${esc(nein)}</button>`}
         </div>`;
+      // Wischen: links „nein“ bzw. die erste von zwei Möglichkeiten, rechts „ja“ bzw. die zweite; bei mehr als zwei nicht
+      if (b.swipe !== false && (!multi || wahl.length === 2)) {
+        swipe = multi ? swipeAttrs('[data-tri-go="0"]', '[data-tri-go="1"]', wahl[0], wahl[1]) : swipeAttrs('[data-tri-go="n"]', '[data-tri-go="j"]', nein, ja);
+        panel += swipeTip();
+      }
     }
-    return `<div class="kp-tri${mail ? ' kp-tri-mail' : ''}${ticket ? ' kp-tri-ticket' : ''}" data-triage="${b.id}">
+    return `<div class="kp-tri${mail ? ' kp-tri-mail' : ''}${ticket ? ' kp-tri-ticket' : ''}" data-triage="${b.id}"${b.swipe !== false && (!multi || wahl.length === 2) ? swipeN(items.length - offen.length) : ''}>
       ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}${b.intro ? `<div class="kp-text">${res(b.intro)}</div>` : ''}</div>` : ''}
       <div class="kp-tri-split">
         <div class="kp-tri-board">${karten}</div>
-        <div class="kp-tri-panel" role="status">${panel}</div>
+        <div class="kp-tri-panel" role="status"${swipe}>${panel}</div>
       </div>
       <p class="kp-sr" role="status">${items.length - offen.length} ${T('von')} ${items.length}</p>
     </div>`;
@@ -5903,7 +8311,12 @@ function kursPlayer(course, opts) {
   let chatFresh = null;
   // Fragen an die Figur: die Lernenden fragen, die Figur antwortet. Umgekehrt zum Quiz, die Person steuert das Gespräch.
   // Zustand state.self[id] = { asked: [i] } in der Reihenfolge der Fragen; erledigt ab b.min Fragen (Standard 1)
-  const askMin = b => Math.max(1, Math.min(Number(b.min) || 1, (b.items || []).length || 1));
+  const askMin = b => Math.max(1, Math.min(Number(b.min) || 1, (b.items || []).length || 1, askBudget(b) || Infinity));
+  // Gespräch mit wenig Zeit (Vorbild Rise „Performance Analysis in Practice“, 1:1 mit Marcus): höchstens budget Fragen,
+  // jede gute Frage deckt eine Ursache aus clues[] auf (items[].clue), die Leiste oben zeigt, was schon gefunden ist.
+  const askBudget = b => { const n = Number(b.budget) || 0; return n > 0 ? Math.min(n, (b.items || []).length) : 0; };
+  const askClues = b => (b.clues || []).map(c => String(c || '').trim()).filter(Boolean);
+  const askFound = (b, asked) => askClues(b).map((c, k) => asked.some(i => (b.items[i] || {}).clue !== '' && (b.items[i] || {}).clue != null && Number(b.items[i].clue) === k));
   function renderFragen(b) {
     const st = state.self[b.id] || {};
     const items = b.items || [];
@@ -5914,26 +8327,31 @@ function kursPlayer(course, opts) {
     const photo = p.look === 'image' || (!p.look && p.image && p.image.src);
     const face = photo && poseImage(p, pose) ? `<img src="${esc(res(poseImage(p, pose)))}" alt=""${focusStyle(p.image)}>` : avatarSvg(p.look && p.look !== 'image' ? p.look : 'a1', pose);
     const open = items.map((x, i) => i).filter(i => !asked.includes(i));
-    const all = !open.length;
+    const budget = askBudget(b), left = budget ? Math.max(0, budget - asked.length) : open.length;
+    const all = !open.length || (budget > 0 && !left);
+    const clues = askClues(b), found = askFound(b, asked), nFound = found.filter(Boolean).length;
+    const tracker = clues.length ? `<ol class="kp-ask-clues" aria-label="${esc(T('fragUrsachen').replace('{n}', nFound).replace('{m}', clues.length))}">${clues.map((c, k) => `<li class="kp-ask-clue${found[k] ? ' on' : ''}"><i aria-hidden="true"></i><span>${esc(c)}</span><span class="kp-sr">: ${esc(found[k] ? T('fragGefunden') : T('fragOffen'))}</span></li>`).join('')}</ol>` : '';
+    const missed = budget && all && clues.length && nFound < clues.length;
     const log = [
       plainText(b.intro) ? `<div class="kp-ask-msg kp-ask-them"><div class="kp-text">${res(b.intro)}</div></div>` : '',
       ...asked.map((i, k) => `<div class="kp-ask-msg kp-ask-me">${esc(plainText(items[i].q))}</div>
         <div class="kp-ask-msg kp-ask-them${k === asked.length - 1 ? ' kp-ask-new' : ''}" ${k === asked.length - 1 ? 'data-ask-last' : ''}><div class="kp-text">${res(items[i].a)}</div></div>`),
-      all && plainText(b.end) ? `<div class="kp-ask-msg kp-ask-them kp-ask-end"><div class="kp-text">${res(b.end)}</div></div>` : ''
+      all && plainText(missed && plainText(b.endMissed) ? b.endMissed : b.end) ? `<div class="kp-ask-msg kp-ask-them kp-ask-end"><div class="kp-text">${res(missed && plainText(b.endMissed) ? b.endMissed : b.end)}</div></div>` : ''
     ].join('');
     const need = askMin(b);
     return `<div class="kp-ask" data-fragen="${b.id}">
       ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      ${tracker}
       <div class="kp-ask-grid">
         <div class="kp-ask-who"><span class="kp-ask-face" data-mood="${esc(pose)}"${p.color ? ` style="--kp-shirt:${esc(p.color)}"` : ''}>${face}</span>
           <span class="kp-ask-name">${esc(p.name || '')}</span>${p.role ? `<span class="kp-ask-role">${esc(p.role)}</span>` : ''}</div>
         <div class="kp-ask-main">
           <div class="kp-ask-log" aria-live="polite">${log}</div>
           ${all ? '' : `<div class="kp-ask-menu" role="group" aria-label="${esc(T('fragWas'))}">
-            <span class="kp-label">${asked.length ? T('fragWeiter') : T('fragWas')}</span>
+            <span class="kp-label">${budget ? esc((b.budgetLabel || T('fragBudget')).replace('{n}', left).replace(left === 1 ? /\bFragen\b/ : /^$/, 'Frage')) : asked.length ? T('fragWeiter') : T('fragWas')}</span>
             ${open.map(i => `<button type="button" class="kp-ask-q fx-reveal" data-ask-q="${i}" data-block="${b.id}">${esc(plainText(items[i].q))}</button>`).join('')}
           </div>`}
-          <p class="kp-ask-status">${T('fragStand').replace('{n}', asked.length).replace('{m}', items.length)}${asked.length < need ? ' · ' + T('fragNoch').replace('{n}', need - asked.length) : ''}</p>
+          ${budget && all ? `<p class="kp-ask-status kp-ask-sum">${esc(T('fragUrsachen').replace('{n}', nFound).replace('{m}', clues.length))}${missed ? ` <button type="button" class="kp-btn kp-btn-ghost" data-ask-reset="${esc(b.id)}">${T('fragNeu')}</button>` : ''}</p>` : budget ? '' : `<p class="kp-ask-status">${T('fragStand').replace('{n}', asked.length).replace('{m}', items.length)}${asked.length < need ? ' · ' + T('fragNoch').replace('{n}', need - asked.length) : ''}</p>`}
         </div>
       </div>
     </div>`;
@@ -6228,11 +8646,24 @@ function kursPlayer(course, opts) {
   }
 
   // Weiter-Sperre: Der Rest der Seite erscheint erst auf Klick
+  // Startkarte vor dem Wissenscheck (pool.startCard, Vorbild Fernhill „Ready when you are“): Pillen mit Fragenzahl und
+  // Wiederholung, „n von m richtig“ mit Teilstrichen und Marke an der Bestehensgrenze, Startknopf. Stand state.self[id].started.
+  function poolStartCard(b) {
+    const draw = Math.max(1, Math.min(Number(b.draw) || 1, (b.questions || []).length));
+    const need = b.graded === false ? 0 : Math.max(1, Math.ceil(draw * passScore / 100));
+    const segs = Array.from({ length: draw }, (x, k) => `<i class="${k < need ? 'need' : ''}" style="--kp-i:${k}"></i>`).join('');
+    return `<div class="kp-pool-start">
+      <p class="kp-pool-start-title">${esc(b.startTitle || T('poolBereit'))}</p>
+      <p class="kp-sl-pills kp-pool-pills"><span class="kp-sl-pill">${icon('lines')} ${esc(T('poolFragen').replace('{n}', draw))}</span><span class="kp-sl-pill">${icon('flip')} ${esc(T('poolWiederholen'))}</span></p>
+      ${need ? `<div class="kp-pool-pass"><p><b>${esc(T('poolBestehen').replace('{n}', need).replace('{m}', draw))}</b> ${esc(b.passHint || T('poolBestehenHint'))}</p><div class="kp-pool-segs" style="--need:${need};--n:${draw}" aria-hidden="true">${segs}<span class="kp-pool-mark">${icon('check')}${esc(T('poolPass'))}</span></div></div>` : ''}
+      <button type="button" class="kp-btn kp-pool-go" data-pool-start="${esc(b.id)}">${esc(b.startLabel || T('poolStart'))}${icon('arrow')}</button>
+    </div>`;
+  }
   function renderGate(b) {
     const done = (state.self[b.id] || {}).done;
     return done ? '<div class="kp-gate-open" aria-hidden="true"></div>'
       : `<div class="kp-gate"><div class="kp-text">${res(b.html)}</div>
-        <button class="kp-btn" data-gate="${b.id}">${esc(b.label || 'Weiter')}</button></div>`;
+        <button class="kp-btn" data-gate="${b.id}">${esc(b.label || 'Weiter')}${scrollLook() ? icon('arrow') : ''}</button></div>`;
   }
 
   // ---------- Genially-Ansatz: Code-Schloss, Fundstücke, Wahlbrett ----------
@@ -6349,10 +8780,12 @@ function kursPlayer(course, opts) {
   // Wahlbrett (Choice Board): die Lernenden wählen selbst, welche Aufgaben sie machen. Kachel mit Ziel führt auf eine Seite
   // (erledigt, sobald sie besucht ist), Kachel mit Aufgabe klappt ein Feld auf („Erledigt“ setzt state.self[id].d).
   let wbOpen = {};
-  const wbMin = b => Math.max(1, Math.min((b.items || []).length || 1, Number(b.min) || 2));
+  const wbMin = b => Math.max(1, Math.min((b.items || []).length || 1, Number(b.min) || (b.look === 'liste' ? (b.items || []).length : 2)));
   function wbDone(b, i) {
     const it = (b.items || [])[i] || {};
     const t = it.target ? pageIndexById(it.target) : -1;
+    // Liste der Herausforderungen: erledigt erst, wenn auf der Zielseite jede Frage beantwortet und jede Übung erledigt ist
+    if (t >= 0 && b.look === 'liste') return state.visited.has(t) && (pages[t].blocks || []).every(x => x.type === 'quiz' ? state.answers[x.id] != null : !isExercise(x) || blockDone(x));
     if (t >= 0) return state.visited.has(t);
     return ((state.self[b.id] || {}).d || []).includes(i);
   }
@@ -6361,7 +8794,42 @@ function kursPlayer(course, opts) {
     const n = wbCount(b), m = wbMin(b);
     return `<p class="kp-wb-status${n >= m ? ' all' : ''}" data-wb-status role="status" aria-live="polite">${esc(n >= m ? T('wbGeschafft').replace('{n}', n) : T('wbStand').replace('{n}', n).replace('{m}', m))}</p>`;
   }
+  // Liste der Herausforderungen (wahlbrett.look „liste“, Vorbild Rise „Workplace challenges“, 30.10.2026): nummerierte Zeilen,
+  // jede führt auf ihre eigene Seite mit Beispielen; mit Reihenfolge (Standard) ist nur die nächste offen, die übrigen „Später“.
+  // Der Startknopf führt zur nächsten offenen Aufgabe. Die Zielseite zeigt oben den Rückweg und „Aufgabe n von m“ (wbCrumb).
+  const wbOrdered = b => b.order !== false;
+  function wbNext(b) { const list = b.items || []; for (let i = 0; i < list.length; i++) if (!wbDone(b, i)) return i; return -1; }
+  function renderWbListe(b) {
+    const list = b.items || [], nx = wbNext(b);
+    const rows = list.map((it, i) => {
+      const t = it.target ? pageIndexById(it.target) : -1, done = wbDone(b, i);
+      const locked = wbOrdered(b) && !done && i !== nx;
+      const st = done ? T('wbFertig') : locked ? T('wbSpaeter') : T('wbOffen');
+      const attrs = t < 0 ? 'disabled' : locked ? `aria-disabled="true" data-wb-locked="${i}" data-block="${b.id}"` : `data-goto="${t}"`;
+      return `<li class="kp-wbl-row${done ? ' done' : ''}${locked ? ' locked' : ''}${i === nx ? ' next' : ''}"><button type="button" class="kp-wbl-btn" ${attrs} data-wb-tile="${i}">
+        <span class="kp-wbl-num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span><span class="kp-wbl-title">${esc(it.title || '')}${it.text ? `<span class="kp-wbl-text">${esc(it.text)}</span>` : ''}</span>
+        <span class="kp-wbl-state">${done ? icon('check') : ''}${esc(st)}${done ? '' : ' →'}</span></button></li>`;
+    }).join('');
+    const t = nx >= 0 && list[nx].target ? pageIndexById(list[nx].target) : -1;
+    const start = nx < 0 ? '' : `<div class="kp-quiz-actions"><button type="button" class="kp-btn" data-goto="${t}"${t < 0 ? ' disabled' : ''}>${esc(nx === 0 ? (b.startLabel || T('wbStarten')) : T('wbWeiterMit').replace('{n}', nx + 1))} →</button></div>`;
+    return `<div class="kp-wb kp-wbl" data-wahlbrett="${b.id}">
+      ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title kp-wbl-head">${accent(b.title)}</h2>` : ''}</div>` : ''}
+      ${plainText(b.intro) ? `<div class="kp-text">${res(b.intro)}</div>` : ''}
+      <ol class="kp-wbl-list">${rows}</ol>${start}${wbStatus(b)}</div>`;
+  }
+  // Rückweg oben auf einer Zielseite der Liste: „← Titel der Liste“ und „Aufgabe n von m“
+  function wbCrumb(p) {
+    const id = p.id;
+    for (let k = 0; k < pages.length; k++) for (const b of pages[k].blocks || []) {
+      if (b.type !== 'wahlbrett' || b.look !== 'liste') continue;
+      const i = (b.items || []).findIndex(it => it && it.target === id);
+      if (i < 0 || pages[k] === p) continue;
+      return `<button type="button" class="kp-wb-crumb" data-goto="${k}">← ${esc(plainTitle(b.title || pages[k].title || ''))}</button>${p.eyebrow ? '' : eyebrow(T('wbAufgabeVon').replace('{n}', i + 1).replace('{m}', (b.items || []).length))}`;
+    }
+    return '';
+  }
   function renderWahlbrett(b) {
+    if (b.look === 'liste') return renderWbListe(b);
     const list = b.items || [];
     const open = wbOpen[b.id];
     const cols = Math.max(1, Math.min(3, list.length === 4 ? 2 : list.length));
@@ -6472,15 +8940,42 @@ function kursPlayer(course, opts) {
       : `<div class="kp-linkcard kp-lc-empty">${inner}<p class="kp-lock">Noch keine Adresse hinterlegt.</p></div>`;
   }
 
+  // Dateiname beim Herunterladen: der Anzeigename ohne Zeichen, die Dateisysteme ablehnen, mit der Endung der
+  // Datei aus der Ablage („0.2 · Karten“ hätte sonst „2 · Karten“ als Endung und kein .pdf)
+  function fileDlName(f) {
+    const base = String(f.src || '').split(/[?#]/)[0].split('/').pop();
+    const ext = /^[^:]+\.([a-z0-9]{1,5})$/i.test(base) ? '.' + base.split('.').pop().toLowerCase() : '';
+    let n = String(f.name || base || 'datei').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'datei';
+    if (ext && !n.toLowerCase().endsWith(ext)) n += ext;
+    return n;
+  }
   function renderAttachments(b) {
     const items = (b.files || []).filter(f => f.src);
     return `<div class="kp-files${b.look === 'knopf' ? ' kp-files-knopf' : ''}">
       ${b.title ? `<p class="kp-label">${esc(b.title)}</p>` : ''}
-      ${items.length ? `<ul>${items.map(f => `<li><a href="${esc(res(f.src))}" download="${esc(f.name || 'datei')}">${icon('book')}<span><strong>${esc(f.name || 'Datei')}</strong>${f.note ? `<em>${esc(f.note)}</em>` : ''}</span><span class="kp-file-dl">${T('herunterladen')}</span></a></li>`).join('')}</ul>`
+      ${items.length ? `<ul>${items.map(f => `<li><a href="${esc(res(f.src))}" download="${esc(fileDlName(f))}">${icon('book')}<span><strong>${esc(f.name || 'Datei')}</strong>${f.note ? `<em>${esc(f.note)}</em>` : ''}</span><span class="kp-file-dl">${T('herunterladen')}</span></a></li>`).join('')}</ul>`
         : '<p class="kp-lock">Noch keine Datei hinterlegt.</p>'}</div>`;
   }
 
+  // Relative Helligkeit einer #hex-Farbe nach WCAG (0 schwarz, 1 weiß)
+  function hexLum(h) {
+    const m = String(h || '').match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    if (!m) return 1;
+    const c = m.slice(1).map(x => { const v = parseInt(x, 16) / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
   // Das eigene Bild eines Bausteins (fuer die Kulisse): Bild, Titelbild, Poster, erste Suchbild-Runde
+  // Textfarbe eines Bausteins: Hauptfarbe, Akzentfarbe, Weiß, Schriftfarbe oder eine eigene Farbe als #hex
+  function blockInk(v, dark) {
+    const k = String(v || '').trim();
+    if (!k) return '';
+    if (k === 'primary') return 'var(--kp-primary)';
+    // die abgedunkelte Akzentfarbe (accent-ink) trägt auf hellem Grund, auf dunklem die reine
+    if (k === 'accent') return dark ? 'var(--kp-accent)' : 'var(--kp-accent-ink, var(--kp-accent))';
+    if (k === 'text') return 'var(--kp-text)';
+    if (k === 'white') return '#fff';
+    return /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(k) ? k : '';
+  }
   function ownImage(b) {
     const src = o => (o && o.src) || '';
     return src(b.image) || src(b.poster && { src: b.poster }) || src(b.media && b.media.poster && { src: b.media.poster }) || src(((b.rounds || []).find(r => r && r.image && r.image.src) || {}).image) || '';
@@ -6502,6 +8997,7 @@ function kursPlayer(course, opts) {
   // Tabelle: Zeilen in b.cells (eine Zeile je Zeile, Zellen mit | getrennt), erste Zeile als Kopf (header), erste Spalte als Zeilenkopf (firstCol)
   function tableRows(b) { return String(b.cells || '').split(/\r?\n/).map(r => r.trim()).filter(Boolean).map(r => r.split('|').map(c => c.trim())); }
   function renderTable(b) {
+    if (b.look === 'ausfuellen') return renderTableFill(b);
     const rows = tableRows(b), n = Math.max(1, ...rows.map(r => r.length));
     const head = b.header !== false && rows.length > 1 ? rows.shift() : null;
     const cell = (c, i, tag) => tag === 'th' ? `<th scope="${i < 0 ? 'col' : 'row'}">${esc(c || '')}</th>` : `<td>${esc(c || '')}</td>`;
@@ -6511,10 +9007,148 @@ function kursPlayer(course, opts) {
         ${head ? `<thead><tr>${pad(head).map(c => cell(c, -1, 'th')).join('')}</tr></thead>` : ''}
         <tbody>${rows.map(r => `<tr>${pad(r).map((c, i) => cell(c, 0, b.firstCol && i === 0 ? 'th' : 'td')).join('')}</tr>`).join('')}</tbody></table></div></div>`;
   }
+  // Tabelle zum Ausfüllen (table.look „ausfuellen“, Webanalyse 29.10.2026, Empfehlung 7): eine Lückenzelle steht in cells als
+  // [[Lösung / Ablenker / Ablenker # Erklärung]]. Ohne eigene Ablenker bietet die Auswahl alle Lösungen derselben Spalte an
+  // (das Verwechseln ähnlicher Kategorien ist die Aufgabe), stabil gemischt. Stand: state.self[id] = { a: {Zelle: Wahl}, checked, n, r, f }
+  // (checked = Ergebnis steht, n = Zahl der Prüfungen, r = richtige Zellen zuletzt, f = Anteil beim ersten Prüfen für die Wertung).
+  function tfGap(c) {
+    const m = /\[\[([\s\S]*?)\]\]/.exec(String(c || ''));
+    if (!m) return null;
+    const k = m[1].indexOf('#'), body = k >= 0 ? m[1].slice(0, k) : m[1];
+    const opts = body.split('/').map(x => x.trim()).filter(Boolean);
+    return { sol: opts[0] || '', own: opts.slice(1), why: k >= 0 ? m[1].slice(k + 1).trim() : '', pre: c.slice(0, m.index).trim(), post: c.slice(m.index + m[0].length).trim() };
+  }
+  function tfModel(b) {
+    const rows = tableRows(b), n = Math.max(1, ...rows.map(r => r.length));
+    const head = b.header !== false && rows.length > 1 ? rows.shift() : null;
+    const body = rows.map(r => r.concat(Array(Math.max(0, n - r.length)).fill('')));
+    const gaps = [];
+    body.forEach((r, ri) => r.forEach((c, ci) => { const g = tfGap(c); if (g) gaps.push(Object.assign(g, { key: ri + '-' + ci, r: ri, c: ci })); }));
+    gaps.forEach(g => {
+      const list = g.own.length ? [g.sol].concat(g.own) : gaps.filter(x => x.c === g.c).map(x => x.sol), uniq = [];
+      list.forEach(x => { if (x && !uniq.some(y => normStr(y) === normStr(x))) uniq.push(x); });
+      g.choices = shuffled(uniq.length, b.id + 'tf' + g.key).map(i => uniq[i]);
+      const rn = g.c > 0 && body[g.r][0] && !tfGap(body[g.r][0]) ? body[g.r][0] : String(g.r + 1);
+      const cn = head && head[g.c] && !tfGap(head[g.c]) ? head[g.c] : String(g.c + 1);
+      g.label = T('tfZelle').replace('{z}', rn).replace('{s}', cn);
+    });
+    return { head, body, n, gaps };
+  }
+  const tfRight = (g, a) => a[g.key] != null && a[g.key] !== '' && normStr(a[g.key]) === normStr(g.sol);
+  function renderTableFill(b) {
+    const M = tfModel(b), st = state.self[b.id] || {}, a = st.a || {}, shown = !!st.checked, n0 = st.n || 0;
+    const at = {}; M.gaps.forEach(g => { at[g.key] = g; });
+    const right = M.gaps.filter(g => tfRight(g, a)).length, total = M.gaps.length;
+    const colName = ci => (M.head && M.head[ci] ? M.head[ci] : '');
+    const gapCell = g => {
+      const v = a[g.key], pre = g.pre ? esc(g.pre) + ' ' : '', post = g.post ? ' ' + esc(g.post) : '';
+      if (n0 && tfRight(g, a)) return { cls: ' kp-tf-gap kp-tf-ok', html: `${pre}<span class="kp-tf-val">${esc(g.sol)}</span>${post}<span class="kp-tf-mark" aria-hidden="true">✓</span><span class="kp-sr"> (${esc(T('tfRichtig'))})</span>` };
+      if (shown) return { cls: ' kp-tf-gap kp-tf-no', html: `<span class="kp-tf-mine"><span class="kp-sr">${esc(T('tfDeineWahl'))}: </span><s>${esc(v || T('tfLeer'))}</s></span><span class="kp-tf-mark kp-tf-x" aria-hidden="true">✕</span><span class="kp-sr"> (${esc(T('tfFalsch'))})</span>
+        <span class="kp-tf-sol" data-tf-sol><span class="kp-tf-lab">${esc(T('loesung'))}:</span> ${pre}${esc(g.sol)}${post}</span>${g.why ? `<span class="kp-tf-why" data-tf-why>${esc(g.why)}</span>` : ''}` };
+      return { cls: ' kp-tf-gap', html: `${pre}<select class="kp-tf-sel${v ? ' has-value' : ''}" data-tf-sel="${g.key}" data-block="${b.id}" aria-label="${esc(g.label)}" aria-describedby="${b.id}-tf-hint"><option value="">${esc(T('tfWaehlen'))}</option>${g.choices.map(o => `<option value="${esc(o)}"${v != null && normStr(o) === normStr(v) ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>${post}` };
+    };
+    const cell = (c, ri, ci) => {
+      const g = at[ri + '-' + ci], lab = colName(ci) && !(ci === 0 && !g) ? ` data-label="${esc(colName(ci))}"` : '';
+      if (ci === 0 && b.firstCol && !g) return `<th scope="row" class="kp-tf-rowname">${esc(c)}</th>`;
+      if (!g) return `<td${lab}${ci === 0 ? ' class="kp-tf-rowname"' : ''}>${esc(c)}</td>`;
+      const x = gapCell(g);
+      return `<td class="${x.cls.trim()}"${lab}>${x.html}</td>`;
+    };
+    const sum = shown ? T('tfErgebnis').replace('{r}', right).replace('{n}', total) : '';
+    return `<div class="kp-table-box kp-tf${M.n > 3 ? ' kp-tf-many' : ''}${shown ? ' is-checked' : ''}" data-tf="${b.id}" style="--n:${M.n}">${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
+      <p class="kp-tf-hint" id="${b.id}-tf-hint">${esc(T('tfHinweis'))}</p>
+      <div class="kp-table-wrap" role="region" aria-label="${esc(plainTitle(b.title || '') || b.caption || T('tabelle'))}"><table class="kp-table kp-tf-table${b.firstCol ? ' kp-table-rowhead' : ''}">${b.caption ? `<caption>${esc(b.caption)}</caption>` : ''}
+        ${M.head ? `<thead><tr>${M.head.concat(Array(Math.max(0, M.n - M.head.length)).fill('')).map(c => `<th scope="col">${esc(c || '')}</th>`).join('')}</tr></thead>` : ''}
+        <tbody>${M.body.map((r, ri) => `<tr>${r.map((c, ci) => cell(c, ri, ci)).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="kp-tf-sum${shown && right === total ? ' is-all' : ''}" data-tf-sum role="status" aria-live="polite" tabindex="-1">${esc(sum)}</p>
+      ${shown && b.explanation ? `<div class="kp-text kp-tf-expl" data-tf-expl>${res(b.explanation)}</div>` : ''}
+      <div class="kp-quiz-actions">${!shown ? `<button type="button" class="kp-btn" data-tf-check="${b.id}">${esc(b.checkLabel || T('tfPruefen'))}</button>` : right < total ? `<button type="button" class="kp-btn kp-sec" data-tf-again="${b.id}">${esc(T('nochEinmal'))}</button>` : ''}</div>
+    </div>`;
+  }
+  // Prüfen: fehlt eine Wahl, nur Hinweis und Fokus auf die erste leere Lücke; sonst zählen, zeichnen, Fokus auf die Zusammenfassung
+  function tfCheck(b, box) {
+    const M = tfModel(b), st = state.self[b.id] || {}, a = st.a = st.a || {};
+    box.querySelectorAll('select[data-tf-sel]').forEach(s => { a[s.dataset.tfSel] = s.value; });
+    const empty = [...box.querySelectorAll('select[data-tf-sel]')].filter(s => !s.value);
+    box.querySelectorAll('td.kp-tf-missing').forEach(td => td.classList.remove('kp-tf-missing'));
+    if (empty.length) {
+      empty.forEach(s => s.closest('td').classList.add('kp-tf-missing'));
+      const sum = box.querySelector('[data-tf-sum]');
+      if (sum) { sum.classList.add('is-missing'); sum.textContent = T('tfFehlt').replace('{n}', empty.length); }
+      state.self[b.id] = st;
+      empty[0].focus();
+      return;
+    }
+    const r = M.gaps.filter(g => tfRight(g, a)).length;
+    st.checked = true; st.n = (st.n || 0) + 1; st.r = r;
+    if (st.n === 1) st.f = M.gaps.length ? r / M.gaps.length : 0;
+    state.self[b.id] = st;
+    uiSound(r === M.gaps.length ? 'erledigt' : r ? 'richtig' : 'falsch');
+    refreshBlock(box, renderTable(b));
+    const sum = root.querySelector(`[data-tf="${b.id}"] [data-tf-sum]`);
+    if (sum) sum.focus({ preventScroll: true });
+  }
+  // Noch einmal: nur die falschen Zellen werden wieder zur Auswahl, die richtigen bleiben stehen
+  function tfAgain(b, box) {
+    const M = tfModel(b), st = state.self[b.id] || {}, a = st.a = st.a || {};
+    M.gaps.forEach(g => { if (!tfRight(g, a)) delete a[g.key]; });
+    st.checked = false;
+    state.self[b.id] = st;
+    refreshBlock(box, renderTable(b));
+    const sel = root.querySelector(`[data-tf="${b.id}"] select[data-tf-sel]`);
+    if (sel) sel.focus();
+  }
   const SPLIT_TEXT = ['text', 'note', 'statement', 'gate', 'sources', 'divider', 'attachments', 'linkcard', 'table'];
   const SPLIT_NO = ['hero', 'textimage', 'chapters', 'casebank', 'game', 'agenda', 'compare', 'pool', 'review', 'pretest', 'certificate', 'team', 'comicstrip', 'album', 'simulation', 'mission', 'vstatements', 'cards', 'timeline'];
   // Nennung zum Bild der Folie (page.bgImage.credit): Storyset und Fotos verlangen sie, ein Bildbaustein zeigt sie selbst
+  // Lektionskopf der Lektionen zum Scrollen (Vorbild Fernhill/Rise): Foto der Lektion (page.bgImage) unter einem Schleier in der Hauptfarbe,
+  // Etikett aus der Dachzeile, Pillen „Lektion n von m“ und Lesezeit, großer Titel mit Strich, Einleitungssatz (page.lead), Lektionspunkte
+  // Etikett: endet die Dachzeile auf eine Zahl („Moment 3“), steht das Wort klein über der großen Zahl
+  function slBadge(t) {
+    const m = String(t || '').trim().match(/^(.*?)\s*(\d+)$/);
+    if (!t || String(t).trim().length > 14) return '';
+    return m && m[1] ? `<span class="kp-sl-badge kp-sl-badge-num"><small>${esc(m[1])}</small><b>${esc(m[2])}</b><i aria-hidden="true"></i></span>` : `<span class="kp-sl-badge">${esc(t)}</span>`;
+  }
+  // Leiste über dem Lektionskopf: „↑ 2 von 5 · vorige Lektion“ führt zurück (Vorbild Rise, Fernhill)
+  function slPrevBar(at, lessons) {
+    if (at <= 0) return '';
+    const i = lessons[at - 1];
+    return `<button type="button" class="kp-sl-prevbar" data-goto="${i}"><span aria-hidden="true">↑</span> ${esc(T('lektionVon').replace('{n}', at).replace('{m}', lessons.length))} · ${esc(plainTitle(pages[i].title || ''))}<span class="kp-sr"> (${esc(T('vorigeLektion'))})</span></button>`;
+  }
+  // Karten „Die Situation“ (page.moment) und „Dein Schritt“ (page.move), im Lektionskopf und in jedem Stil unter dem Seitentitel
+  function slCards(p) {
+    const card = (cls, ico, label, text) => (plainText(text) ? `<div class="kp-sl-mini kp-sl-mini-${cls}"><p class="kp-sl-label">${icon(ico)}${esc(label)}</p><p class="kp-sl-mtext">${esc(text)}</p></div>` : '');
+    const c = card('moment', ICONS[p.momentIcon] ? p.momentIcon : 'pin', T('slSituation'), p.moment) + card('move', ICONS[p.moveIcon] ? p.moveIcon : 'arrow-ur', T('slSchritt'), p.move);
+    return c ? `<div class="kp-sl-cards">${c}</div>` : '';
+  }
+  function slHero(p, at, n) {
+    const img = p.bgImage && p.bgImage.src;
+    const focus = img && p.bgImage.focus ? (typeof p.bgImage.focus === 'object' ? `${p.bgImage.focus.x || 50}% ${p.bgImage.focus.y || 50}%` : p.bgImage.focus) : '';
+    const min = kursZeit([p]).minutes;
+    const dots = Array.from({ length: n }, (x, k) => `<i class="${k < at ? 'past' : k === at ? 'now' : ''}"></i>`).join('');
+    const cards = slCards(p);
+    // Ohne kurzes Etikett (Begrüßungslektion, Vorbild Fernhill „Welcome“): Logo oben links, die Dachzeile als Zeile mit Strich,
+    // auf der ersten Lektion die Eckdaten des Kurses als Pillen (Lektionen, Lernzeit, Abschlusscheck)
+    const badge = slBadge(p.eyebrow);
+    const logo = !badge && chrome.logo ? `<img class="kp-sl-logo" src="${esc(res(chrome.logo))}" alt="">` : '';
+    const eye = !badge && plainText(p.eyebrow) ? `<p class="kp-eyebrow kp-sl-eyebrow">${esc(p.eyebrow)}</p>` : '';
+    const pills = !badge && at === 0 && n > 2
+      ? `<span class="kp-sl-pill">${icon('clock')} ${esc(T('slRund').replace('{n}', estimateMinutes()))}</span><span class="kp-sl-pill">${icon('lines')} ${esc(T('slLektionen').replace('{n}', n))}</span>${graded().length ? `<span class="kp-sl-pill">${icon('check')} ${esc(T('slAbschluss'))}</span>` : ''}`
+      : `<span class="kp-sl-pill kp-ml-lesson">${esc(T('lektionVon').replace('{n}', at + 1).replace('{m}', n))}</span><span class="kp-sl-pill">${icon('clock')} ${min} ${T('minAbk')}</span>`;
+    return `${slPrevBar(at, microLessons())}<header class="kp-page-head kp-ml-chapstart kp-sl-hero kp-on-dark${img ? ' kp-sl-hero-img' : ' kp-sl-hero-noimg'}${badge ? '' : ' kp-sl-hero-plain'}"${img ? ` style="--kp-slbg:url('${esc(res(img))}')${focus ? `;--kp-slpos:${esc(focus)}` : ''}"` : ''}>
+      ${badge}${logo}
+      <div class="kp-sl-hero-in">
+        ${eye}<p class="kp-sl-pills">${pills}</p>
+        <h1>${accent(p.title)}</h1>
+        ${p.lead ? `<p class="kp-sl-lead">${esc(p.lead)}</p>` : ''}
+        <p class="kp-sl-dots" aria-hidden="true">${dots}<span>${at + 1}/${n}</span></p>
+      </div>
+      ${cards}
+      ${img && p.bgImage.credit ? `<p class="kp-sl-credit">${esc(p.bgImage.credit)}</p>` : ''}
+    </header>`;
+  }
   function slideCredit(p) {
+    if (scrollLook()) return '';
     const c = p.bgImage && p.bgImage.src && p.bgImage.credit;
     return c ? `<p class="kp-slide-credit">${esc(c)}</p>` : '';
   }
@@ -6522,10 +9156,10 @@ function kursPlayer(course, opts) {
   // Folie „Zahl“: der erste dieser Bausteine steht groß links, alles andere rechts
   const ZAHL_TYPES = ['bignumber', 'statement', 'image', 'anim', 'lottie'];
   // Bausteine, die in der Folie „Wechsel“ als Bild neben dem Text stehen
-  const PIC_TYPES = ['image', 'media', 'vstatements', 'ivideo', 'lottie', 'anim', 'vscene'];
+  const PIC_TYPES = ['image', 'media', 'vstatements', 'ivideo', 'lottie', 'anim', 'vscene', 'modell3d', 'scribble'];
   // b.slot 'unten' gilt nur auf der geteilten Folie: der Baustein steht unter Text und Bühne über die ganze Breite (Vorbild Rise
   // „Arbeitsschutz für alle“: Kernsatz unter Einleitung und Personenkarten); auf anderen Folien zählt er zur Bühne
-  const slotOf = b => (b.slot === 'text' ? 'text' : b.slot === 'buehne' ? 'stage' : b.slot === 'unten' ? 'below' : SPLIT_TEXT.includes(b.type) ? 'text' : 'stage');
+  const slotOf = b => (b.slot === 'text' ? 'text' : (b.slot === 'buehne' || b.slot === 'stage') ? 'stage' : b.slot === 'unten' ? 'below' : SPLIT_TEXT.includes(b.type) && !(b.type === 'table' && b.look === 'ausfuellen') ? 'text' : 'stage');
   function arrangeOf(p) {
     if (!set.screen || !p) return '';
     const blocks = p.blocks || [];
@@ -6537,7 +9171,7 @@ function kursPlayer(course, opts) {
     // Ein Hintergrundbild der ganzen Folie ohne eigene Wahl: Inhalt mittig darauf (Vorbild: Kapitelwahl über der Küche)
     if (p.bgImage && p.bgImage.src && !p.arrange) return 'mitte';
     if (p.arrange === 'stapel') return bleed ? '' : 'fit';
-    const unsuited = blocks.some(b => SPLIT_NO.includes(b.type) || b.cover || (b.type === 'dialog' && b.stage) || (b.design && (b.design.bg || ['wide', 'full', 'half'].includes(b.design.width))));
+    const unsuited = blocks.some(b => SPLIT_NO.includes(b.type) || b.cover || (b.type === 'branch' && ['handy', 'laptop', 'karte'].includes(b.look)) || (b.type === 'quiz' && b.look === 'notizen') || (b.type === 'dialog' && b.stage) || (b.design && (b.design.bg || ['wide', 'full', 'half', 'third', 'twothird'].includes(b.design.width))));
     // Eine „Kurz gefragt“-Sprechblase liegt über der Seite und belegt keinen Platz auf der Folie
     const slots = blocks.filter(b => !(b.type === 'kurzfrage' && kfBubble(b))).map(slotOf);
     if (!unsuited && slots.includes('text') && slots.includes('stage')) return 'geteilt';
@@ -6549,6 +9183,14 @@ function kursPlayer(course, opts) {
   // mittigen Bildschirmseite füllt die ganze Folie, Titel weiß oben auf der unscharfen Kulisse, kein leerer Streifen darunter
   // Dunkle Folie (Vorbild Rise „Mit Struktur zum Ziel“): page.tone 'dunkel' auf einer Folie ohne eigene Aufteilung färbt die ganze Fläche dunkel
   function darkSlide(p) { return !!(p && !p.result && p.tone === 'dunkel' && ['fit', ''].includes(arrangeOf(p)) && !(p.blocks || []).some(b => b.type === 'hero')); }
+  // Eigene Farbe der Folie (page.bgColor, Rechtsklick „Hintergrund“ in „Direkt bearbeiten“, Kerstin 11.11.2026): füllt die ganze Fläche
+  // hinter den Bausteinen. Nur auf Folien ohne eigene Aufteilung und ohne Titelbereich, die bringen ihre Flächen selbst mit.
+  function pageFillOk(p) { return !!p && !p.result && ['fit', '', 'geteilt'].includes(arrangeOf(p)) && !(p.blocks || []).some(b => b.type === 'hero'); }
+  function pageFill(p) { const v = p && !p.result ? String(p.bgColor || '') : ''; return /^#[0-9a-f]{6}$/i.test(v) && pageFillOk(p) ? v : ''; }
+  // Eigene Schriftfarbe für den Kopf der Folie (page.ink: Dachzeile, Titel, Lesezeit), Werte wie design.ink am Baustein
+  function headInk(p) { return p ? blockInk(p.ink, darkSlide(p) || pageFillDark(p)) : ''; }
+  // Auf einer dunklen Farbe wird die Schrift weiß (dieselben Regeln wie die dunkle Folie)
+  function pageFillDark(p) { const v = pageFill(p); if (!v) return false; const lf = hexLum(v), lt = hexLum(/^#[0-9a-f]{6}$/i.test(theme.text || '') ? theme.text : '#1f2d33'); return 1.05 / (lf + 0.05) > (Math.max(lf, lt) + 0.05) / (Math.min(lf, lt) + 0.05); }
   // Infofolie baut sich auf (page.einflug): Kopf, Absätze, Listenpunkte, Karten und Bilder fliegen nacheinander ein.
   // Nur beim Zeichnen der Seite, nicht beim Neuzeichnen eines Bausteins; unter „Bewegung reduzieren“ steht alles sofort (CSS).
   const EI_TEXT = '.kp-text:not(.kp-text .kp-text, .kp-card .kp-text, details .kp-text, .kp-fig-quote *)';
@@ -6573,7 +9215,7 @@ function kursPlayer(course, opts) {
   function soloBleed(p) {
     if (!set.screen || !p || p.result || !p.hideTitle || arrangeOf(p) !== '') return false;
     const bl = (p.blocks || []).filter(b => !(b.type === 'kurzfrage' && kfBubble(b)) && b.type !== 'sources');
-    return bl.length === 1 && ['statement', 'text', 'note', 'bignumber'].includes(bl[0].type) && !!(bl[0].design && bl[0].design.bg) && !bl[0].showIf;
+    return bl.length === 1 && (['statement', 'text', 'note', 'bignumber'].includes(bl[0].type) || (bl[0].type === 'sortcats' && bl[0].look === 'stapel')) && !!(bl[0].design && bl[0].design.bg) && !bl[0].showIf;
   }
 
   // Ein Baustein allein auf einer mittigen Bildschirmseite, der die Folie ganz füllt (Prüfung 20.10.2026, Vorbilder
@@ -6608,7 +9250,7 @@ function kursPlayer(course, opts) {
     // Microlearning: die erste Seite eines Kapitels bekommt das dunkle Band mit Kapitelnummer „05 / 06“
     const chs = theme.style === 'micro' ? microChapters() : null;
     const chAt = chs ? chs.findIndex(ch => ch.pages[0] === pages.indexOf(p)) : -1;
-    const lessons = chs && lektion() ? microLessons() : null;
+    const lessons = chs && (lektion() || scrollLook()) ? microLessons() : null;
     const lesAt = lessons ? lessons.indexOf(pages.indexOf(p)) : -1;
     const num = lessons ? (lesAt >= 0 ? `<span class="kp-ml-num kp-ml-lesson">${esc(T('lektionVon').replace('{n}', lesAt + 1).replace('{m}', lessons.length))}</span>` : '') : chAt >= 0 ? `<span class="kp-ml-num">${String(chAt + 1).padStart(2, '0')}<small>/ ${String(chs.length).padStart(2, '0')}</small></span>` : '';
     // Lesezeit je Seite (settings.readTime): dieselbe Rechnung wie die Kurszeit, nur fuer diese Seite
@@ -6618,11 +9260,15 @@ function kursPlayer(course, opts) {
     // Maskottchen steht am Anfang jedes Kapitels neben dem Titel, mit der Haltung dieser Seite
     const masc = mascotCast() && !p.result && chapterList().some(c => c.pages[0] === pages.indexOf(p)) ? mascotHtml(p.mascotPose, 'kp-mascot-head') : '';
     const side = masc ? `<div class="kp-head-side">${masc}${cring}</div>` : cring;
-    const head = p.hideTitle ? '' : `<header class="kp-page-head${firstWide ? ' kp-head-wide' : ''}${chAt >= 0 || lessons ? ' kp-ml-chapstart' : ''}${side ? ' kp-has-chring' : ''}">${num}${eyebrow(p.eyebrow)}<h1>${accent(p.title)}</h1>${chAt >= 0 && !lessons && p.chapter && plainTitle(p.title) !== p.chapter ? `<p class="kp-ml-chap">${esc(p.chapter)}</p>` : ''}${read}${side}</header>`;
+    const head = p.hideTitle ? '' : lessons && scrollLook() && lesAt >= 0 ? slHero(p, lesAt, lessons.length) : `<header class="kp-page-head${firstWide ? ' kp-head-wide' : ''}${chAt >= 0 || lessons ? ' kp-ml-chapstart' : ''}${side ? ' kp-has-chring' : ''}${headInk(p) ? ' kp-own-headink' : ''}"${headInk(p) ? ` style="--kp-head-ink:${headInk(p)}"` : ''}>${num}${wbCrumb(p)}${pageDays(p)}${eyebrow(p.eyebrow)}<h1>${accent(p.title)}</h1>${chAt >= 0 && !lessons && p.chapter && plainTitle(p.title) !== p.chapter ? `<p class="kp-ml-chap">${esc(p.chapter)}</p>` : ''}${read}${slCards(p)}${side}</header>`;
     let blocked = false; // hinter einer Weiter-Sperre bleibt der Rest der Seite verborgen
+    // Direkt bearbeiten im Editor (opts.showAll): alles steht offen, verborgene Teile tragen nur einen Vermerk
+    let gated = false;
     const parts = (p.blocks || []).map(b => {
       if (blocked) return `<section class="kp-block kp-b-${b.type} kp-hidden" data-block="${b.id}" hidden></section>`;
-      if ((b.type === 'gate' || b.type === 'schloss') && !(state.self[b.id] || {}).done) blocked = true;
+      const devNote = opts.showAll && ['handy', 'gross'].includes((b.design || {}).device) ? T(b.design.device === 'handy' ? 'ieNurHandy' : 'ieNurGross') : '';
+      const later = opts.showAll && [gated ? T('ieNachSperre') : hasCond(b) && !conditionMet(b.showIf) ? T('ieNachBedingung') : '', devNote].filter(Boolean).join(' · ');
+      if ((b.type === 'gate' || b.type === 'schloss') && !(state.self[b.id] || {}).done) { if (opts.showAll) gated = true; else blocked = true; }
       const look = b.design || {};
       const cls = ['kp-block', 'kp-b-' + b.type];
       if (isCustom(b) || b.type === 'html') cls.push('kp-b-custom');
@@ -6630,13 +9276,42 @@ function kursPlayer(course, opts) {
       if (look.width && look.width !== 'normal') cls.push('kp-w-' + look.width);
       if (look.space === 'large') cls.push('kp-sp-large');
       if (look.bg === 'mesh') cls.push('kp-tone-' + (['warm', 'kalt', 'haus'].includes(look.tone) ? look.tone : 'haus'));
-      if (set.layout === 'scroll' || theme.effects !== 'dezent') cls.push('fx-reveal');
+      if (later) cls.push('kp-ie-later');
+      // Nur am Handy oder nur am Bildschirm (design.device); beim Bearbeiten im Editor bleibt alles sichtbar
+      if (['handy', 'gross'].includes(look.device) && !opts.showAll) cls.push('kp-dev-' + look.device);
+      if (keepShown && keepShown.has(b.id)) cls.push('fx-reveal', 'fx-in', 'fx-now');
+      // Lektionen zum Scrollen: Textbausteine bauen sich Absatz für Absatz auf (activateComponents), nicht als Ganzes
+      else if (scrollLook() && theme.effects !== 'dezent' && b.type === 'text' && !b.deep) cls.push('kp-sl-text');
+      else if (set.layout === 'scroll' || theme.effects !== 'dezent') cls.push('fx-reveal');
       // Foto-Hintergrund: Der Schleier bestimmt Stimmung und Lesbarkeit
       if (look.bg === 'image') cls.push('kp-ov-' + (look.overlay || 'light'));
       const bgMove = look.bg === 'image' && look.bgImage && look.bgImage.src && ['zoom', 'pan'].includes(look.bgMotion);
       if (bgMove) cls.push('kp-bgm', 'kp-bgm-' + look.bgMotion);
       if (look.bg === 'dark' || (look.bg === 'image' && ['dark', 'primary'].includes(look.overlay))) cls.push('kp-on-dark');
       const styles = [];
+      // Eigene Füllfarbe (Menüband „Fülleffekt“): dunkle Farben bekommen helle Schrift
+      const fill = look.bg !== 'fill' ? '' : /^#[0-9a-f]{6}$/i.test(look.fill || '') ? look.fill : '#E3EEFB';
+      if (fill) {
+        styles.push('--kp-fill:' + fill);
+        // Weiß oder die Schriftfarbe des Designs, je nachdem, was auf der Füllfarbe mehr Kontrast hat
+        const lf = hexLum(fill), lt = hexLum(/^#[0-9a-f]{6}$/i.test(theme.text || '') ? theme.text : '#1f2d33');
+        if (1.05 / (lf + 0.05) > (Math.max(lf, lt) + 0.05) / (Math.min(lf, lt) + 0.05)) cls.push('kp-on-dark');
+      }
+      if (['linie', 'haupt', 'akzent'].includes(look.outline)) cls.push('kp-ol-' + look.outline);
+      else if (/^#[0-9a-f]{6}$/i.test(look.outline || '')) { cls.push('kp-ol-eigen'); styles.push('--kp-ol:' + look.outline); }
+      // Füllung der Form (design.shapeFill): der Kasten um den Baustein, getrennt von der Fläche des Abschnitts (design.bg).
+      // Ohne Abschnittsfläche ist der Baustein selbst die Form, mit Fläche sein Innenkasten. Die Schrift richtet sich nach der Form.
+      if (/^#[0-9a-f]{6}$/i.test(look.shapeFill || '')) {
+        styles.push('--kp-shape-fill:' + look.shapeFill);
+        const lf = hexLum(look.shapeFill), lt = hexLum(/^#[0-9a-f]{6}$/i.test(theme.text || '') ? theme.text : '#1f2d33');
+        const dk = 1.05 / (lf + 0.05) > (Math.max(lf, lt) + 0.05) / (Math.min(lf, lt) + 0.05);
+        for (let k = cls.indexOf('kp-on-dark'); k >= 0; k = cls.indexOf('kp-on-dark')) cls.splice(k, 1);
+        cls.push('kp-form-fill', dk ? 'kp-form-dark' : 'kp-form-light');
+        if (dk) cls.push('kp-on-dark');
+      }
+      // Eigene Farben für die Kästen im Baustein (Karten, Antworten, Akkordeon …): Füllung, Rahmen, Schrift
+      [['boxFill', 'bg'], ['boxLine', 'line'], ['boxInk', 'ink']].forEach(([k, n]) => { if (/^#[0-9a-f]{6}$/i.test(look[k] || '')) { cls.push('kp-box-' + n); styles.push(`--kp-box-${n}:${look[k]}`); } });
+      if ([2, 3].includes(Number(look.cols))) cls.push('kp-cols-' + Number(look.cols));
       if (look.bg === 'image' && look.bgImage && look.bgImage.src) {
         styles.push(`--kp-bgimg:url('${esc(res(look.bgImage.src))}')`);
         if (look.bgImage.focus) styles.push(`--kp-bgpos:${esc(look.bgImage.focus)}`);
@@ -6648,6 +9323,14 @@ function kursPlayer(course, opts) {
         if (own) styles.push(`--kp-bgimg:url('${esc(res(own))}')`);
         cls.push('kp-on-dark');
       }
+      // Textfarbe, Ausrichtung und Größe des ganzen Bausteins (aus „Direkt bearbeiten“ oder dem Reiter Gestaltung)
+      const ink = blockInk(look.ink, cls.includes('kp-on-dark') || ['primary', 'dark', 'image'].includes(look.bg));
+      if (ink) { cls.push('kp-own-ink'); styles.push(`--kp-ink-own:${ink}`); }
+      if (/^#[0-9a-f]{6}$/i.test(look.iconInk || '')) { cls.push('kp-own-ico'); styles.push(`--kp-ico-own:${look.iconInk}`); }
+      if (['center', 'right'].includes(look.align)) cls.push('kp-al-' + look.align);
+      if (['center', 'bottom'].includes(look.valign)) cls.push('kp-va-' + look.valign);
+      const scale = Number(look.scale);
+      if (scale && scale !== 1 && scale >= 0.7 && scale <= 1.6) { cls.push('kp-own-scale'); styles.push(`--kp-scale:${scale}`); }
       const style = styles.length ? ` style="${styles.join(';')}"` : '';
       const decor = look.decor ? `<span class="kp-decor" aria-hidden="true">${icon(look.decor)}</span>` : '';
       const lang = look.lang ? ` lang="${esc(look.lang)}"` : '';
@@ -6656,25 +9339,38 @@ function kursPlayer(course, opts) {
       const shape = look.bg && look.shape && look.shape !== 'kante'
         ? `<span class="kp-shape kp-shape-${esc(look.shape)}" aria-hidden="true"></span>` : '';
       const inner = b.type === 'sources' ? renderBlock(b) : footnotes(renderBlock(b));
-      return `<section class="${cls.join(' ')}" data-block="${b.id}"${hasCond(b) ? ' data-cond="1"' + (conditionMet(b.showIf) ? '' : ' hidden') : ''}${style}${lang}>${bgMove ? '<span class="kp-bgmove" aria-hidden="true"></span>' : ''}${decor}<div class="kp-block-inner">${band}${narrationButton(b)}${inner}</div>${shape}</section>`;
+      return `<section class="${cls.join(' ')}" data-block="${b.id}"${hasCond(b) ? ' data-cond="1"' + (conditionMet(b.showIf) || opts.showAll ? '' : ' hidden') : ''}${later ? ` data-ie-why="${esc(later)}"` : ''}${style}${lang}>${bgMove ? '<span class="kp-bgmove" aria-hidden="true"></span>' : ''}${decor}<div class="kp-block-inner">${band}${narrationButton(b)}${inner}</div>${shape}</section>`;
     });
-    // Zwei halbbreite Blöcke nebeneinander: aufeinanderfolgende werden zu einer Reihe gebündelt
-    const out = [];
-    (p.blocks || []).forEach((b, i) => {
-      const half = ((b.design || {}).width === 'half') && !(blocked && i > 0);
-      const prev = out[out.length - 1];
-      if (half && prev && prev.row && prev.n < 2) { prev.html += parts[i]; prev.n++; }
-      else out.push(half ? { row: true, n: 1, html: parts[i] } : { row: false, html: parts[i] });
-    });
+    // Raster (01.11.2026): Bausteine mit Spaltenbreite (⅓, ½, ⅔ von sechs Rasterspalten) stehen nebeneinander. Aufeinanderfolgende
+    // werden zu einer Reihe gebündelt, bis sechs Spalten oder drei Bausteine voll sind; am Handy rutscht alles untereinander.
+    const COL_SPAN = { third: 2, half: 3, twothird: 4 };
+    const colOf = i => (!(blocked && i > 0) && COL_SPAN[((p.blocks[i] || {}).design || {}).width]) || 0;
+    const packRows = idxs => {
+      const res = [];
+      let row = null;
+      idxs.forEach(i => {
+        const s = colOf(i);
+        // design.rowStart: hier beginnt eine neue Reihe, auch wenn in der vorigen noch Platz wäre
+        if (s && row && !((p.blocks[i].design || {}).rowStart) && row.sum + s <= 6 && row.n < 3) { row.html += parts[i]; row.sum += s; row.n++; return; }
+        if (s) { row = { html: parts[i], sum: s, n: 1 }; res.push(row); return; }
+        row = null;
+        res.push({ html: parts[i] });
+      });
+      return res.map(x => (x.sum ? `<div class="kp-row">${x.html}</div>` : x.html)).join('');
+    };
+    const allIdx = (p.blocks || []).map((b, i) => i);
+    const allRows = () => packRows(allIdx);
     // Ohne Test gibt es keine Ergebnisseite: die Empfehlung steht dann auf der letzten Seite
     const isLast = !pages.some(x => x.result) && pages.indexOf(p) === pages.length - 1;
     if (slide) {
       // Folie mit Vollbild: „mitte“ legt Titel und Bausteine als Karten mittig auf das Bild, „welle“ stellt sie auf eine
       // geschwungene Fläche rechts (bzw. links), das Bild bleibt daneben als Szene sichtbar
       const bgFocus = f => (f && typeof f === 'object' ? `${+f.x || 50}% ${+f.y || 50}%` : f); // {x, y} aus älteren Dateien, sonst Text wie „50% 30%“
-      const bg = p.bgImage && p.bgImage.src ? `--kp-slidebg:url('${esc(res(p.bgImage.src))}');${p.bgImage.focus ? `--kp-bgpos:${esc(bgFocus(p.bgImage.focus))};` : ''}` : '';
+      // Bildidee für das Foto der Folie (KI-Bauplan, 02.11.2026): in der Vorschau steht ein Platzhalter mit der Idee, im Kurs bleibt die Fläche leer
+      const bgIdea = !(p.bgImage && p.bgImage.src) && opts.preview && p.bgImage && plainText(p.bgImage.idea) ? slideIdeaSvg(p.bgImage, /^(uebung|mitte)/.test(arrange)) : '';
+      const bg = p.bgImage && p.bgImage.src ? `--kp-slidebg:url('${esc(res(p.bgImage.src))}');${p.bgImage.focus ? `--kp-bgpos:${esc(bgFocus(p.bgImage.focus))};` : ''}` : bgIdea ? `--kp-slidebg:url('${bgIdea}');` : '';
       // Zeichnung (SVG) statt Foto: in den Fotofeldern von Muster, Verlauf, Rahmen und Kopfband ganz zeigen statt anschneiden (Prüfung 19.10.2026)
-      const bgDraw = bg && /\.svg(\?|$)|^data:image\/svg/i.test(String(p.bgImage.src)) ? ' kp-bg-drawing' : '';
+      const bgDraw = bgIdea ? ' kp-bg-idea' : bg && /\.svg(\?|$)|^data:image\/svg/i.test(String(p.bgImage.src)) ? ' kp-bg-drawing' : '';
       const kind = arrange.replace(/-(links|hell)$/, '');
       const flip = /-links$/.test(arrange);
       // Muster (Vorbild „Fragen gezielt einsetzen“): links eine Fläche in der Hauptfarbe mit großen Zeichen in Sprechblasen
@@ -6682,17 +9378,17 @@ function kursPlayer(course, opts) {
       if (kind === 'muster') {
         const ch = [...String(p.pattern || '?!').replace(/\s+/g, '')].slice(0, 6);
         const cells = Array.from({ length: 12 }, (x, k) => `<i>${esc(ch[k % ch.length] || '?')}</i>`).join('');
-        return `<div class="kp-slide kp-slide-muster${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-muster-feld" aria-hidden="true">${cells}</div><div class="kp-muster-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-muster-karte">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+        return `<div class="kp-slide kp-slide-muster${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-muster-feld" aria-hidden="true">${cells}</div><div class="kp-muster-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-muster-karte">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       // Verlauf (Vorbild „Das Warum und die Alternative ermitteln“): das Foto steht links und läuft weich in den Grund aus,
       // Titel und Text rechts daneben ohne Karte, gern als Ich-Erzählung der Person im Bild
       if (kind === 'verlauf') {
-        return `<div class="kp-slide kp-slide-verlauf${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-verlauf-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-verlauf-text">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+        return `<div class="kp-slide kp-slide-verlauf${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-verlauf-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-verlauf-text">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       // Rahmen (Vorbild Business-Präsentation „Our Philosophy“): das Foto steht in einem versetzten Linienrahmen, eine weiße
       // Karte mit Titel und allen Bausteinen überlappt es von der Seite
       if (kind === 'rahmen') {
-        return `<div class="kp-slide kp-slide-rahmen${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-rahmen-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-rahmen-karte">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+        return `<div class="kp-slide kp-slide-rahmen${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-rahmen-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-rahmen-karte">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       // Szene (Vorbild illustrierte Storyline-Kurse, „Setz jetzt deine Kopfhörer auf“): die Illustration aus page.bgImage füllt
       // die Folie, bis zu zwei Figuren aus page.figures stehen links und rechts im Bild, alle Bausteine hängen als Schild
@@ -6726,7 +9422,7 @@ function kursPlayer(course, opts) {
         if (z - a > 7) { a = Math.max(a, Math.min(idx - 3, z - 7)); z = a + 7; }
         const maxOk = unlockedUpTo(), tabs = [];
         for (let i = a; i <= z; i++) tabs.push(`<button type="button" class="kp-ordner-tab${i === idx ? ' current' : ''}${state.visited.has(i) && i !== idx ? ' seen' : ''}" data-goto="${i}" ${set.gating && i > maxOk ? 'disabled' : ''} ${i === idx ? 'aria-current="page"' : ''} aria-label="${esc(plainTitle(pages[i].title || '') || String(i + 1))}">${i - a + 1}</button>`);
-        return `<div class="kp-slide kp-slide-ordner${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><div class="kp-ordner"><nav class="kp-ordner-tabs" aria-label="${esc(T('seitenImKapitel'))}">${tabs.join('')}</nav><div class="kp-slide-panel kp-ordner-sheet">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div></div>`;
+        return `<div class="kp-slide kp-slide-ordner${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><div class="kp-ordner"><nav class="kp-ordner-tabs" aria-label="${esc(T('seitenImKapitel'))}">${tabs.join('')}</nav><div class="kp-slide-panel kp-ordner-sheet">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div></div>`;
       }
       // Wechsel (Vorbild LUCYDATE „Wie wirke ich auf dich?“): je zwei Bausteine bilden einen Abschnitt über die ganze Breite,
       // das Bild (Foto, Video) steht abwechselnd rechts und links, der Grund wechselt zwischen getönt und hell. Abschnitte,
@@ -6794,7 +9490,7 @@ function kursPlayer(course, opts) {
       // Fotoband („Anne fragt nach“ in „Was sagt die Forschung über Kreativität?“): das Foto über die ganze Folie, oben links eine
       // weiße, leicht durchscheinende Karte mit Titel und Text, die Personen im Bild bleiben frei
       if (kind === 'fotoband') {
-        return `<div class="kp-slide kp-slide-fotoband${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel kp-fb-card">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+        return `<div class="kp-slide kp-slide-fotoband${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel kp-fb-card">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       // Schachbrett (Teammeetings verbessern, Kognitive Flexibilität): Fotos und Stimmen im Raster 2 × 2 ohne Lücke, Foto | Zitat,
       // darunter Zitat | Foto; Zitatfelder in der Hauptfarbe, die nach unten heller wird
@@ -6820,8 +9516,9 @@ function kursPlayer(course, opts) {
         return `<div class="kp-slide kp-slide-zweifarb${flip ? ' kp-slide-flip' : ''}${p.tone === 'farbe' ? ' kp-zf-farbe' : ''}"><div class="kp-zf-hell">${left.filter(i => bl[i]).map(i => parts[i]).join('')}</div><div class="kp-slide-panel kp-zf-dunkel kp-on-dark">${head}${right.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       if (kind === 'uebung') {
-        const txt = [], stg = [];
-        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? txt : stg).push(parts[i]));
+        const ti = [], si = [];
+        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? ti : si).push(i));
+        const txt = ti.length ? [packRows(ti)] : [], stg = [packRows(si)];
         // page.tone 'dunkel' (Vorbild bildungsinnovator „Führen mit Zielvereinbarungen“): das Kopfband in der dunklen Hauptfarbe,
         // Titel links, Einleitung rechts, die Übung darunter auf hellem Grund
         const dark = p.tone === 'dunkel';
@@ -6830,7 +9527,7 @@ function kursPlayer(course, opts) {
       // Bild + Übung (Prüfung 19.10.2026, Vorbilder bildungsinnovator „Schneller ohne Stress“ und „Dialog- und Konfliktfähigkeit“):
       // das Foto füllt die halbe Folie bis an alle Ränder, daneben Titel, Text und Übung auf der dunklen Hauptfarbe
       if (kind === 'bilduebung') {
-        return `<div class="kp-slide kp-slide-bilduebung${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-bilduebung-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-bilduebung-panel kp-on-dark">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+        return `<div class="kp-slide kp-slide-bilduebung${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-bilduebung-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-bilduebung-panel kp-on-dark">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       // Vergleich: Titel oben, darunter zwei Spalten mit einer Trennlinie (Vorher/Nachher, Richtig/Falsch, zwei Rollen);
       // der erste Baustein steht links, der zweite rechts, weitere darunter über die ganze Breite
@@ -6857,8 +9554,9 @@ function kursPlayer(course, opts) {
         return `<div class="kp-slide kp-slide-zahl${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><div class="kp-zahl-big">${big >= 0 ? parts[big] : ''}</div><div class="kp-zahl-text">${head}${rest.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       if (kind === 'kreis' || kind === 'buehne' || kind === 'plakat') {
-        const txt = [], stg = [];
-        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? txt : stg).push(parts[i]));
+        const ti = [], si = [];
+        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? ti : si).push(i));
+        const txt = ti.length ? [packRows(ti)] : [], stg = si.length ? [packRows(si)] : [];
         // Plakat (Vorbild PUMA): dunkles Foto über die ganze Folie, riesiger Titel in kursiven Versalien links, die Übung rechts
         if (kind === 'plakat') return `<div class="kp-slide kp-slide-plakat kp-on-dark${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel">${head}${txt.join('')}${isLast ? nextCourseCard() : ''}</div><div class="kp-plakat-stage">${stg.join('')}</div></div>`;
         if (kind === 'kreis') {
@@ -6872,11 +9570,12 @@ function kursPlayer(course, opts) {
         const stageBg = bg || (own ? `--kp-slidebg:url('${esc(res(own))}');` : '');
         return `<div class="kp-slide kp-slide-buehne${hell ? ' kp-buehne-hell' : ''}${bg ? ' kp-has-bg' : ''}"><div class="kp-buehne-top${hell ? '' : ' kp-on-dark'}">${head}${txt.join('')}</div><div class="kp-buehne-stage${own ? ' kp-buehne-ambient kp-on-dark' : ''}"${stageBg ? ` style="${stageBg}"` : ''}>${stg.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
-      return `<div class="kp-slide kp-slide-${kind}${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel${kind === 'karte' ? ' kp-on-dark' : ''}">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      return `<div class="kp-slide kp-slide-${kind}${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel${kind === 'karte' ? ' kp-on-dark' : ''}">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
     }
     if (split) {
-      const txt = [], stg = [], unten = [];
-      (p.blocks || []).forEach((b, i) => { const s = slotOf(b); (s === 'text' ? txt : s === 'below' ? unten : stg).push(parts[i]); });
+      const ti = [], si = [], ui = [];
+      (p.blocks || []).forEach((b, i) => { const s = slotOf(b); (s === 'text' ? ti : s === 'below' ? ui : si).push(i); });
+      const txt = ti.length ? [packRows(ti)] : [], stg = si.length ? [packRows(si)] : [], unten = ui.length ? [packRows(ui)] : [];
       // Ein Foto ohne Geräterahmen allein auf der Bühne füllt die Fläche randlos
       const onStage = (p.blocks || []).filter(b => slotOf(b) === 'stage');
       // Zeichnungen (SVG) bleiben eingepasst, damit nichts abgeschnitten wird (Vorbild: Normen-Stapel auf grauer Fläche)
@@ -6884,7 +9583,7 @@ function kursPlayer(course, opts) {
       const vbg = fill ? '' : videoBackdrop(onStage);
       return `<div class="kp-split${arrange === 'geteilt-links' ? ' kp-split-flip' : ''}${unten.length ? ' kp-has-unten' : ''}"><div class="kp-split-text">${head}${txt.join('')}${isLast && !unten.length ? nextCourseCard() : ''}</div><div class="kp-split-stage${fill ? ' kp-stage-fill' : ''}${vbg ? ' kp-stage-video kp-on-dark' : ''}"${vbg && vbg !== 'none' ? ` style="${vbg}"` : ''}>${stg.join('')}</div>${unten.length ? `<div class="kp-split-unten">${unten.join('')}${isLast ? nextCourseCard() : ''}</div>` : ''}</div>`;
     }
-    const body = head + out.map(x => (x.row ? `<div class="kp-row">${x.html}</div>` : x.html)).join('') + (isLast ? nextCourseCard() : '');
+    const body = head + allRows() + (isLast ? nextCourseCard() : '');
     const vbg = arrange === 'fit' ? videoBackdrop(p.blocks) : '';
     return arrange === 'fit' ? `<div class="kp-fit${vbg ? ' kp-fit-video' : ''}${vbg && set.screen ? ' kp-on-dark' : ''}"${vbg && vbg !== 'none' ? ` style="${vbg}"` : ''}>${body}</div>` : body;
   }
@@ -6899,12 +9598,18 @@ function kursPlayer(course, opts) {
     const right = qs.filter(it => itemFraction(it) >= 1).length;
     let ex = 0, exDone = 0;
     pages.forEach(p => (p.blocks || []).forEach(b => {
-      if (b.type === 'quiz' || b.type === 'pool' || b.type === 'pretest' || b.type === 'review' || !INTERACTIVE_DONE.includes(b.type) || (b.type === 'takeaways' && (!b.recall || b.look === 'zeilen')) || (b.type === 'cards' && !cardsRv(b).length) || (b.type === 'bignumber' && !bnAsk(b))) return;
+      if (!isExercise(b)) return;
       ex++; if (blockDone(b)) exDone++;
     }));
     return { seen, pagesTotal: content.length, chaptersDone, chaptersTotal: chapters.filter(c => c.name).length, right, questions: qs.length, exDone, ex };
   }
-  const INTERACTIVE_DONE = ['mappe', 'videopaar', 'bildschirm', 'schloss', 'wahlbrett', 'markieren', 'merkkarte', 'kartenstapel', 'formular', 'interaktion', 'fragen', 'ueberdich', 'kurzfrage', 'branch', 'dialog', 'selfcheck', 'reflection', 'actionplan', 'ivideo', 'mission', 'game', 'simulation', 'casebank', 'triage', 'promptbuild', 'findtext', 'hotspots', 'checklist', 'sortcats', 'flipcards', 'glossquiz', 'predict', 'process', 'album', 'levers', 'chat', 'matrix', 'takeaways', 'aufdecken', 'cards', 'bignumber', 'team', 'pyramide', 'venn'];
+  // Übung ohne Fragen (wie isTaskBlock im Editor): Kernaussagen nur zum Aufdecken, Karten nur mit Aufdeckzeile usw.
+  function isExercise(b) {
+    return !(b.type === 'quiz' || b.type === 'pool' || b.type === 'pretest' || b.type === 'review' || !INTERACTIVE_DONE.includes(b.type) || (b.type === 'takeaways' && (!b.recall || b.look === 'zeilen')) || (b.type === 'cards' && !cardsRv(b).length) || (b.type === 'bignumber' && !bnAsk(b)) || (b.type === 'accordion' && b.look !== 'nummern') || (b.type === 'sequence' && (b.look !== 'szene' || (b.steps || []).length < 2)) || (b.type === 'table' && b.look !== 'ausfuellen') || (b.type === 'debrief' && b.look !== 'karte') || ((b.type === 'lottie' || b.type === 'anim') && stepCount(b) < 2) || (b.type === 'scribble' && !scrDoc(b)));
+  }
+  // Aufgabe auf der Seite, Fragen eingeschlossen (die Lernbuch-Karte soll sie nicht verdecken)
+  const isTaskHere = b => ['quiz', 'pool', 'pretest', 'review'].includes(b.type) || isExercise(b);
+  const INTERACTIVE_DONE = ['sequence', 'scribble', 'table', 'sprechen', 'debrief', 'lottie', 'anim', 'accordion', 'modell3d', 'mappe', 'videopaar', 'bildschirm', 'schloss', 'wahlbrett', 'markieren', 'merkkarte', 'kartenstapel', 'formular', 'interaktion', 'fragen', 'ueberdich', 'kurzfrage', 'branch', 'dialog', 'selfcheck', 'reflection', 'actionplan', 'ivideo', 'mission', 'game', 'simulation', 'casebank', 'triage', 'promptbuild', 'findtext', 'hotspots', 'checklist', 'sortcats', 'flipcards', 'glossquiz', 'predict', 'process', 'album', 'levers', 'chat', 'matrix', 'takeaways', 'aufdecken', 'cards', 'bignumber', 'team', 'pyramide', 'venn'];
 
   // Ergebnisring: Kreis füllt sich bis zum Prozentwert (Animation über stroke-dashoffset, unter „Bewegung reduzieren“ steht er sofort)
   function scoreRing(pct, passed) {
@@ -6946,7 +9651,7 @@ function kursPlayer(course, opts) {
   function renderResult() {
     const s = score();
     if (s.open) {
-      return `<div class="kp-result"><h1>Fast geschafft</h1><p>Es ${s.open === 1 ? 'ist noch 1 Testfrage' : 'sind noch ' + s.open + ' Testfragen'} offen. ${esc(T('fragenZurueck'))}</p></div>`;
+      return `<div class="kp-result"><h1>${T('fastGeschafft')}</h1><p>${esc(s.open === 1 ? T('testfrageOffen') : T('testfragenOffen').replace('{n}', s.open))} ${esc(T('fragenZurueck'))}</p></div>`;
     }
     const passed = s.pct >= passScore;
     // Je Lernziel: Balken, Anzahl richtiger Fragen und Sprung ins Kapitel, in dem das Ziel behandelt wird
@@ -6967,7 +9672,7 @@ function kursPlayer(course, opts) {
     const calib = sureWrong ? `<div class="kp-note kp-calib">${esc(T('kalibFalsch').replace('{n}', sureWrong === 1 ? 'einer Frage' : sureWrong + ' Fragen'))}</div>` : '';
     const review = graded().map(it => {
       const f = itemFraction(it);
-      const playName = { simulation: 'Klickpfad', mission: 'Mini-Mission', game: 'Level-Spiel' };
+      const playName = { simulation: 'Klickpfad', mission: 'Mini-Mission', game: 'Level-Spiel', interaktion: 'Übung', table: T('tabelle') };
       const label = it.q ? it.q.question : it.branch ? (it.branch.prompt || 'Entscheidung') : it.play ? `${playName[it.play.type]}: ${String(it.play.title || pages[it.pageIndex].title).replace(/\*/g, '')}` : 'Frage auf der Seite „' + pages[it.pageIndex].title + '“';
       const ap = it.q && set.reviewAnswers !== false ? answerPair(it.q, state.answers[it.id]) : null;
       const more = ap ? `<details class="kp-rv-more"${f != null && f < 1 ? ' open' : ''}><summary>${esc(T('antwortLoesung'))}</summary>
@@ -6988,12 +9693,17 @@ function kursPlayer(course, opts) {
     const name = firstName();
     const prev = state.self.prev && state.self.prev.max ? state.self.prev : null;
     const prevHtml = prev ? `<p class="kp-prev ${s.pct > prev.pct ? 'up' : s.pct < prev.pct ? 'down' : 'same'}" data-prev="${prev.pct}">${T('letzterVersuch')}: ${prev.pct} % · ${T('heute')}: <b>${s.pct} %</b> · ${s.pct > prev.pct ? T('besserAls') : s.pct < prev.pct ? T('unterLetztem') : T('gleichWie')}</p>` : '';
+    const maxTries = Math.max(0, Number(set.testAttempts) || 0);
+    const usedTries = ((state.self.prev || {}).n || 0) + 1;
+    const triesLeft = !maxTries || usedTries < maxTries;
+    const triesHtml = maxTries ? `<p class="kp-tries" data-tries="${usedTries}">${T('versuchVon').replace('{n}', Math.min(usedTries, maxTries)).replace('{m}', maxTries)}</p>` : '';
     return `<div class="kp-result"><p class="kp-label">${T('deinErgebnis')}</p>${scoreRing(s.pct, passed)}
-      <p>${s.got} von ${s.max} Punkten · Bestehensgrenze ${passScore} %</p>${prevHtml}
+      <p>${s.got} von ${s.max} Punkten · Bestehensgrenze ${passScore} %</p>${prevHtml}${triesHtml}
       <div class="kp-feedback ${passed ? 'ok' : 'no'}" role="status">${passed ? (name ? `${T('bestandenName').replace('{n}', esc(name))}` : T('bestanden')) : T('nichtBestanden')}</div>
       <div class="kp-quiz-actions" style="justify-content:center">
-        ${passed ? '' : '<button class="kp-btn" data-retry-all>Test wiederholen</button>'}
-        ${passed && certPage >= 0 ? `<button class="kp-btn" data-goto="${certPage}">Zum Zertifikat</button>` : ''}
+        ${passed ? '' : triesLeft ? `<button class="kp-btn" data-retry-all>${T('testWiederholen')}</button>` : `<p class="kp-hint" data-tries-out>${esc(T('keineVersuche').replace('{n}', maxTries))}</p>`}
+        ${passed && certPage >= 0 ? `<button class="kp-btn" data-goto="${certPage}">${T('zumZertifikat')}</button>` : ''}
+        ${set.exitButton ? `<button class="kp-btn kp-sec" data-exit>${T('kursBeenden')}</button>` : ''}
       </div>${goalBack()}${wegHtml()}${doneHtml}${objHtml}${calib}${confRev}
       ${planCard(certBlock())}<div class="kp-review">${review}</div>${nextCourseCard()}</div>`;
   }
@@ -7048,6 +9758,78 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
   }
   // Lektions-Look (theme.sideLook 'lektion', Vorbild Articulate Rise): jede Seite ist eine Lektion, Kapitel sind Abschnitte darüber
   const lektion = () => theme.style === 'micro' && theme.sideLook === 'lektion';
+  // Lektionen zum Scrollen (theme.sideLook 'scroll', Vorbild Articulate Rise): Leiste links mit Ring je Lektion, der sich beim Lesen füllt,
+  // jede Seite eine lange Lektion, die sich beim Scrollen aufbaut; „Weiter“ steht am Ende der Lektion, nicht in der Leiste
+  const scrollLook = () => theme.style === 'micro' && theme.sideLook === 'scroll';
+  // Gelesene Lektionen (bis zum Ende gescrollt oder über „Nächste Lektion“ verlassen) stehen im Lernstand unter state.self.sc
+  const scDone = () => (Array.isArray(state.self.sc) ? state.self.sc : []);
+  function scMark(i) {
+    if (scDone().includes(i)) return false;
+    state.self.sc = scDone().concat(i);
+    return true;
+  }
+  // Anteil der aktuellen Lektion, den man gesehen hat (0 bis 1): gemessen am Ende des Inhalts, nicht am Seitenende
+  let scFrac = 0;
+  function scMeasure() {
+    const main = root.querySelector('#kp-main');
+    if (!main) return 0;
+    const r = main.getBoundingClientRect();
+    const top = r.top + window.scrollY, h = main.offsetHeight;
+    const seen = window.scrollY + window.innerHeight - top;
+    return h <= 0 ? 1 : Math.max(0, Math.min(1, seen / h));
+  }
+  const scRing = (f, done) => `<svg class="kp-sl-ring${done ? ' is-done' : ''}" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" pathLength="100" class="kp-sl-track"/><circle cx="10" cy="10" r="8" pathLength="100" class="kp-sl-fill" style="stroke-dasharray:${done ? 100 : Math.round(f * 100)} 100"/>${done ? '<path d="M6.2 10.3l2.5 2.5 5-5.2" class="kp-sl-tick"/>' : ''}</svg>`;
+  // Eine noch geschlossene Weiter-Sperre (oder ein Schloss) heißt: der Rest der Lektion steht noch aus
+  const scGated = () => (pages[state.current].blocks || []).some(b => (b.type === 'gate' || b.type === 'schloss') && !(state.self[b.id] || {}).done);
+  function scPct() {
+    const lessons = microLessons();
+    return lessons.length ? Math.round(lessons.filter(i => scDone().includes(i)).length / lessons.length * 100) : 0;
+  }
+  function scrollSide() {
+    const chapters = microChapters();
+    const { info, infoCh } = microInfo(chapters);
+    const maxOk = unlockedUpTo();
+    const testPages = new Set(graded().map(it => it.pageIndex));
+    const pct = scPct();
+    const lesson = i => {
+      const cur = i === state.current, done = scDone().includes(i);
+      const locked = set.gating && i > maxOk;
+      return `<li class="kp-sl-item${cur ? ' current' : ''}${done ? ' done' : ''}"><button type="button" data-goto="${i}" ${locked ? 'disabled' : ''} ${cur ? 'aria-current="page"' : ''}><span class="kp-sl-ico" aria-hidden="true">${icon(ICONS[pages[i].icon] ? pages[i].icon : testPages.has(i) ? 'question' : 'lines')}</span><span class="kp-sl-name">${esc(plainTitle(pages[i].title || ''))}</span><span class="kp-sl-state" data-sl-ring="${i}">${scRing(cur ? scFrac : 0, done)}</span><span class="kp-sr">${done ? T('mlAbgeschlossen') : ''}</span></button></li>`;
+    };
+    // Kapitelname als Abschnitt nur, wenn er mehr als eine Lektion zusammenfasst oder anders heißt als die einzige Lektion
+    // Die Seite mit dem Mediennachweis steht nur unten als „Weitere Informationen“, nicht zusätzlich in der Liste
+    const list = chapters.filter(ch => ch !== infoCh).map(ch => ({ ch, ps: ch.pages.filter(i => i !== info) })).filter(g => g.ps.length).map(({ ch, ps }) => {
+      const name = ch.name && ps.length > 1 ? `<p class="kp-sl-sec">${esc(ch.name)}</p>` : '';
+      return `<li class="kp-sb-group">${name}<ol>${ps.map(lesson).join('')}</ol></li>`;
+    }).join('');
+    return `<nav class="kp-ml-side kp-sl-side" aria-label="${esc(T('inhalt'))}">
+      <div class="kp-sl-top">
+        <h2 class="kp-sl-title">${esc(course.title)}</h2>
+        ${course.subtitle ? `<p class="kp-sl-sub">${esc(course.subtitle)}</p>` : ''}
+        <div class="kp-sl-prog"><i role="progressbar" aria-label="${esc(T('mlFortschritt'))}" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" style="--w:${pct}%" data-sl-bar></i><span data-sl-pct>${esc(T('slAbgeschlossen').replace('{n}', pct))}</span></div>
+        ${goalCard('kp-goal-side')}
+      </div>
+      <ol class="kp-sb-list">${list}</ol>
+      ${info != null ? `<button type="button" class="kp-ml-info" data-goto="${info}"><b>${T('mlWeitere')}</b><span>${T('mlMedien')}</span></button>` : ''}
+    </nav>`;
+  }
+  // Beim Scrollen: Ring der aktuellen Lektion füllen, am Ende als gelesen merken und die Leiste nachziehen (ohne Neuzeichnen)
+  function scUpdate() {
+    if (!scrollLook() || !root.querySelector('#kp-main')) return;
+    scFrac = Math.max(scFrac, scMeasure());
+    const i = state.current;
+    const box = root.querySelector(`[data-sl-ring="${i}"]`);
+    const fresh = scFrac >= 0.97 && !blockedHere() && !scGated() && !pages[i].result && scMark(i);
+    if (box) box.innerHTML = scRing(scFrac, scDone().includes(i));
+    if (fresh) {
+      const li = box && box.closest('.kp-sl-item'); if (li) li.classList.add('done');
+      const pct = scPct();
+      const bar = root.querySelector('[data-sl-bar]'), lab = root.querySelector('[data-sl-pct]');
+      if (bar) { bar.style.setProperty('--w', pct + '%'); bar.setAttribute('aria-valuenow', pct); }
+      if (lab) lab.textContent = T('slAbgeschlossen').replace('{n}', pct);
+      report();
+    }
+  }
   function microInfo(chapters) {
     const info = pages.map((p, i) => i).filter(i => (pages[i].blocks || []).some(b => b.type === 'sources' || b.type === 'attachments')).pop();
     const infoCh = info != null ? chapters.find(ch => ch.pages.length === 1 && ch.pages[0] === info) : null;
@@ -7055,8 +9837,9 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
   }
   function microLessons() {
     const chapters = microChapters();
-    const { infoCh } = microInfo(chapters);
-    return chapters.filter(ch => ch !== infoCh).reduce((a, ch) => a.concat(ch.pages), []);
+    const { info, infoCh } = microInfo(chapters);
+    // Im Scroll-Look zählt die Seite mit dem Mediennachweis nicht als Lektion (sie steht unten in der Leiste)
+    return chapters.filter(ch => ch !== infoCh).reduce((a, ch) => a.concat(ch.pages), []).filter(i => !scrollLook() || i !== info);
   }
   function microSide() {
     const pr = progressResult();
@@ -7099,11 +9882,18 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
       ${info != null ? `<button type="button" class="kp-ml-info" data-goto="${info}"><b>${T('mlWeitere')}</b><span>${T('mlMedien')}</span></button>` : ''}
     </nav>`;
   }
+  // Weiter-Sperre in den Lektionen zum Scrollen: die Seite bleibt, wo sie war, schon gezeigte Abschnitte fahren nicht noch einmal herein
+  let keepScroll = null, keepShown = null;
+  // Ausgeblendeter Seitentitel (UX-Prüfung 07.11.2026, WCAG 1.3.1): unsichtbar als h1 vor dem Inhalt, sonst begann die Folie mit h2 oder h3.
+  // Bewusst vor <main> und nicht darin: Regeln wie „.kp-main > .kp-block:first-child“ (randlose Abschnitte, Titelfolie) hängen am ersten Kind
+  function srPageTitle(p) { return p && p.hideTitle && String(p.title || '').trim() ? `<h1 class="kp-sr" data-sr-title>${plainTitle(p.title)}</h1>` : ''; }
   function render(moveFocus) {
     doneSeen = null;
     // Laufende Videos, Töne und Zeitgeber der vorigen Seite beenden
     mediaTimers.forEach(t => (typeof t === 'object' ? t.stop() : clearInterval(t)));
     mediaTimers = [];
+    // Laut sagen: Aufnahmen anderer Seiten freigeben, eine laufende auf derselben Seite beenden
+    Object.keys(spRec).forEach(id => { const r = spRec[id]; if (r.page !== state.current || r.phase === 'wait') spRelease(id); else if (r.phase === 'rec') spStop(id); });
     clearTimeout(dlgTimer); filmAuto.clear();
     stopSound(); disarmAudio();
     cbOpen = null; // ein offener Fall gehört zur Seite, die gerade verlassen wird
@@ -7124,7 +9914,7 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
         if (set.toc !== false) tools.push(`<button class="kp-iconbtn" data-drawer="toc">${T('inhalt')}</button>`);
         const hub = pages.findIndex(x => (x.blocks || []).some(b => b.type === 'chapters'));
         if (hub >= 0 && hub !== state.current) tools.push(`<button class="kp-iconbtn" data-goto="${hub}">${T('uebersicht')}</button>`);
-        if (set.search !== false && pages.length > 3) tools.push(`<button class="kp-iconbtn" data-drawer="search">${T('suchen')}</button>`);
+        if (set.search !== false && pages.length > 3) tools.push(`<button class="kp-iconbtn" data-drawer="search" aria-label="${T('suchen')}">${T('suchen')}</button>`);
         if (set.notes) tools.push(`<button class="kp-iconbtn" data-drawer="notes">${T('notizen')}</button>`);
         if (set.trainerMode) tools.push(`<button class="kp-iconbtn" data-drawer="trainer" title="${esc(T('trTitel'))}">${T('trainer')}</button>`);
         if ((course.glossary || []).length) tools.push(`<button class="kp-iconbtn" data-drawer="glossary">${T('glossar')}</button>`);
@@ -7151,36 +9941,48 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     const footHtml = `<footer class="${chrome.footer ? 'kp-custom-foot' : 'kp-foot'}" data-footer ${chrome.hideFooter ? 'hidden' : ''}></footer>`;
     const bar = navPos === 'oben' ? `${header}${prog}` : '';
     const sideBar = navPos === 'oben' ? footHtml
-      : `<div class="kp-navbar" id="kp-navbar">${prog}<div class="kp-navrow">${header}${theme.style === 'micro' && navPos === 'links' ? microSide() : ''}${footHtml}</div></div>`;
+      : `<div class="kp-navbar" id="kp-navbar">${prog}<div class="kp-navrow">${header}${theme.style === 'micro' && navPos === 'links' ? (scrollLook() ? scrollSide() : microSide()) : ''}${scrollLook() ? '' : footHtml}</div></div>`;
+    document.body.style.background = pageFill(p);
     root.innerHTML = `
       <a class="kp-skip" href="#kp-main">${T('zumInhalt')}</a>
       ${bar}
-      ${set.layout === 'scroll' ? '<div class="kp-readbar" aria-hidden="true"><b></b></div>' : ''}
-      <main class="kp-main ${p.animation ? 'fx-' + p.animation : ''}${(arrangeOf(p) === 'fit' ? ' kp-fit-main' : arrangeOf(p) ? ' kp-split-main' : '')}${soloBleed(p) ? ' kp-solo-main' : ''}${soloFill(p) ? ' kp-fill-main kp-fill-' + soloFill(p) : ''}${kinoPage(p) ? ' kp-kino-main' : ''}${darkSlide(p) ? ' kp-dunkel-main kp-on-dark' : ''}${p.einflug ? ' kp-einflug' : ''}${set.slideNav && !coverPage(p) ? ' kp-has-pagenav' : ''}" id="kp-main" tabindex="-1">${pageLogo(p) || qChipHtml(p) ? `<div class="kp-page-top">${qChipHtml(p)}${pageLogo(p)}</div>` : ''}${renderPage(p)}${slideCredit(p)}${pageNavHtml(p)}</main>
+      ${set.layout === 'scroll' || scrollLook() ? '<div class="kp-readbar" aria-hidden="true"><b></b></div>' : ''}
+      ${srPageTitle(p)}
+      <main class="kp-main ${p.animation ? 'fx-' + p.animation : ''}${(arrangeOf(p) === 'fit' ? ' kp-fit-main' : arrangeOf(p) ? ' kp-split-main' : '')}${soloBleed(p) ? ' kp-solo-main' : ''}${soloFill(p) ? ' kp-fill-main kp-fill-' + soloFill(p) : ''}${kinoPage(p) ? ' kp-kino-main' : ''}${pageFill(p) ? ' kp-eigen-main' + (pageFillDark(p) ? ' kp-dunkel-main kp-on-dark' : '') : darkSlide(p) ? ' kp-dunkel-main kp-on-dark' : ''}${p.einflug ? ' kp-einflug' : ''}${set.slideNav && !coverPage(p) ? ' kp-has-pagenav' : ''}" id="kp-main" tabindex="-1"${pageFillOk(p) ? ' data-fill-ok' : ''}${pageFill(p) ? ` style="--kp-page-fill:${pageFill(p)}"` : ''}>${pageLogo(p) || qChipHtml(p) ? `<div class="kp-page-top">${qChipHtml(p)}${pageLogo(p)}</div>` : ''}${renderPage(p)}${slideCredit(p)}${pageNavHtml(p)}${scrollLook() && navPos !== 'oben' ? footHtml : ''}</main>
       ${sideBar}
       ${chrome.hideHeader && chrome.hideFooter ? '' : `<button class="kp-nav-toggle" data-nav-toggle aria-controls="kp-navbar" aria-expanded="${!navShut}" aria-label="${esc(T(navShut ? 'leisteAuf' : 'leisteZu'))}" title="${esc(T(navShut ? 'leisteAuf' : 'leisteZu'))}">${icon('chev')}</button>`}
       ${chrome.hideHeader || chrome.header || !aiInHead ? aiMarkHtml('kp-ai-fixed') : ''}
       <div class="kp-backdrop" data-close-drawer></div>
-      <aside class="kp-drawer" id="kp-drawer" aria-label="Seitenleiste"></aside>
+      <aside class="kp-drawer" id="kp-drawer" aria-label="Seitenleiste" inert></aside>
       ${opts.review ? reviewPanelHtml() : ''}
       <div class="kp-kf-dock" data-kf-dock aria-live="polite"></div>`;
-    kfOpen = null; kfTried = new Set(); kfPlanned = new Set(); wbOpen = {};
+    kfOpen = null; kfTried = new Set(); kfPlanned = new Set(); wbOpen = {}; hfUi = {};
     renderFooter();
     activateComponents(root);
     klangErledigt(); // Grundstand: was beim Öffnen schon fertig ist, klingt nicht
     updateClues();
     kfPops();
     measureNav();
+    embedCheck();
     if (set.tour === true && !opts.preview && !opts.renderer && !tourSeen() && !reducedMotion()) { const tm = setTimeout(startTour, 1100); mediaTimers.push(tm); }
-    // Lernbuch-Karte auf der ersten Seite, einmal je Browser; die Bedienhilfe wartet dann, bis sie geschlossen ist (Tour startet erst beim nächsten Öffnen)
-    if (state.current === 0 && set.lernbuchIntro !== false && !opts.renderer && !opts.review && hasLernbuch() && !lbwSeen()) { const tm = setTimeout(lernbuchWelcome, 700); mediaTimers.push(tm); }
+    // Lernbuch-Karte auf der ersten Seite, einmal je Browser; die Bedienhilfe wartet dann, bis sie geschlossen ist (startTour() merkt sich tourAfterLbw)
+    // Steht auf der ersten Seite eine Aufgabe, würde die Karte sie verdecken: dann erst auf der nächsten Seite ohne Aufgabe
+    if ((state.current === 0 || lbwWait) && set.lernbuchIntro !== false && !opts.renderer && !opts.review && !opts.showAll && opts.lbwAuto !== false && hasLernbuch() && !lbwSeen()) {
+      if ((pages[state.current].blocks || []).some(isTaskHere)) { if (state.current === 0) lbwWait = true; }
+      else { lbwWait = false; const tm = setTimeout(lernbuchWelcome, 700); mediaTimers.push(tm); }
+    }
     if (opts.focusBlock && state.current === opts.startPage) {
       const el = root.querySelector(`[data-block="${opts.focusBlock}"]`);
       opts.focusBlock = null;
       if (el) setTimeout(() => el.scrollIntoView({ block: 'center' }), 60);
+    } else if (keepScroll != null) {
+      window.scrollTo(0, keepScroll);
     } else {
       window.scrollTo(0, 0);
     }
+    keepScroll = null; keepShown = null;
+    // Lektionen zum Scrollen: Ring neu messen, sobald die Seite steht (eine kurze Lektion gilt gleich als gelesen)
+    if (scrollLook()) { scFrac = 0; requestAnimationFrame(scUpdate); }
     // Nach dem Seitenwechsel springt der Fokus auf den Inhalt (wichtig für Screenreader)
     if (moveFocus) root.querySelector('#kp-main').focus({ preventScroll: true });
     // Lesefortschritt innerhalb der Seite (Scroll-Darstellung)
@@ -7188,6 +9990,7 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     if (readbar && !window.__kpReadbar) {
       window.__kpReadbar = true;
       window.addEventListener('scroll', () => {
+        scUpdate();
         const bar = root.querySelector('.kp-readbar b');
         const max = document.documentElement.scrollHeight - window.innerHeight;
         if (bar) bar.style.width = (max > 0 ? Math.min(100, window.scrollY / max * 100) : 100) + '%';
@@ -7195,7 +9998,7 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     }
     // Ton der Folie beim Öffnen starten (settings.autoNarration); in der Editor-Vorschau erst nach einem Seitenwechsel,
     // sonst finge der Ton bei jeder Änderung im Editor neu an
-    if (set.autoNarration && !opts.renderer && (moveFocus || !opts.preview)) autoAudio();
+    if (set.autoNarration && !opts.renderer && !opts.showAll && (moveFocus || !opts.preview)) autoAudio();
     report();
   }
 
@@ -7282,7 +10085,11 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     const nx = last ? null : pages[nextIndex()];
     const preview = set.layout === 'scroll' && nx && !hint
       ? `<div class="kp-next-preview"><span>${nx.chapter && nx.chapter !== pages[state.current].chapter ? T('naechstesKapitel') + ' · ' + esc(nx.chapter) : T('alsNaechstes')}</span><strong>${accent(nx.title)}</strong></div>` : '';
-    foot.innerHTML = chrome.footer ? fill(res(chrome.footer), { hinweis: esc(hint) }) : dezent
+    const lessons = scrollLook() ? microLessons() : null;
+    const nxAt = lessons && nx ? lessons.indexOf(pages.indexOf(nx)) : -1;
+    foot.innerHTML = chrome.footer ? fill(res(chrome.footer), { hinweis: esc(hint) }) : scrollLook()
+      ? scGated() ? '' : `<div class="kp-sl-nav">${hint ? `<span class="kp-lock" role="status">${hint}</span>` : ''}${last || hint ? '' : `<button type="button" class="kp-sl-next" data-next><span class="kp-sl-arrow" aria-hidden="true">↓</span><span class="kp-sr">${toMap >= 0 ? T('zurueckZurKarte') : nx && nx.result ? T('zumErgebnis') : T('naechsteLektion')}: </span><strong>${toMap >= 0 ? T('zurueckZurKarte') : nx && nx.result ? T('zumErgebnis') : `${nxAt >= 0 ? esc(T('lektionVon').replace('{n}', nxAt + 1).replace('{m}', lessons.length)) + ' · ' : ''}${esc(plainTitle(nx.title || ''))}`}</strong></button>`}</div>`
+      : dezent
       ? `${hint ? `<span class="kp-lock" role="status">${hint}</span>` : ''}<button class="kp-dz-arrow kp-dz-back" data-back aria-label="${T('zurueck')}" title="${T('zurueck')}">${icon('chev')}</button>${toMap >= 0 ? `<button class="kp-dz-arrow kp-dz-map" data-next aria-label="${T('zurueckZurKarte')}" title="${T('zurueckZurKarte')}">${icon('map')}<span>${T('zurueckZurKarte')}</span></button>` : `<button class="kp-dz-arrow" data-next aria-label="${T('weiter')}" title="${T('weiter')}">${icon('chev')}</button>`}`
       : `${preview}
       <button class="kp-btn kp-sec" data-back>← ${T('zurueck')}</button>
@@ -7331,6 +10138,17 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     // Bildschirmseiten: Bei der Leiste oben steht die Navigation unter dem Inhalt und zählt für die Seitenhöhe mit
     const fuss = navPos === 'oben' ? root.querySelector('[data-footer]:not([hidden])') : null;
     st.setProperty('--kp-footh', fuss ? Math.round(fuss.getBoundingClientRect().height) + 'px' : '0px');
+    // Fokus nicht verdeckt (WCAG 2.4.11, Analyse 10.11.2026): eine eigene Fußzeile, die per CSS am Rand klebt, und das Dock der
+    // Begleitfigur, wenn es am Handy die ganze Breite einnimmt, zählen für den Abstand beim Rollen zum Fokus mit
+    const fixedFoot = fuss && /sticky|fixed/.test(getComputedStyle(fuss).position);
+    st.setProperty('--kp-fixfooth', fixedFoot ? Math.round(fuss.getBoundingClientRect().height) + 'px' : '0px');
+    const dock = root.querySelector('[data-kf-dock]');
+    const dockH = () => {
+      const r = dock && dock.isConnected ? dock.getBoundingClientRect() : null;
+      st.setProperty('--kp-dockh', r && r.height && r.width > document.documentElement.clientWidth * 0.6 ? Math.round(r.height) + 'px' : '0px');
+    };
+    dockH();
+    if (dock && typeof ResizeObserver === 'function' && measureNav.dock !== dock) { measureNav.dock = dock; if (measureNav.dro) measureNav.dro.disconnect(); measureNav.dro = new ResizeObserver(dockH); measureNav.dro.observe(dock); }
     // Pillen im Inhalt (settings.slideNav) zählen für die Bildschirmhöhe mit, sonst ragt jede Bildschirmseite um ihre Höhe hinaus
     // (in der Flex-Spalte einer „fit“-Seite ist margin-top: auto und liefe als gebrauchter Wert in die Hunderte, dort zählt nur die Höhe)
     const pn = root.querySelector('.kp-pagenav');
@@ -7395,11 +10213,16 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     root.querySelectorAll('.kp-b-certificate, .kp-b-debrief').forEach(s => {
       if (s.querySelector('[data-cert-name]') && s.contains(document.activeElement)) return;
       const b = findBlock(s.dataset.block);
-      if (b) s.innerHTML = renderBlock(b);
+      if (b) { s.innerHTML = renderBlock(b); s.querySelectorAll('[data-dmap-box]').forEach(setupDmap); }
     });
     // Fokus auf die Rückmeldung, damit Screenreader sie vorlesen
-    const fb = fresh.querySelector && fresh.querySelector('.kp-feedback, .kp-saved, .kp-q');
-    if (fb) { fb.tabIndex = -1; fb.focus({ preventScroll: true }); }
+    // Rangfolge statt Dokumentreihenfolge: die Frage steht im Baustein vor der Rückmeldung und bekam sonst den Fokus
+    const fb = fresh.querySelector && (fresh.querySelector('.kp-feedback') || fresh.querySelector('.kp-saved') || fresh.querySelector('.kp-q'));
+    if (fb) {
+      fb.tabIndex = -1; fb.focus({ preventScroll: true });
+      const r = fb.getBoundingClientRect();
+      if (fb.matches('.kp-feedback') && (r.bottom > innerHeight || r.top < 0)) try { fb.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' }); } catch (e) { /* alte Browser */ }
+    }
     updateConditions();
     renderFooter();
     report();
@@ -7444,6 +10267,7 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
       case 'takeaways': return b.recall && b.look !== 'zeilen' ? alle((b.items || []).length, (b.items || []).every((x, i) => (st.open || []).includes(i))) : Object.keys(st).length > 0;
       case 'gate': case 'selfcheck': case 'interaktion': case 'schloss': return !!st.done;
       case 'wahlbrett': return (b.items || []).length > 0 && wbCount(b) >= wbMin(b);
+      case 'sequence': return b.look === 'szene' && ((b.steps || []).length <= 1 || !!st.end);
       case 'reflection': case 'actionplan': return state.texts[b.id] != null;
       case 'ivideo': return !!state.watched[b.id];
       case 'mission': case 'game': return !!(state.self.mm || {})[b.id];
@@ -7458,13 +10282,16 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
       case 'chat': return alle((b.turns || []).length, (Number(st.n) || 0) >= (b.turns || []).length);
       case 'fragen': return ((st.asked || []).length) >= askMin(b);
       case 'ueberdich': return !!st.done;
+      // Entscheidungskarte: erledigt, sobald eine nicht gewählte Abzweigung geöffnet war
+      case 'debrief': return b.look === 'karte' && (st.open || []).length > 0;
       case 'kurzfrage': return typeof st.v === 'number';
       case 'markieren': return !!st.done;
       case 'merkkarte': return !!st.o;
       case 'mappe': return !!st.r;
       case 'videopaar': return typeof st.v === 'number';
       case 'bildschirm': return !!st.done;
-      case 'kartenstapel': return !!st.done;
+      case 'sprechen': return !!st.done;
+      case 'kartenstapel': return !!(st.done || st.fin);
       case 'formular': { const f = formFilled(b); return f.length > 0 && f.every(Boolean); }
       case 'bignumber': return !bnAsk(b) || typeof st.v === 'number';
       case 'matrix': return !!st.cmp;
@@ -7474,6 +10301,8 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
         return alle(gesucht.length, gesucht.every(i => (st.hit || []).includes(i)));
       }
       case 'hotspots': {
+        if (b.mode === 'folge') return !!st.done;
+        if (b.panorama) { const ps = panoStops(b); return alle(ps.length, ps.every(i => (st.seen || {})[i])); }
         const rounds = (b.rounds || []).filter(x => x && x.image && x.image.src);
         if (rounds.length) return alle(rounds.length, rounds.every((rd, r) => (rd.points || []).length && (rd.points || []).every((pt, i) => pt.target || ((st.rs || {})[r] || {})[i])));
         const list = b.points || [];
@@ -7486,7 +10315,15 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
       case 'pyramide': { const n = (b.levels || []).length; return alle(n, (b.levels || []).every((x, i) => (st.open || []).includes(i))); }
       case 'venn': { const n = Math.min(3, (b.circles || []).length); return alle(n, (b.circles || []).slice(0, 3).every((x, i) => (st.open || []).includes(i))); }
       // Team „aufklappen“: erledigt, wenn jede Person mit Text einmal aufgeklappt war (Stand aus dem toggle-Ereignis)
+      case 'sortcats': return b.look === 'stapel' || b.look === 'liste' ? !!st.done : Object.keys(st).length > 0;
+      // Tabelle zum Ausfüllen: erledigt, sobald einmal geprüft wurde
+      case 'table': return b.look === 'ausfuellen' && (st.n || 0) > 0;
+      case 'accordion': { const n = (b.items || []).length; return b.look === 'nummern' && alle(n, (b.items || []).every((x, i) => (st.open || []).includes(i))); }
       case 'team': { if (b.look === 'karussell') { const n = (b.members || []).length; return alle(n, n > 1 && (b.members || []).every((m, i) => (st.seen || []).includes(i))); } if (b.look !== 'aufklappen') return false; const ms = (b.members || []).map((m, i) => i).filter(i => plainText((b.members[i] || {}).html)); return alle(ms.length, ms.every(i => (st.open || []).includes(i))); }
+      case 'modell3d': return m3dDone(b);
+      case 'scribble': return !!(state.self[b.id] || {}).done;
+      // Animation in Schritten: erledigt, wenn jeder Schritt einmal gezeigt wurde
+      case 'lottie': case 'anim': { const n = stepCount(b), seen = Array.isArray(st.seen) ? st.seen : []; return alle(n, Array.from({ length: n }, (x, i) => i).every(i => seen.includes(i))); }
       case 'aufdecken': return (b.stops || []).length > 0 && (b.stops || []).every((x, i) => (st.seen || {})[i]);
       case 'checklist': return alle((b.items || []).length, (st.c || []).length >= (b.items || []).length);
       case 'flipcards': return umgedreht();
@@ -7549,7 +10386,7 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
       if (!hasCond(b)) return;
       const sec = root.querySelector(`section[data-block="${b.id}"][data-cond]`);
       if (!sec) return;
-      const show = conditionMet(b.showIf);
+      const show = conditionMet(b.showIf) || !!opts.showAll;
       if (sec.hidden === !show) return;
       sec.hidden = !show;
       neu = true;
@@ -7563,6 +10400,18 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     if (neu) renderFooter();
     root.querySelectorAll('[data-meters-live]').forEach(el => { el.outerHTML = meterPanel(null, true); });
     updateClues();
+    embedCheck();
+  }
+  // Eingebettet als Rise-Code-Block oder Storyline-Webobjekt (opts.embed, Articulate-Paket): sind alle Aufgaben der letzten Seite
+  // erledigt, meldet der Kurs das dem umgebenden Fenster einmal mit { type: 'complete' } (so erkennt Rise den Abschluss für „Continue“)
+  var embedSent = false; // var: render() kann vor dieser Zeile laufen
+  function embedCheck() {
+    if (!opts.embed || embedSent || typeof window === 'undefined' || window.parent === window) return;
+    if (state.current !== pages.length - 1) return;
+    const p = pages[state.current];
+    if (!p || !(p.blocks || []).filter(isTaskHere).every(b => blockDone(b))) return;
+    embedSent = true;
+    try { window.parent.postMessage({ type: 'complete' }, '*'); } catch (e) { /* ohne Elternfenster */ }
   }
   // Anzeige der Szenario-Werte; mit Wirkung einer Entscheidung (eff) zeigt sie die Veränderung
   function meterPanel(eff, live) {
@@ -7593,7 +10442,7 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
   }
 
   // ---------- Animationen ----------
-  const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reducedMotion = () => calmOn() || !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   // Zusatzbibliotheken (Paket: gsap.min.js, rough-notation.js, driver.js; Vorschau inline): nur bei Effekten „hochwertig“,
   // jede mit Rückfall auf die CSS-Fassung, wenn die Datei fehlt
   const fxOn = () => (theme.effects || 'hochwertig') !== 'dezent';
@@ -7662,7 +10511,7 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     const on = el => {
       el.dataset.animOn = '1'; el.classList.add('run');
       // Striche mit GSAP zeichnen (pathLength="1": Versatz 1 → 0), gestaffelt nach --d; ohne GSAP bleibt die CSS-Animation
-      const g = gs(), paths = g ? el.querySelectorAll('.kp-draw') : [];
+      const g = gs(), paths = g && !el.classList.contains('kp-anim-sw') ? el.querySelectorAll('.kp-draw') : [];
       if (paths.length) paths.forEach(pth => { pth.style.animation = 'none'; g.fromTo(pth, { strokeDashoffset: 1 }, { strokeDashoffset: 0, duration: .9, ease: 'power2.inOut', delay: parseFloat(pth.style.getPropertyValue('--d')) || 0 }); });
     };
     if (!window.IntersectionObserver || reducedMotion()) return items.forEach(on);
@@ -7801,12 +10650,19 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     });
   }
   function activateComponents(scope) {
+    // Bildfolge: Seitenverhältnis des Bilds, damit Bild, Zähler und Knöpfe auf Bildschirmseiten gleich breit und in der Höhe passen
+    scope.querySelectorAll('.kp-hf-stage > img').forEach(im => {
+      const set = () => { const box = im.closest('.kp-hf'); if (box && im.naturalWidth && im.naturalHeight) box.style.setProperty('--kp-hf-ar', (im.naturalWidth / im.naturalHeight).toFixed(4)); };
+      if (im.complete) set(); else im.addEventListener('load', set, { once: true });
+    });
     // Schaubild als Zeichnung: Seitenverhältnis aus dem Bild, damit die Bühne auf Bildschirmseiten in die freie Höhe passt
-    scope.querySelectorAll('.kp-hs-drawing .kp-hs-zoom > img').forEach(im => {
+    scope.querySelectorAll('.kp-hs-drawing .kp-hs-zoom > img, .kp-map .kp-hs-zoom > img').forEach(im => {
       const set = () => { const st = im.closest('.kp-hs-stage'); if (st && im.naturalWidth && im.naturalHeight) st.style.setProperty('--kp-hs-ar', (im.naturalWidth / im.naturalHeight).toFixed(4)); };
       if (im.complete) set(); else im.addEventListener('load', set, { once: true });
     });
     setupEinflug(scope);
+    setupSwipes(scope);
+    setupVideoTrim(scope);
     liveIllus(scope);
     fitTitles(scope);
     setupExtras(scope);
@@ -7818,12 +10674,16 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       window.addEventListener('resize', () => root.querySelectorAll('[data-ml]').forEach(drawMatchLines));
     }
     scope.querySelectorAll('[data-ml]').forEach(drawMatchLines);
-    scope.querySelectorAll('.kp-chat-log').forEach(l => { l.scrollTop = l.scrollHeight; });
+    scope.querySelectorAll('[data-dmap-box]').forEach(setupDmap);
+    scope.querySelectorAll('.kp-chat-log, .kp-bx-msgs').forEach(l => { l.scrollTop = l.scrollHeight; });
     chatSfxRun(scope);
     setupCounters(scope);
     setupAnimations(scope);
     scope.querySelectorAll('[data-ivideo]').forEach(setupVideo);
     scope.querySelectorAll('[data-lottie]').forEach(setupLottie);
+    scope.querySelectorAll('[data-m3d]').forEach(setupModell3d);
+    scope.querySelectorAll('[data-scr]').forEach(setupScribble);
+    scope.querySelectorAll('[data-pano]:not(.kp-pano-failed)').forEach(setupPano);
     lottieFigs(scope);
     scope.querySelectorAll('[data-mission]').forEach(setupMission);
     scope.querySelectorAll('[data-seq]').forEach(setupSequence);
@@ -7864,12 +10724,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       media.addEventListener('pause', stop); media.addEventListener('ended', () => { media.currentTime = 0; stop(); });
       if (media.readyState >= 1) paint();
     });
-    scope.querySelectorAll('.kp-flip').forEach(f => {
-      const turn = () => { f.classList.toggle('flipped'); f.classList.add('kp-seen'); uiSound('aufdecken'); updateConditions(); };
-      f.onclick = turn;
-      f.onmouseenter = () => { f.classList.add('kp-seen'); updateConditions(); };
-      f.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); turn(); } };
-    });
+    scope.querySelectorAll('.kp-flip').forEach(wireFlip);
     scope.querySelectorAll('[data-lightbox]').forEach(img => {
       const open = () => {
         const lb = document.createElement('div');
@@ -7912,6 +10767,24 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
         if (id) fxShown.add(id);
       });
     }
+    // Lektionen zum Scrollen: Symbolstriche in Karten und im Karussell bekommen pathLength=1 und die Klasse kp-stroke, damit sie sich per stroke-dashoffset
+    // nachzeichnen können (ein Attribut-Selektor [pathLength] greift im Stylesheet nicht: Chromium vergleicht ihn an SVG-Elementen kleingeschrieben) (das Original zeichnet die Icons nach dem Auffalten der Karte)
+    if (scrollLook()) scope.querySelectorAll(':is(.kp-card-icon, .kp-cc-icon) svg > :is(path, circle, line, polyline, polygon, rect, ellipse):not(.kp-stroke)').forEach(el => { el.setAttribute('pathLength', '1'); el.classList.add('kp-stroke'); });
+    // Lektionen zum Scrollen: Absätze, Überschriften und Listenpunkte erscheinen einzeln, sobald sie ins Bild kommen
+    scope.querySelectorAll('.kp-sl-text').forEach(sec => {
+      if (sec.dataset.slReady) return;
+      sec.dataset.slReady = '1';
+      sec.querySelectorAll(':scope .kp-block-inner > :not(.kp-text), :scope .kp-text > :not(ul):not(ol), :scope .kp-text > :is(ul, ol) > li').forEach(el => {
+        const li = el.tagName === 'LI';
+        el.style.setProperty('--kp-i', li ? Math.min([...el.parentElement.children].indexOf(el), 8) : 0);
+        el.classList.add('fx-reveal');
+      });
+    });
+    // Hängt am Band: Einschwingen erst, wenn das Bild ins Bild kommt (einmal je Seitenaufruf)
+    // (über die Lage im Fenster statt IntersectionObserver: zuverlässig auch in Rahmen und beim Neuzeichnen; dasselbe Prüfen gilt für das Zitatband)
+    scope.querySelectorAll('[data-hang]:not(.is-in), [data-quote-in]:not(.is-in)').forEach(el => { if (reducedMotion()) el.classList.add('is-in', 'is-still'); });
+    inViewCheck();
+    if (!window.__kpInView) { window.__kpInView = true; window.addEventListener('scroll', inViewCheck, { passive: true }); window.addEventListener('resize', inViewCheck); }
     const reveal = scope.querySelectorAll('.fx-reveal:not(.fx-in)');
     if (reveal.length && window.IntersectionObserver) {
       const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('fx-in'); io.unobserve(e.target); } }), { threshold: .12 });
@@ -7995,7 +10868,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
   function notesBody() {
     const all = notesAll();
     const others = pages.map((p, pi) => ({ pi, t: String(all[p.id] || '').trim() })).filter(x => x.pi !== state.current && x.t);
-    return `<p class="kp-label kp-notes-page">${T('notizZuSeite')}: ${esc(plainTitle(pages[state.current].title || ''))}</p>
+    return `<p class="kp-label kp-notes-page">${T('notizZuSeite')}: <span data-kp-page="${state.current}">${esc(plainTitle(pages[state.current].title || ''))}</span></p>
       <textarea class="kp-notes" data-notes aria-label="${esc(T('notizZuSeite'))}" placeholder="${esc(T('notizLeer'))}">${esc(noteFor(state.current))}</textarea>
       <p class="kp-label">${esc(T('notizHinweis'))}</p>
       ${others.length || all._ ? `<p class="kp-label kp-notes-page">${T('notizAndere')}</p>${all._ ? `<div class="kp-lb-entry"><span class="kp-lb-q">${T('notizAllgemein')}</span><p>${esc(all._).replace(/\n/g, '<br>')}</p></div>` : ''}${others.map(x => `<div class="kp-lb-entry"><span class="kp-lb-q">${esc(plainTitle(pages[x.pi].title || ''))}</span><p>${esc(x.t).replace(/\n/g, '<br>')}</p><button type="button" class="kp-lb-go" data-goto="${x.pi}">${T('zurSeite')} ${x.pi + 1}</button></div>`).join('')}` : ''}`;
@@ -8022,6 +10895,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
   function startTour() {
     const d = window.driver && (window.driver.js ? window.driver.js.driver : window.driver.driver);
     if (!d) return false;
+    if (document.querySelector('.kp-lbw:not(.out)')) { tourAfterLbw = true; return false; }
     closeDrawer();
     const steps = tourSteps();
     if (!steps.length) return false;
@@ -8030,9 +10904,11 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       nextBtnText: T('weiter'), prevBtnText: T('zurueck'), doneBtnText: T('tourFertig'), progressText: '{{current}} ' + T('von') + ' {{total}}', popoverClass: 'kp-tour', steps }).drive();
     return true;
   }
+  // Schalter im Inhaltsverzeichnis: Symbol, Name und der Zustand als Pille (an/aus); der Name bleibt gleich, aria-pressed trägt den Zustand
+  function tocSwitch(ic, label, on) { return `${icon(ic)} <span>${label}</span><span class="kp-sw-state" aria-hidden="true">${T(on ? 'an' : 'aus')}</span>`; }
   function openDrawer(which) {
     const d = root.querySelector('#kp-drawer');
-    const titles = { toc: 'Kursinhalt', notes: 'Meine Notizen', glossary: 'Glossar', search: T('suchen'), trainer: T('trTitel'), lernbuch: T('lernbuch') };
+    const titles = { toc: T('kursinhalt'), notes: T('meineNotizen'), glossary: T('glossar'), search: T('suchen'), trainer: T('trTitel'), lernbuch: T('lernbuch') };
     let body = '';
     if (which === 'lernbuch') {
       body = lernbuchBody();
@@ -8053,7 +10929,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
         const mark = state.visited.has(i) ? '✓' : '·';
         return out + `<button class="kp-toc-item ${i === state.current ? 'current' : ''}" data-goto="${i}" ${locked ? 'disabled' : ''} ${i === state.current ? 'aria-current="page"' : ''}><span class="kp-toc-state" aria-hidden="true">${mark}</span><span>${plainTitle(p.title)}</span></button>`;
       }).join('');
-      body += '<p style="margin-top:18px"><button class="kp-btn kp-sec" data-print>Zusammenfassung drucken</button></p>';
+      body += `<p style="margin-top:18px"><button class="kp-btn kp-sec" data-print>${T('zusammenfassungDrucken')}</button></p>`;
       // Am Handy sind die weiteren Knöpfe der Kopfzeile hier erreichbar (die Kopfzeile bleibt einzeilig)
       const extra = [];
       const hub = pages.findIndex(x => (x.blocks || []).some(b => b.type === 'chapters'));
@@ -8067,15 +10943,26 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       const lb = lernbuchEntries().length;
       if (hasLernbuch()) body = `<div class="kp-toc-fs"><button class="kp-btn kp-sec kp-lb-open" data-drawer="lernbuch">${T('lernbuch')}${lb ? ` (${lb})` : ''}</button></div>` + body;
       body = goalCard('kp-goal-toc') + body;
-      if (set.tour === true && window.driver) body = `<div class="kp-toc-fs"><button class="kp-btn kp-sec" data-tour>${icon('question')} ${T('tour')}</button></div>` + body;
-      if (soundsAllowed()) body = `<div class="kp-toc-fs"><button class="kp-btn kp-sec" data-sounds aria-pressed="${soundsOn()}">${icon(soundsOn() ? 'volume' : 'mute')} ${T(soundsOn() ? 'klangAn' : 'klangAus')}</button></div>` + body;
-      if (fsEnabled()) body = `<div class="kp-toc-fs">${fsButton()}</div>` + body;
+      // Einstellungen unter der Kapitelliste als schmale Schalter mit Zustand (UX-Prüfung 02.11.2026: fünf große Knöpfe
+      // standen vor dem Inhalt, bei 768 px Höhe blieben sieben Seiten sichtbar, und „Klänge an“ ließ offen, ob Zustand oder Aktion)
+      const sets = [];
+      if (fsEnabled()) sets.push(fsButton());
+      if (soundsAllowed()) sets.push(`<button class="kp-toc-sw" data-sounds aria-pressed="${soundsOn()}">${tocSwitch(soundsOn() ? 'volume' : 'mute', T('klaenge'), soundsOn())}</button>`);
+      if (!opts.renderer) sets.push(`<button class="kp-toc-sw" data-calm aria-pressed="${calmOn()}">${tocSwitch('pause', T('ruhigAus'), calmOn())}</button>`);
+      if (set.tour === true && window.driver) sets.push(`<button class="kp-toc-sw" data-tour>${icon('question')} <span>${T('tour')}</span></button>`);
+      if (sets.length) body += `<div class="kp-toc-set" role="group" aria-label="${esc(T('tocEinstellungen'))}"><div class="kp-toc-chapter">${T('tocEinstellungen')}</div>${sets.join('')}</div>`;
+      if (set.exitButton) body += `<div class="kp-toc-fs kp-toc-exit"><button class="kp-btn kp-sec" data-exit>${T('kursBeenden')}</button></div>`;
     } else if (which === 'notes') {
       body = notesBody();
     } else {
       body = (course.glossary || []).map(g => `<div class="kp-glossar-term">${esc(g.term)}</div><div class="kp-glossar-def">${esc(g.definition)}</div>`).join('');
     }
+    // Wer das Verzeichnis geöffnet hat, bekommt den Fokus beim Schließen zurück (WCAG 2.4.3)
+    const ae = document.activeElement;
+    if (ae && ae !== document.body && !d.contains(ae)) drawerOpener = ae;
+    d.dataset.which = which;
     d.innerHTML = `<div class="kp-drawer-head"><span>${titles[which]}</span><button data-close-drawer aria-label="Schließen">×</button></div><div class="kp-drawer-body">${body}</div>`;
+    d.inert = false;
     d.classList.add('open');
     root.querySelector('.kp-backdrop').classList.add('open');
     root.querySelectorAll('[data-dz-menu]').forEach(m => m.setAttribute('aria-expanded', String(which === 'toc')));
@@ -8179,10 +11066,20 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     root.querySelectorAll('[data-fullscreen]').forEach(b => { b.innerHTML = fsLabel(); b.setAttribute('aria-pressed', String(fsActive())); });
   }));
 
+  // Geschlossen ist das Verzeichnis inert: es liegt nur verschoben neben dem Bild, Tab darf nicht hineinlaufen.
+  // Stand der Fokus darin, geht er zurück auf den Knopf, der es geöffnet hat (sonst auf den Menüknopf).
+  let drawerOpener = null;
   function closeDrawer() {
     const d = root.querySelector('#kp-drawer');
     if (!d || !d.classList.contains('open')) return;
+    const had = d.contains(document.activeElement);
     d.classList.remove('open');
+    d.inert = true;
+    if (had) {
+      const back = drawerOpener && drawerOpener.isConnected && !d.contains(drawerOpener) ? drawerOpener : root.querySelector('[data-dz-menu], .kp-head [data-drawer="toc"], [data-drawer="toc"]');
+      if (back) back.focus({ preventScroll: true });
+    }
+    drawerOpener = null;
     root.querySelector('.kp-backdrop').classList.remove('open');
     root.querySelectorAll('[data-dz-menu]').forEach(m => m.setAttribute('aria-expanded', 'false'));
   }
@@ -8257,6 +11154,24 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     return given.length ? given.sort((x, y) => x - y) : null;
   }
 
+  // „Antwort prüfen“ ohne Antwort: ein Satz direkt unter dem Knopf statt Stille (UX-Prüfung 07.11.2026, WCAG 3.3.1);
+  // verschwindet, sobald etwas gewählt oder eingegeben wird, der Fokus bleibt auf dem Knopf
+  function emptyAnswerMsg(q, box, btn) {
+    const key = { fill: 'leerLuecke', numeric: 'leerZahl', match: 'leerZuordnen', pins: 'leerPins', claims: 'leerAussagen' }[q.kind] || 'leerAuswahl';
+    let m = box.querySelector('[data-empty-msg]');
+    if (!m) {
+      m = document.createElement('p');
+      m.className = 'kp-empty-msg';
+      m.setAttribute('data-empty-msg', '');
+      m.setAttribute('role', 'status');
+      const row = btn.closest('.kp-quiz-actions') || btn;
+      row.insertAdjacentElement('afterend', m);
+      const clear = () => { m.remove(); box.removeEventListener('input', clear); box.removeEventListener('change', clear); };
+      box.addEventListener('input', clear); box.addEventListener('change', clear);
+    }
+    m.textContent = T(key);
+  }
+
   // Einschätzung vorher: nur Übungsfragen; bewertete Fragen behalten die Abfrage nach der Antwort, die Punkte ändern sich nie
   function confBefore(q, isGraded) {
     if (set.confidence !== 'vorher' || isGraded || q.kind === 'hotspot' || /~resume$/.test(q.id)) return false;
@@ -8324,6 +11239,85 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     setTimeout(() => a.remove(), 500);
   }
 
+  // Vorschau im Editor (Direkt bearbeiten): Bedientexte und ihre Schlüssel für die Zuordnung, Fenster des Kurses zum Bearbeiten öffnen
+  // („Alle Folien“ → Lernbuch-Karte, Lernbuch, Bedienhilfe, Meilenstein, Wiedereinstieg, Menü). Nie im Paket.
+  if (opts.preview && typeof window !== 'undefined') {
+    window.kpUiKeys = Object.keys(UI_DE);
+    window.kpUiText = k => T(k);
+    // Wie der Player eine Datei auflöst (SVG-Grafiken kommen umgefärbt an): „Direkt bearbeiten“ findet so das Bild zum Feld
+    window.kpRes = v => { const r = res(v); return [r, ILLU_LIVE.get(r)].filter(Boolean); };
+    // Direkt einspielen statt neu laden (Kerstin 08.11.2026: „wenn ich etwas anpasse, nicht ruckeln, sondern sich direkt anpassen“):
+    // Der Editor gibt den geänderten Kurs; geänderte Folien und Dateien werden übernommen und nur die aktuelle Folie neu gezeichnet.
+    // Scrollstand, offenes Seitenfenster (Lernbuch, Menü, Notizen) und Fenster am body (Lernbuch-Karte) bleiben, nichts fährt noch einmal herein.
+    // Ändert sich, was beim Start fest berechnet wird (Design, Einstellungen, Leiste, CSS, Figuren, Glossar, Sprachen, Zahl und Folge der Folien,
+    // neue Bausteinarten mit eigenen Bibliotheken), liefert kpHot false und der Editor lädt wie bisher neu.
+    window.kpPage = () => state.current;
+    window.kpHot = (data, o) => {
+      o = o || {};
+      const no = why => { window.kpHotWhy = why; return false; };
+      // Folien, die der Player selbst anhängt (Ergebnis „_result“), stehen am Ende und bleiben
+      const own = pages.filter(p => !/^_/.test(String(p.id || ''))).length;
+      if (!data || !Array.isArray(data.pages) || data.pages.length !== own) return no('Folienzahl ' + (data && data.pages ? data.pages.length : '-') + ' statt ' + own);
+      // Bedientexte, KI-Hinweis und Kurstitel ändert „Direkt bearbeiten“ ohne Neuladen: sie zählen nicht als feste Einstellung und werden übernommen
+      const LIVE = ['uiTexts', 'aiNotice'];
+      // Namen und Rollen der Figuren, Begriffe und Erklärungen im Glossar liest der Player beim Zeichnen: auch sie ohne Neuladen
+      const TXT = { cast: ['name', 'role'], glossary: ['term', 'definition'] };
+      const bare = (k, v) => Array.isArray(v) && TXT[k] ? v.map(x => x && typeof x === 'object' ? Object.assign({}, x, Object.fromEntries(TXT[k].map(f => [f, null]))) : x) : v;
+      const cmp = (k, v) => JSON.stringify(v == null ? null : (k === 'settings' ? Object.assign({}, v, Object.fromEntries(LIVE.map(x => [x, null]))) : bare(k, v)));
+      const FIX = ['theme', 'settings', 'chrome', 'css', 'cast', 'glossary', 'languages', 'lang', 'meters', 'objectives', 'missionTheme', 'series'];
+      const differ = FIX.filter(k => cmp(k, data[k]) !== cmp(k, course[k]));
+      if (differ.length) return no('fest: ' + differ.join(', '));
+      if (data.pages.some((p, i) => !p || !pages[i] || p.id !== pages[i].id)) return no('Folgen der Folien');
+      const typesOf = list => new Set(list.flatMap(p => (p.blocks || []).map(b => b.type)));
+      const had = typesOf(pages);
+      if ([...typesOf(data.pages)].some(t => !had.has(t))) return no('neue Bausteinart');
+      const ds = data.settings || {};
+      Object.keys(uiOwn).forEach(k => delete uiOwn[k]);
+      Object.assign(uiOwn, ds.uiTexts && typeof ds.uiTexts === 'object' ? ds.uiTexts : {});
+      [course.settings, set].forEach(x => { if (x) LIVE.forEach(k => { if (k !== 'uiTexts') x[k] = ds[k]; }); });
+      course.title = data.title;
+      Object.keys(TXT).forEach(k => { if (Array.isArray(data[k])) course[k] = data[k]; });
+      // Kopien für die Wiederholung neu aus den geänderten Fragen ziehen
+      Object.keys(reviewCopies).forEach(k => delete reviewCopies[k]);
+      // data.assets === null: Dateien unverändert (der Editor schickt sie dann nicht mit)
+      if (data.assets !== null) {
+        (data.assets || []).forEach(a => { if (a && a.name) assetMap['assets/' + a.name] = a.src; });
+        course.assets = data.assets;
+      }
+      data.pages.forEach((p, i) => { course.pages[i] = p; pages[i] = p; });
+      try { buildItems(); } catch (e) { return no('Fragen: ' + e.message); }
+      const target = o.page != null && o.page >= 0 && o.page < pages.length ? o.page : state.current;
+      const same = target === state.current;
+      const dr = root.querySelector('#kp-drawer.open'), drWhich = dr && dr.dataset.which;
+      if (same) { keepScroll = window.scrollY; keepShown = new Set([...root.querySelectorAll('#kp-main [data-block]')].map(x => x.dataset.block)); }
+      state.current = target;
+      render(false);
+      // Nichts noch einmal hereinfahren lassen: Seitenanimation, Einflug und gestaffelte Listen stehen sofort
+      const main = root.querySelector('#kp-main');
+      if (main && same) [...main.classList].filter(c => /^fx-/.test(c)).forEach(c => main.classList.remove(c));
+      if (same) root.querySelectorAll('.kp-einflug').forEach(x => x.classList.remove('kp-einflug'));
+      if (same) root.querySelectorAll('.fx-reveal').forEach(x => x.classList.add('fx-in', 'fx-now'));
+      if (drWhich && same) openDrawer(drWhich);
+      return true;
+    };
+    window.kpShow = what => {
+      closeDrawer();
+      document.querySelectorAll('.kp-lbw, .kp-milestone, .kp-resume').forEach(x => x.remove());
+      if (what === 'lernbuchKarte') { lernbuchWelcome(); return !!document.querySelector('.kp-lbw'); }
+      if (what === 'lernbuch') { openDrawer('lernbuch'); return true; }
+      if (what === 'menue') { openDrawer('toc'); return true; }
+      if (what === 'tour') return startTour();
+      if (what === 'meilenstein') {
+        const list = chapterList(true).filter(c => c.name);
+        const ch = (pages[state.current] || {}).chapter || (list[0] || {}).name;
+        if (!ch) return false;
+        milestoneCard(ch); return true;
+      }
+      if (what === 'wiedereinstieg') { showResume(state.current); return true; }
+      return false;
+    };
+  }
+
   // Level-Spiele melden ihr Ergebnis per postMessage; nur Nachrichten aus den eigenen Spielrahmen zählen
   window.addEventListener('message', e => {
     const d = e.data;
@@ -8366,6 +11360,13 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     report();
   });
 
+  // Wischen im Stapel: der Klick, den Stift oder Maus nach dem Wischen noch auslösen, zählt nicht (der Knopf unter dem Finger
+  // würde sonst zusätzlich gedrückt); der Klick der Geste selbst läuft über swipeFiring durch
+  root.addEventListener('click', e => {
+    if (!swipeEat || swipeFiring) return;
+    if (Date.now() > swipeEat.until) { swipeEat = null; return; }
+    if (swipeEat.el.contains(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); swipeEat = null; }
+  }, true);
   // Matrix: gesetzte Nummern ziehen (Maus, Finger) oder mit den Pfeiltasten schieben
   let mxDragged = false;
   root.addEventListener('pointerdown', e => {
@@ -8391,6 +11392,21 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     };
     d.addEventListener('pointermove', move); d.addEventListener('pointerup', up); d.addEventListener('pointercancel', up);
   });
+  // 360°-Rundgang: Pfeiltasten drehen in 15°-Schritten (oben/unten verschieben leicht), Pos1 auf die Startrichtung
+  root.addEventListener('keydown', e => {
+    const view = e.target.closest && e.target.closest('[data-pano-view]');
+    if (!view || e.altKey || e.ctrlKey || e.metaKey) return;
+    const box = view.closest('[data-pano]'), b = box && findBlock(box.dataset.pano);
+    if (!b) return;
+    const v = panoState(b);
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') v.yaw += e.key === 'ArrowRight' ? 15 : -15;
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') v.pitch = Math.max(-0.15, Math.min(0.15, v.pitch + (e.key === 'ArrowDown' ? 0.05 : -0.05)));
+    else if (e.key === 'Home') { v.yaw = panoNorm(b.start); v.pitch = 0; }
+    else return;
+    e.preventDefault();
+    clearTimeout(v.timer);
+    panoApply(box, true);
+  });
   root.addEventListener('keydown', e => {
     const d = e.target.closest && e.target.closest('[data-mx-dot]');
     const dir = { ArrowLeft: [-2, 0], ArrowRight: [2, 0], ArrowUp: [0, 2], ArrowDown: [0, -2] }[e.key];
@@ -8404,6 +11420,20 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
   });
   root.addEventListener('click', e => {
     const t = e.target;
+    // Erst überlegen, dann aufdecken: Möglichkeit wählen oder Stichwort aufdecken; „Alle aufdecken“ für Erfahrene
+    const gPick = t.closest('[data-guess]');
+    if (gPick) return guessPick(gPick);
+    const gAll = t.closest('[data-guess-all]');
+    if (gAll) return guessAll(gAll);
+    // Animation in Schritten: Weiter, Zurück, Wiederholen; laufende Lottie-Schleife anhalten
+    const sbBtn = t.closest('[data-sb-go], [data-sb-again]');
+    if (sbBtn) {
+      const box = sbBtn.closest('[data-steps-of]');
+      if (!box || sbBtn.getAttribute('aria-disabled') === 'true') return;
+      return sbAct(findBlock(box.dataset.stepsOf), box, sbBtn.hasAttribute('data-sb-again') ? 'again' : sbBtn.dataset.sbGo === '1' ? 'next' : 'prev');
+    }
+    const lPause = t.closest('[data-lottie-pause]');
+    if (lPause) return lottiePause(lPause);
     // Code-Schloss: Stelle hoch oder runter, öffnen, Hinweis auf Abruf
     const lockStep = t.closest('[data-lock-step]');
     if (lockStep) {
@@ -8506,21 +11536,35 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       return;
     }
     // Kartenstapel: starten, umdrehen, gewusst/noch nicht, neu
-    const deckBtn = t.closest('[data-deck-start], [data-deck-flip], [data-deck-rate], [data-deck-restart]');
+    const poolGo = t.closest('[data-pool-start]');
+    if (poolGo) { const id = poolGo.getAttribute('data-pool-start'); state.self[id] = Object.assign(state.self[id] || {}, { started: 1 }); const box = poolGo.closest('.kp-pool-start'); if (box) refreshBlock(box, renderBlock(findBlock(id))); const q = root.querySelector(`[data-block="${id}"] .kp-quiz`); if (q) { q.setAttribute('tabindex', '-1'); q.focus(); } report(); renderFooter(); return; }
+    const deckBtn = t.closest('[data-deck-start], [data-deck-flip], [data-deck-rate], [data-deck-restart], [data-deck-due], [data-deck-extra]');
     if (deckBtn) {
       const el = deckBtn.closest('[data-deck]'), b = findBlock(el.dataset.deck);
       let st = state.self[b.id] || (state.self[b.id] = {});
       let focus = '.kp-mkc-front';
-      if (deckBtn.hasAttribute('data-deck-start')) Object.assign(st, { q: deckCards(b).map(c => c.id), r: {}, seen: [], flip: false, done: false });
+      // Mit Fächern merkt sich die Runde ihren Tag; „Fällige wiederholen“ nimmt nur die fälligen, „Trotzdem üben“ alle (ohne die Fächer zu ändern)
+      const round = (ids, extra) => { Object.assign(st, { q: ids, r: {}, seen: [], flip: false, done: false }); if (b.spaced) { st.day = todayNum(); st.n = ids.length; if (extra) st.extra = 1; else delete st.extra; } };
+      if (deckBtn.hasAttribute('data-deck-start')) round(deckCards(b).map(c => c.id));
+      else if (deckBtn.hasAttribute('data-deck-due')) round(deckShuffle(deckDue(b).map(c => c.id)));
+      else if (deckBtn.hasAttribute('data-deck-extra')) round(deckShuffle(deckCards(b).map(c => c.id)), true);
       else if (deckBtn.hasAttribute('data-deck-flip')) { st.flip = true; focus = '.kp-mkc-back'; }
-      else if (deckBtn.hasAttribute('data-deck-restart')) { st = state.self[b.id] = {}; focus = '[data-deck-start]'; }
+      else if (deckBtn.hasAttribute('data-deck-restart')) { st = state.self[b.id] = b.spaced ? { lb: deckLb(b), fin: st.fin || (st.done ? 1 : 0) } : {}; focus = b.spaced && Object.keys(st.lb).length ? '.kp-deck-due-n' : '[data-deck-start]'; }
       else {
         const v = Number(deckBtn.dataset.deckRate), id = st.q.shift();
-        if (st.r[id] == null) st.r[id] = v;
+        if (st.r[id] == null) {
+          st.r[id] = v;
+          // Fächer: nur die erste Bewertung der Runde zählt; gewusst = ein Fach weiter, noch nicht = Fach 1, morgen
+          if (b.spaced && !st.extra) {
+            const lb = Object.assign({}, deckLb(b)), f = v ? Math.min(5, (lb[id] ? lb[id][0] : 1) + 1) : 1;
+            lb[id] = [f, todayNum() + LEITNER_TAGE[f - 1]];
+            deckLbSave(b, lb);
+          }
+        }
         st.seen = [id].concat((st.seen || []).filter(x => x !== id));
         if (v === 0) st.q.push(id);
         st.flip = false;
-        if (!st.q.length) { st.done = true; focus = '.kp-deck-done'; }
+        if (!st.q.length) { st.done = true; if (b.spaced) st.fin = 1; focus = '.kp-deck-done'; }
       }
       refreshBlock(el, renderKartenstapel(b));
       const f = root.querySelector(`[data-deck="${b.id}"] ${focus}`); if (f) f.focus();
@@ -8605,13 +11649,24 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       return refreshBlock(pbReset.closest('[data-promptbuild]'), renderPromptBuild(b));
     }
     // Fragen an die Figur: Frage stellen, die Antwort erscheint im Verlauf, der Fokus springt auf sie
+    const askRe = t.closest('[data-ask-reset]');
+    if (askRe) {
+      const b = findBlock(askRe.dataset.askReset);
+      state.self[b.id] = { asked: [] };
+      refreshBlock(askRe.closest('[data-fragen]'), renderFragen(b));
+      const q0 = root.querySelector(`[data-fragen="${b.id}"] [data-ask-q]`); if (q0) q0.focus();
+      updateConditions(); renderFooter(); report();
+      return;
+    }
     const askQ = t.closest('[data-ask-q]');
     if (askQ) {
       const b = findBlock(askQ.dataset.block);
       const st = state.self[b.id] || (state.self[b.id] = { asked: [] });
       st.asked = st.asked || [];
       const i = Number(askQ.dataset.askQ);
+      if (askBudget(b) && st.asked.length >= askBudget(b)) return;
       if (!st.asked.includes(i)) st.asked.push(i);
+      if (askClues(b).length && b.items[i] && b.items[i].clue !== '' && b.items[i].clue != null) uiSound('aufdecken');
       refreshBlock(askQ.closest('[data-fragen]'), renderFragen(b));
       const box = root.querySelector(`[data-fragen="${b.id}"]`);
       const log = box && box.querySelector('.kp-ask-log');
@@ -8663,9 +11718,14 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       st.at = at; st.seen = st.seen || []; if (!st.seen.includes(at)) st.seen.push(at);
       box.querySelector('.kp-tc-track').style.setProperty('--at', at);
       cards.forEach((c, i) => { c.classList.toggle('on', i === at); if (i === at) c.removeAttribute('aria-hidden'); else c.setAttribute('aria-hidden', 'true'); });
+      // Foto-Karussell: die frische Karte baut ihren Inhalt neu auf (Vorbild Fernhill is-fresh), nur sie trägt kp-fresh
+      cards.forEach((c, i) => { c.classList.remove('kp-fresh'); if (i === at && c.classList.contains('kp-cc-card')) { void c.offsetWidth; c.classList.add('kp-fresh'); } });
       box.querySelectorAll('.kp-tc-dot').forEach((d, i) => { if (i === at) d.setAttribute('aria-current', 'true'); else d.removeAttribute('aria-current'); });
       box.querySelectorAll('[data-tc-step]').forEach(x => { x.disabled = x.dataset.dir === '-1' ? at === 0 : at >= cards.length - 1; });
-      const pos = box.querySelector('[data-tc-pos]'); if (pos) pos.textContent = `${at + 1} ${T('von')} ${cards.length}`;
+      const pos = box.querySelector('[data-tc-pos]');
+      // Foto-Karussell der Karten: Zähler „03 / 09“ und Balken, sonst die gesprochene Position
+      if (pos && pos.querySelector('[data-tc-n]')) { pos.querySelector('[data-tc-n]').textContent = String(at + 1).padStart(2, '0'); pos.querySelector('[data-tc-bar]').style.setProperty('--w', Math.round((at + 1) / cards.length * 100) + '%'); }
+      else if (pos) pos.textContent = `${at + 1} ${T('von')} ${cards.length}`;
       if (tcStep.disabled) { const other = box.querySelector(`[data-tc-step]:not(:disabled)`); if (other) other.focus({ preventScroll: true }); }
       updateConditions(); renderFooter(); report();
       return;
@@ -8682,7 +11742,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       const pos = box.querySelector('[data-fc-pos]'); if (pos) pos.textContent = `${at + 1} ${T('von')} ${cards.length}`;
       const bar = box.querySelector('.kp-flipcar-bar b'); if (bar) bar.style.width = Math.round((at + 1) / cards.length * 100) + '%';
       box.querySelectorAll('[data-fc-step]').forEach(x => { x.disabled = x.dataset.dir === '-1' ? at === 0 : at >= cards.length - 1; });
-      cards[at].focus({ preventScroll: true });
+      (cards[at].classList.contains('kp-flip-ask') ? cards[at].querySelector('.kp-guess-opt, .kp-guess-in') || cards[at] : cards[at]).focus({ preventScroll: true });
       return;
     }
     const chatReset = t.closest('[data-chat-reset]');
@@ -8732,6 +11792,20 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       report();
       return refreshBlock(triPick.closest('[data-triage]'), renderTriage(b));
     }
+    const tszBtn = t.closest('[data-tsz-go]');
+    if (tszBtn) { const b = findBlock(tszBtn.dataset.block); return tszGo(b, Number(tszBtn.dataset.i), Number(tszBtn.dataset.tszGo), tszBtn); }
+    const tszNext = t.closest('[data-tsz-next]');
+    if (tszNext) {
+      const b = findBlock(tszNext.dataset.tszNext);
+      const st = state.self[b.id] || (state.self[b.id] = { d: {}, cur: 0 });
+      const offen = (b.items || []).map((x, i) => i).filter(i => st.d[i] == null);
+      if (offen.length) st.cur = offen[0]; else st.end = true;
+      report();
+      refreshBlock(tszNext.closest('[data-triage]'), renderTriage(b));
+      const nb = root.querySelector(`[data-triage="${b.id}"]`);
+      const f = nb && (nb.querySelector('[data-tsz-sum]') || nb.querySelector('.kp-tsz-count')); if (f) { if (!f.hasAttribute('tabindex')) f.setAttribute('tabindex', '-1'); f.focus({ preventScroll: true }); }
+      return;
+    }
     const triGo = t.closest('[data-tri-go]');
     if (triGo) {
       const b = findBlock(triGo.dataset.block);
@@ -8767,7 +11841,11 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       return;
     }
     const nextBtn = t.closest('[data-next]');
-    if (nextBtn) return nextBtn.disabled || blockedHere() ? undefined : go(nextIndex());
+    if (nextBtn) {
+      if (nextBtn.disabled || blockedHere()) return;
+      if (scrollLook() && !pages[state.current].result && !scGated()) scMark(state.current);
+      return go(nextIndex());
+    }
     if (t.closest('[data-back]')) {
       const prev = state.history.length ? state.history.pop() : state.current - 1;
       if (prev >= 0) { state.current = prev; pageTransition(() => render(true), true); }
@@ -8840,10 +11918,17 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     if (drawer && drawer.hasAttribute('data-dz-menu') && root.querySelector('#kp-drawer.open')) return closeDrawer();
     if (drawer) return openDrawer(drawer.dataset.drawer);
     if (t.closest('[data-fullscreen]')) return toggleFullscreen();
+    const calmBtn = t.closest('[data-calm]');
+    if (calmBtn) {
+      const on = !calmOn(); setCalmOn(on);
+      calmBtn.setAttribute('aria-pressed', String(on)); calmBtn.innerHTML = tocSwitch('pause', T('ruhigAus'), on);
+      toast(T(on ? 'ruhigAnHinweis' : 'ruhigAusHinweis'));
+      return;
+    }
     const sb = t.closest('[data-sounds]');
     if (sb) {
       const on = !soundsOn(); setSoundsOn(on);
-      sb.setAttribute('aria-pressed', String(on)); sb.innerHTML = `${icon(on ? 'volume' : 'mute')} ${T(on ? 'klangAn' : 'klangAus')}`;
+      sb.setAttribute('aria-pressed', String(on)); sb.innerHTML = tocSwitch(on ? 'volume' : 'mute', T('klaenge'), on);
       if (on) { klangLast = 0; uiSound('klick'); }
       return;
     }
@@ -8873,7 +11958,8 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
         const c = box.querySelector('[data-regal-count]'); if (c) c.textContent = T('regalGenau').replace('{n}', regalPick(found.q));
         return;
       }
-      if (a == null || needsConf(found.q, box)) return;
+      if (a == null) { emptyAnswerMsg(found.q, box, check); return; }
+      if (needsConf(found.q, box)) return;
       const whyEl = box.querySelector(`[data-why="${found.q.id}"]`);
       if (whyEl) {
         const v = whyEl.value.trim();
@@ -8890,12 +11976,23 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       state.seen[found.q.id] = Date.now();
       return refreshBlock(retry.closest('[data-quiz]'), renderQuiz(found.q, found.graded));
     }
+    // settings.exitButton: Stand melden, beim LMS abmelden, Fenster schließen (geht nur, wenn das LMS es geöffnet hat)
+    if (t.closest('[data-exit]')) {
+      if (lms && !finished) { report(); finished = true; try { lms.finish(); } catch (e) { /* LMS weg */ } }
+      try { (window.top || window).close(); } catch (e) { /* fremdes Fenster */ }
+      try { window.close(); } catch (e) { /* nicht von Skript geöffnet */ }
+      closeDrawer();
+      toast(T('kursBeendet'));
+      return;
+    }
     if (t.closest('[data-retry-all]')) {
+      const maxTries = Math.max(0, Number(set.testAttempts) || 0);
+      if (maxTries && ((state.self.prev || {}).n || 0) + 1 >= maxTries) return;
       const last = score();
       state.self.prev = { pct: last.pct, got: last.got, max: last.max, n: ((state.self.prev || {}).n || 0) + 1 };
       graded().forEach(it => {
         delete state.answers[it.id]; delete state.tries[it.id]; delete state.conf[it.id]; if (it.branch) delete state.branch[it.id];
-        if (it.play && (it.play.type === 'simulation' || it.play.type === 'interaktion')) delete state.self[it.id];
+        if (it.play && (it.play.type === 'simulation' || it.play.type === 'interaktion' || it.play.type === 'table')) delete state.self[it.id];
         else if (it.play && state.self.mm) delete state.self.mm[it.id];
       });
       pages.forEach(p => (p.blocks || []).forEach(b => { if (b.type === 'pool' || b.type === 'review') delete state.pools[b.id]; }));
@@ -8931,6 +12028,15 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       updateConditions();
       return;
     }
+    // Schätzen mit Piktogrammen: Klick auf Symbol k färbt bis k ein, erneuter Klick auf das letzte gefärbte nimmt es zurück
+    const pkc = t.closest('[data-pk-slider] [data-pk-i]');
+    if (pkc) {
+      const g = pkc.closest('[data-pk-slider]'), k = Number(pkc.dataset.pkI);
+      pkSet(g, Number(g.getAttribute('aria-valuenow')) === k + 1 ? k : k + 1);
+      g.focus({ preventScroll: true });
+      uiSound('klick');
+      return;
+    }
     // Denkpause: erst selbst überlegen, dann auflösen
     const pg = t.closest('[data-predict-go]');
     if (pg) {
@@ -8940,9 +12046,17 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       if (b.mode === 'choice') { const c = box.querySelector('input:checked'); if (!c) { box.querySelector('.kp-answers').classList.add('kp-sc-missing'); return; } v = Number(c.value); }
       else if (b.mode === 'range') { const r = [...box.querySelectorAll('[data-pr-range]')].map(x => Number(x.value)); v = [Math.min(...r), Math.max(...r)]; }
       else if (b.mode === 'slider') v = Number(box.querySelector('[data-pr-range]').value);
+      else if (b.mode === 'piktogramm') {
+        const g = box.querySelector('[data-pk-slider]');
+        if (!g.hasAttribute('data-pk-touched')) { g.classList.add('kp-pk-missing'); box.querySelector('[data-pk-miss]').hidden = false; g.focus({ preventScroll: true }); return; }
+        v = Number(g.getAttribute('aria-valuenow'));
+        pkFresh = b.id;
+      }
       else v = box.querySelector('textarea').value.trim();
       state.self[b.id] = { v, done: true };
-      return refreshBlock(box, renderPredict(b));
+      refreshBlock(box, renderPredict(b));
+      if (b.mode === 'piktogramm') { const rv = root.querySelector(`[data-predict="${b.id}"] .kp-predict-reveal`); if (rv) rv.focus({ preventScroll: true }); }
+      return;
     }
     // Klickpfad: Stufe wählen, Zielstelle treffen oder daneben klicken
     const simEl = t.closest('[data-sim]');
@@ -9017,13 +12131,41 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       mddPlace(mddTo.dataset.quiz, mddTo.dataset.card, mddTo.dataset.mddTo);
       return;
     }
+    const tfBtn = t.closest('[data-tf-check], [data-tf-again]');
+    if (tfBtn) {
+      const b = findBlock(tfBtn.dataset.tfCheck || tfBtn.dataset.tfAgain), box = tfBtn.closest('[data-tf]');
+      if (b && box) return tfBtn.dataset.tfCheck ? tfCheck(b, box) : tfAgain(b, box);
+    }
     const sortTo = t.closest('[data-sort-to]');
     if (sortTo) {
       const b = findBlock(sortTo.dataset.block);
-      const st = state.self[b.id] || { place: {}, done: false };
-      st.place[Number(sortTo.dataset.item)] = Number(sortTo.dataset.sortTo);
-      state.self[b.id] = st;
-      return refreshBlock(sortTo.closest('[data-sortcats]'), renderSort(b));
+      return sortPut(b, Number(sortTo.dataset.item), Number(sortTo.dataset.sortTo), sortTo);
+    }
+    const szBtn = t.closest('[data-sz-step]');
+    if (szBtn) {
+      const b = findBlock(szBtn.dataset.block), n = (b.steps || []).length, d = Number(szBtn.dataset.szStep);
+      const idx = Math.max(0, Math.min(n - 1, (state.seq[b.id] || 0) + d));
+      state.seq[b.id] = idx;
+      if (idx === n - 1) state.self[b.id] = Object.assign({}, state.self[b.id], { end: 1 });
+      refreshBlock(szBtn.closest('[data-szene]'), renderSequence(b));
+      const nb = root.querySelector(`[data-szene="${b.id}"]`);
+      const f = nb && (nb.querySelector(`[data-sz-step="${d}"]:not([disabled])`) || nb.querySelector('[data-sz-step]:not([disabled])'));
+      if (f) f.focus({ preventScroll: true });
+      uiSound('klick'); updateConditions(); renderFooter(); report();
+      return;
+    }
+    const wbLock = t.closest('[data-wb-locked]');
+    if (wbLock) { const b = findBlock(wbLock.dataset.block); toast(T('wbErstDie').replace('{n}', wbNext(b) + 1)); return; }
+    const slBtn = t.closest('[data-sl-check]');
+    if (slBtn) { const b = findBlock(slBtn.dataset.slCheck); return slCheck(b, slBtn.closest('[data-sortcats]')); }
+    const slPrint = t.closest('[data-sl-print]');
+    if (slPrint) {
+      const b = findBlock(slPrint.dataset.slPrint);
+      printWindow(plainText(b.listTitle) || T('slCheckliste'), `body { font-family: ${theme.font || 'Segoe UI, sans-serif'}; color: #1d2530; max-width: 760px; margin: 30px auto; padding: 0 20px; }
+        h1 { font-size: 22px; } h3 { font-size: 16px; margin: 18px 0 6px; } ul { list-style: none; padding: 0; margin: 0; } li { padding: 6px 0 6px 30px; position: relative; border-bottom: 1px solid #dde1e6; }
+        li::before { content: ''; position: absolute; left: 0; top: 7px; width: 16px; height: 16px; border: 1.5px solid #555; border-radius: 3px; }`,
+        `<h1>${esc(plainText(b.listTitle) || T('slCheckliste'))}</h1>${slList(b)}`);
+      return;
     }
     const sortCheck = t.closest('[data-sort-check]');
     if (sortCheck) {
@@ -9085,9 +12227,13 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     if (gateBtn) {
       const b = findBlock(gateBtn.dataset.gate);
       state.self[b.id] = { done: true };
+      if (scrollLook()) {
+        keepScroll = window.scrollY;
+        keepShown = new Set([...root.querySelectorAll('#kp-main [data-block]:not([hidden])')].map(x => x.dataset.block));
+      }
       render();
       const el = root.querySelector(`[data-block="${b.id}"]`);
-      if (el && el.nextElementSibling) el.nextElementSibling.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (el && el.nextElementSibling) el.nextElementSibling.scrollIntoView({ block: scrollLook() ? 'start' : 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
       return;
     }
     // Videoszene weiterschalten
@@ -9099,6 +12245,74 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       state.dlg[id] = Math.max(0, Math.min((state.dlg[id] || 0) + dir, (b.steps || []).length - 1));
       return refreshBlock(vn.closest('[data-vscene]'), renderVscene(b));
     }
+    // Gefahren erkennen in einer Bildfolge (hotspots.mode „folge“)
+    const hfBox = t.closest('[data-hf]');
+    if (hfBox) {
+      const b = findBlock(hfBox.dataset.hf);
+      const rounds = hfRounds(b), st = hfState(b), ui = hfUi[b.id] || (hfUi[b.id] = {});
+      const rd = rounds[st.at], pts = rd ? (rd.points || []) : [];
+      if (t.closest('[data-hf-next]')) {
+        if (!rd) return;
+        if (pts.length && !st.res[st.at]) {
+          // „Weiter“ auf einem kritischen Bild: übersehen, die Stelle wird gezeigt, dann geht es weiter
+          st.res = Object.assign({}, st.res, { [st.at]: 'miss' }); state.self[b.id] = st;
+          hfUi[b.id] = { msg: T('hfUebersehen'), kind: 'no', drawn: true };
+          uiSound('falsch');
+          return hfRefresh(b, '[data-hf-fb]');
+        }
+        st.at += 1;
+        if (st.at >= rounds.length) st.done = true;
+        state.self[b.id] = st;
+        hfUi[b.id] = { fresh: true };
+        return hfRefresh(b, st.at >= rounds.length ? '[data-hf-sum]' : '[data-hf-next]');
+      }
+      if (t.closest('[data-hf-alarm]')) {
+        Object.assign(ui, { zeigen: true, msg: '', kind: '', tap: null });
+        return hfRefresh(b, '[data-hf-cell="4"]');
+      }
+      if (t.closest('[data-hf-cancel]')) { Object.assign(ui, { zeigen: false, msg: '', kind: '', tap: null }); return hfRefresh(b, '[data-hf-alarm]'); }
+      if (t.closest('[data-hf-again]')) {
+        state.self[b.id] = { at: 0, res: {}, fa: 0, fx: [], done: st.done };
+        hfUi[b.id] = { fresh: true };
+        return hfRefresh(b, '[data-hf-next]');
+      }
+      const cell = t.closest('[data-hf-cell]');
+      if (cell && ui.zeigen) {
+        const k = Number(cell.dataset.hfCell);
+        ui.tap = [(k % 3) * 100 / 3 + 50 / 3, Math.floor(k / 3) * 100 / 3 + 50 / 3];
+        return hfPoint(b, hfCellHit(pts, k));
+      }
+      const stage = t.closest('[data-hf-stage]');
+      if (stage && ui.zeigen && !st.res[st.at]) {
+        // Mausklick oder Tippen: Lage im Bild in Prozent, Treffer mit 3 % Spielraum je Richtung
+        const r = stage.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        const x = Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100)), y = Math.max(0, Math.min(100, (e.clientY - r.top) / r.height * 100));
+        ui.tap = [Math.round(x * 10) / 10, Math.round(y * 10) / 10];
+        return hfPoint(b, hfHitAt(pts, x, y));
+      }
+      return;
+    }
+    // 360°-Rundgang: nach dem Ziehen kein Klick auf einen Punkt; Drehknöpfe; Leiste „Punkte im Raum“ dreht hin und öffnet
+    if (panoDragged && t.closest('[data-pano-view]')) return;
+    const pTurn = t.closest('[data-pano-turn]');
+    if (pTurn) { const b = findBlock(pTurn.dataset.panoTurn); if (b) panoTurn(b.id, panoState(b).yaw + 30 * Number(pTurn.dataset.dir)); return; }
+    const pGo = t.closest('[data-pano-go]');
+    if (pGo) {
+      const b = findBlock(pGo.dataset.panoGo), i = Number(pGo.dataset.i), pt = (b.points || [])[i];
+      if (!pt) return;
+      const d = panoDoor(pt);
+      if (d >= 0) return go(d);
+      const v = panoState(b), st0 = state.self[b.id] || {};
+      v.to = panoYawOf(pt); v.pitch = panoPitchOf(pt);
+      if (st0.v !== i) uiSound('aufdecken');
+      state.self[b.id] = hsMarkSeen(b, st0, i, i);
+      updateConditions(); renderFooter(); report();
+      refreshBlock(pGo.closest('[data-hotspots]'), renderHotspots(b));
+      const nb = root.querySelector(`[data-pano-go="${b.id}"][data-i="${i}"]`);
+      if (nb) nb.focus({ preventScroll: true });
+      return hsFocusGuess(b);
+    }
     // Punkt im Bild öffnen oder schließen
     const hsDot = t.closest('[data-hs]');
     if (hsDot) {
@@ -9109,15 +12323,18 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       if (door && hsDot.getAttribute('aria-disabled') === 'true') { toast(T('ortGesperrtHinweis'), 'lock'); return; }
       if (door) { const d = pageIndexById(door); if (d >= 0) return go(d); }
       state.self[b.id] = hsMarkSeen(b, st0, i, st0.v === i ? undefined : i);
+      if (b.panorama && st0.v !== i) uiSound('aufdecken');
       updateConditions(); renderFooter(); report();
-      return refreshBlock(hsDot.closest('[data-hotspots]'), renderHotspots(b));
+      refreshBlock(hsDot.closest('[data-hotspots]'), renderHotspots(b));
+      if (b.panorama) { const nd = root.querySelector(`[data-pano-view="${b.id}"] [data-hs][data-i="${i}"]`); if (nd && !nd.hidden) nd.focus({ preventScroll: true }); }
+      return hsFocusGuess(b);
     }
     // Suchbild-Runden: nächste Runde
     const nextRound = t.closest('[data-hs-next-round]');
     if (nextRound) {
       const b = findBlock(nextRound.dataset.hsNextRound);
       const st = state.self[b.id] || {};
-      state.self[b.id] = { r: hsRound(b, st).r + 1, rs: st.rs, v: undefined };
+      state.self[b.id] = { r: hsRound(b, st).r + 1, rs: st.rs, v: undefined, g: st.g, all: st.all };
       return refreshBlock(nextRound.closest('[data-hotspots]'), renderHotspots(b));
     }
     // Vor und zurück in der geöffneten Karte
@@ -9129,8 +12346,10 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       const stops = list.map((pt, i) => i).filter(i => !list[i].target);
       const at = stops.indexOf(st.v);
       const next = stops[(at + Number(step.dataset.dir) + stops.length) % stops.length];
+      if (b.panorama && list[next]) { panoState(b).to = panoYawOf(list[next]); panoState(b).pitch = panoPitchOf(list[next]); }
       state.self[b.id] = hsMarkSeen(b, st, next, next);
-      return refreshBlock(step.closest('[data-hotspots]'), renderHotspots(b));
+      refreshBlock(step.closest('[data-hotspots]'), renderHotspots(b));
+      return hsFocusGuess(b);
     }
     // Führung: der Reihe nach durch alle Punkte
     const tour = t.closest('[data-hs-tour]');
@@ -9142,9 +12361,60 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       let next = st.v == null ? 0 : (st.v + 1) % list.length;
       for (let n = 0; n < list.length && list[next] && list[next].target; n++) next = (next + 1) % list.length;
       state.self[b.id] = hsMarkSeen(b, st, next, next);
-      return refreshBlock(tour.closest('[data-hotspots]'), renderHotspots(b));
+      refreshBlock(tour.closest('[data-hotspots]'), renderHotspots(b));
+      return hsFocusGuess(b);
     }
     // Schichten ein- und ausblenden
+    // Begleitfigur auf der Karte: Sprechblase zu- und aufklappen (beide Fassungen, Bild und Handy), ohne Neuzeichnen
+    const mgT = t.closest('[data-mg-toggle]');
+    if (mgT) {
+      const id = mgT.dataset.mgToggle, blk = mgT.closest('[data-hotspots]');
+      const boxes = blk ? Array.from(blk.querySelectorAll(`[data-map-guide="${id}"]`)) : [];
+      const shut = !boxes.some(x => x.classList.contains('kp-mg-shut'));
+      const say = (blk && blk.querySelector('[data-mg-say]') || {}).textContent || '';
+      if (shut) mgShut[id] = say; else delete mgShut[id];
+      boxes.forEach(x => {
+        x.classList.toggle('kp-mg-shut', shut); x.classList.remove('kp-mg-fresh');
+        const bub = x.querySelector('.kp-mg-bubble'); if (bub) bub.hidden = shut;
+        const face = x.querySelector('.kp-mg-face'), nm = (x.querySelector('.kp-mg-name') || {}).textContent || '';
+        if (face) { face.setAttribute('aria-expanded', String(!shut)); face.setAttribute('aria-label', (nm ? nm + ': ' : '') + T(shut ? 'mgZeigen' : 'mgZu')); }
+      });
+      if (shut) { const f = mgT.closest('[data-map-guide]').querySelector('.kp-mg-face'); if (f) f.focus(); }
+      return;
+    }
+    // 3D-Modell: Teil wählen (Nummer am Modell oder in der Liste), blättern, Bewegung, Ansicht zurück
+    const m3dPt = t.closest('[data-m3d-pt]');
+    if (m3dPt) { const b = findBlock(m3dPt.dataset.block); const pt = m3dPts(b)[Number(m3dPt.dataset.m3dPt)]; m3dGo(b, m3dPt.closest('[data-m3d]'), m3dPt.dataset.m3dPt, m3dPt.classList.contains('kp-m3d-item')); if (pt && pt.target && m3dPt.classList.contains('kp-m3d-hs')) { const d = pageIndexById(pt.target); if (d >= 0) go(d); } return; }
+    const m3dStep = t.closest('[data-m3d-step]');
+    if (m3dStep) { const b = findBlock(m3dStep.dataset.m3dStep), box = m3dStep.closest('[data-m3d]'); const st = state.self[b.id] || {}; m3dGo(b, box, (st.cur == null ? -1 : Number(st.cur)) + Number(m3dStep.dataset.dir), true); return; }
+    const m3dAnim = t.closest('[data-m3d-anim]');
+    if (m3dAnim) {
+      const mv = m3dAnim.closest('[data-m3d]').querySelector('[data-m3d-mv]');
+      if (mv && mv.loaded) { if (mv.paused) { mv.autoRotate = false; mv.play(); } else mv.pause(); }
+      const on = !!(mv && !mv.paused);
+      m3dAnim.setAttribute('aria-pressed', String(on)); m3dAnim.textContent = (on ? '❚❚ ' : '▶ ') + T(on ? 'm3dAnimStop' : 'm3dAnimStart');
+      return;
+    }
+    // Scribble-Video: Abspielen, Szenen, Untertitel, Vollbild
+    const scrBtn = t.closest('[data-scr-toggle], [data-scr-big], [data-scr-step], [data-scr-cc], [data-scr-full]');
+    if (scrBtn && scrBtn.closest('[data-scr]')) {
+      const box = scrBtn.closest('[data-scr]'), rt = scrRt[box.dataset.scr];
+      if (scrBtn.matches('[data-scr-cc]')) { const on = scrBtn.getAttribute('aria-pressed') !== 'true'; scrBtn.setAttribute('aria-pressed', String(on)); if (rt) scrDraw(rt); return; }
+      if (scrBtn.matches('[data-scr-full]')) { const el = box.querySelector('[data-scr-stage]'); try { if (document.fullscreenElement) document.exitFullscreen(); else if (el.requestFullscreen) el.requestFullscreen(); else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen(); } catch (e) { /* kein Vollbild */ } return; }
+      if (!rt || !rt.scene) return;
+      if (scrBtn.matches('[data-scr-step]')) {
+        const sc = rt.scene.tl.scenes, i = scrSceneAt(rt, rt.t), dir = Number(scrBtn.dataset.dir);
+        // zurück: an den Anfang der Szene, nach mehr als zwei Sekunden darin; sonst zur vorigen
+        const j = dir < 0 ? (rt.t - sc[i].t0 > 2 ? i : Math.max(0, i - 1)) : Math.min(sc.length - 1, i + 1);
+        scrSeek(rt, sc[j].t0 + 0.01);
+        return;
+      }
+      if (rt.playing) scrPause(rt); else scrPlay(rt);
+      if (scrBtn.matches('[data-scr-big]')) { const tg = box.querySelector('[data-scr-toggle]'); if (tg) tg.focus(); }
+      return;
+    }
+    const m3dReset = t.closest('[data-m3d-reset]');
+    if (m3dReset) { const b = findBlock(m3dReset.dataset.m3dReset), mv = m3dReset.closest('[data-m3d]').querySelector('[data-m3d-mv]'); if (mv) { mv.cameraTarget = 'auto auto auto'; mv.cameraOrbit = (b && b.orbit) || 'auto auto auto'; mv.fieldOfView = 'auto'; } return; }
     const rvTo = t.closest('[data-rv-to]');
     if (rvTo) { rvApply(findBlock(rvTo.dataset.block), rvTo.closest('[data-reveal]'), rvTo.dataset.rvTo); return; }
     const layer = t.closest('[data-layer]');
@@ -9382,6 +12652,22 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       report();
       return;
     }
+    // Entscheidungskarte: Zweig öffnen oder schließen; Wertung und Entscheidungen bleiben, wie sie sind
+    const dmb = t.closest('[data-dmap-br]');
+    if (dmb) {
+      const id = dmb.dataset.dmap, key = dmb.dataset.dmapBr, box = dmb.closest('[data-dmap-box]'), br = dmb.closest('.kp-dmap-br');
+      const was = dmapOpen[id] === key;
+      dmapOpen[id] = was ? null : key;
+      box.querySelectorAll('[data-dmap-br]').forEach(x => x.setAttribute('aria-expanded', String(!was && x === dmb)));
+      box.querySelectorAll('[data-dmap-panel]').forEach(pn => { pn.hidden = was || pn.dataset.dmapPanel !== key; });
+      if (!was && br && !br.classList.contains('is-mine')) {
+        const st = state.self[id] = Object.assign({}, state.self[id]);
+        st.open = (st.open || []).slice();
+        if (!st.open.includes(key)) { st.open.push(key); br.classList.add('is-seen'); uiSound('aufdecken'); updateConditions(); renderFooter(); report(); }
+      }
+      dmapDraw(box);
+      return;
+    }
     const choose = t.closest('[data-choose]');
     if (choose) {
       const box = choose.closest('[data-branch]');
@@ -9405,6 +12691,38 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       if (staged) refreshBlock(staged, renderDialog(findBlock(staged.dataset.dialog)));
       else refreshBlock(box, renderBranch(b));
       updateConditions();
+      if (BX_LOOKS.includes(b.look)) { const r = root.querySelector(`[data-branch="${b.id}"] [data-conseq]`); if (r) r.focus(); }
+      return;
+    }
+    // Rückblick-Karte: erst wählen, dann festlegen
+    const bxp = t.closest('[data-bx-pick]');
+    if (bxp) {
+      const b = findBlock(bxp.dataset.block); bxSel[b.id] = Number(bxp.dataset.bxPick);
+      const box = bxp.closest('[data-branch]');
+      box.querySelectorAll('[data-bx-pick]').forEach(x => { const on = x === bxp; x.classList.toggle('is-sel', on); x.setAttribute('aria-pressed', String(on)); });
+      const lk = box.querySelector('[data-bx-lock]'); if (lk) lk.disabled = false;
+      uiSound('klick');
+      return;
+    }
+    const bxl = t.closest('[data-bx-lock]');
+    if (bxl) {
+      const b = findBlock(bxl.dataset.bxLock), i = bxSel[b.id];
+      if (i == null) return;
+      const o = (b.options || [])[i] || {}, box = bxl.closest('[data-branch]');
+      delete bxSel[b.id];
+      if (o.retry) { const tries = ((state.self[b.id] || {}).tries || []).concat(i).filter((x, k, a) => a.indexOf(x) === k); state.self[b.id] = Object.assign({}, state.self[b.id], { tried: i, tries }); uiSound('falsch'); }
+      else { state.branch[b.id] = i; uiSound('klick'); }
+      refreshBlock(box, renderBranch(b)); updateConditions();
+      const r = root.querySelector(`[data-branch="${b.id}"] [data-conseq]`); if (r) r.focus();
+      return;
+    }
+    // Zurückspulen: die Wahl wird zurückgenommen, die Frage steht wieder offen
+    const bxr = t.closest('[data-bx-rewind]');
+    if (bxr) {
+      const b = findBlock(bxr.dataset.bxRewind), box = bxr.closest('[data-branch]');
+      delete state.branch[b.id];
+      refreshBlock(box, renderBranch(b)); updateConditions(); renderFooter(); report();
+      const first = root.querySelector(`[data-branch="${b.id}"] .kp-bx-opt`); if (first) first.focus();
       return;
     }
     // Folgekarte schließen: zurück zur Frage
@@ -9629,6 +12947,36 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     }
     if (t.closest('[data-lb-print]')) return printLernbuch();
     if (t.closest('[data-lb-save]')) return saveTextFile((plainTitle(course.title || 'kurs').replace(/[^\wäöüÄÖÜß-]+/g, '-') || 'kurs') + '-lernbuch.txt', lernbuchText(), 'text/plain');
+    // Laut sagen: Aufnehmen, Stopp, Neu aufnehmen, Fertig, Textweg
+    const spGo = t.closest('[data-sp-rec], [data-sp-again]');
+    if (spGo) { const b = findBlock(spGo.dataset.spRec || spGo.dataset.spAgain); if (b) spStart(b); return; }
+    const spSt = t.closest('[data-sp-stop]');
+    if (spSt) return spStop(spSt.dataset.spStop);
+    const spDn = t.closest('[data-sp-done]');
+    if (spDn) {
+      const b = findBlock(spDn.dataset.spDone); if (!b) return;
+      const st = state.self[b.id] = state.self[b.id] || {};
+      st.done = true; st.mode = 'audio'; delete spView[b.id];
+      return spRefresh(b, '.kp-sp-sample, [data-crit], [data-sp-audio]');
+    }
+    const spMd = t.closest('[data-sp-mode]');
+    if (spMd) {
+      const box = spMd.closest('[data-sp]'), b = box && findBlock(box.dataset.sp); if (!b) return;
+      spRelease(b.id);
+      const toText = spMd.dataset.spMode === 'text';
+      spView[b.id] = toText ? 'text' : 'audio'; // nur die Ansicht; der Lernstand ändert sich erst mit Speichern oder „Fertig“
+      return spRefresh(b, toText ? '[data-sp-text]' : '[data-sp-rec]');
+    }
+    const spSv = t.closest('[data-sp-save]');
+    if (spSv) {
+      const box = spSv.closest('[data-sp]'), b = findBlock(spSv.dataset.spSave); if (!b) return;
+      const ta = box.querySelector('[data-sp-text]'), v = ta.value.trim();
+      if (spWords(v) < 3) { const m = box.querySelector('[data-sp-missing]'); m.hidden = false; m.setAttribute('role', 'alert'); ta.focus(); return; }
+      saveText(b.id, v);
+      const st = state.self[b.id] = state.self[b.id] || {};
+      st.done = true; st.mode = 'text'; delete spView[b.id];
+      return spRefresh(b, '.kp-saved');
+    }
     const rs = t.closest('[data-reflect-save]');
     if (rs) {
       const box = rs.closest('[data-reflect]');
@@ -9730,7 +13078,51 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     }
   });
 
+  // Animation in Schritten: Pfeiltasten wechseln den Schritt, die Leertaste wiederholt (auf Zurück und Weiter bleibt sie der Knopfdruck)
+  root.addEventListener('keydown', e => {
+    const box = e.target && e.target.closest && e.target.closest('[data-steps-of]');
+    if (!box || e.altKey || e.ctrlKey || e.metaKey || e.target.matches('input, textarea, select')) return;
+    const kind = e.key === 'ArrowRight' ? 'next' : e.key === 'ArrowLeft' ? 'prev' : (e.key === ' ' && !e.target.matches('[data-sb-go]')) ? 'again' : '';
+    if (!kind) return;
+    e.preventDefault();
+    e.stopPropagation(); // sonst blättert die Pfeiltaste die Seite um
+    sbAct(findBlock(box.dataset.stepsOf), box, kind);
+  });
+  // Erst überlegen, dann aufdecken: Eingabetaste im Stichwortfeld deckt auf
+  root.addEventListener('keydown', e => {
+    const inp = e.target && e.target.matches && e.target.matches('[data-guess-text]') ? e.target : null;
+    if (!inp || e.key !== 'Enter') return;
+    e.preventDefault();
+    const go = inp.closest('[data-guess-box]').querySelector('[data-guess]');
+    if (go) guessPick(go);
+  });
   // Team „aufklappen“: aufgeklappte Personen merken (toggle steigt nicht auf, deshalb Capture), nichts neu zeichnen
+  // Akkordeon mit Nummern: geöffnete Einträge merken, die anderen schließen, Nummer und Zähler nachziehen
+  // Scribble-Video: Text zum Nachlesen geöffnet gilt wie angesehen (Alternative zum Video, WCAG 1.2.1)
+  root.addEventListener('toggle', e => {
+    const d = e.target && e.target.matches && e.target.matches('details[data-scr-read]') ? e.target : null;
+    if (!d || !d.open) return;
+    const b = findBlock(d.closest('[data-scr]').dataset.scr);
+    if (b) { (state.self[b.id] = Object.assign({}, state.self[b.id] || {})).read = true; scrFinish(b); }
+  }, true);
+  root.addEventListener('input', e => {
+    const sk = e.target && e.target.matches && e.target.matches('[data-scr-seek]') ? e.target : null;
+    if (!sk) return;
+    const rt = scrRt[sk.closest('[data-scr]').dataset.scr];
+    if (rt && rt.scene) scrSeek(rt, Number(sk.value) / 1000 * rt.total);
+  });
+  root.addEventListener('toggle', e => {
+    const d = e.target && e.target.matches && e.target.matches('details[data-acc]') ? e.target : null;
+    if (!d || !d.open) return;
+    const id = d.dataset.acc, i = Number(d.dataset.accI), b = findBlock(id);
+    if (!b) return;
+    root.querySelectorAll(`details[data-acc="${id}"]`).forEach(o => { if (o !== d && o.open) o.open = false; });
+    // Eintrag mit offener Vermutung: zeigt erst die Frage, gilt noch nicht als geöffnet
+    if (guessPending(b, i, (b.items || [])[i])) return;
+    if (!accSeen(b, d, i)) return;
+    uiSound('aufdecken');
+    updateConditions(); renderFooter(); report();
+  }, true);
   root.addEventListener('toggle', e => {
     const d = e.target && e.target.closest ? e.target.closest('details[data-person-open][data-team]') : null;
     if (!d || !d.open) return;
@@ -9844,6 +13236,21 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
   };
   ['input', 'click', 'keyup'].forEach(ev => root.addEventListener(ev, scSet));
 
+  // Piktogramm-Regler ohne Maus: Pfeile ±1, Bild auf/ab ±10, Pos1/Ende
+  root.addEventListener('keydown', e => {
+    const g = e.target.closest && e.target.closest('[data-pk-slider]');
+    if (!g) return;
+    const cur = Number(g.getAttribute('aria-valuenow')) || 0, n = Number(g.getAttribute('aria-valuemax')) || 10;
+    const step = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, PageUp: 10, PageDown: -10 }[e.key];
+    let v = null;
+    if (step != null) v = cur + step;
+    else if (e.key === 'Home') v = 0;
+    else if (e.key === 'End') v = n;
+    if (v == null) return;
+    e.preventDefault(); e.stopPropagation();
+    pkSet(g, v);
+  });
+
   // Schätzwert der Denkpause live anzeigen
   root.addEventListener('input', e => {
     const r = e.target.closest && e.target.closest('[data-pr-range]');
@@ -9877,6 +13284,21 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     if (live && rowIdx != null) mailLivePlace(wrap, card, rowIdx);
   }
   // Zuordnen mit Linien: Linien aus data-to der linken Begriffe als SVG über dem Raster zeichnen (nach Klick, Größenänderung, Zeichnen)
+  // Entscheidungskarte: Escape schließt das offene Feld, der Fokus kehrt zum Zweig zurück
+  root.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const box = e.target.closest && e.target.closest('[data-dmap-box]');
+    if (!box) return;
+    const id = box.dataset.dmapBox, key = dmapOpen[id];
+    if (!key) return;
+    e.preventDefault(); e.stopPropagation();
+    dmapOpen[id] = null;
+    box.querySelectorAll('[data-dmap-panel]').forEach(pn => { pn.hidden = true; });
+    box.querySelectorAll('[data-dmap-br]').forEach(x => x.setAttribute('aria-expanded', 'false'));
+    const btn = [...box.querySelectorAll('[data-dmap-br]')].find(x => x.dataset.dmapBr === key);
+    if (btn) btn.focus();
+    dmapDraw(box);
+  });
   function drawMatchLines(wrap) {
     const svg = wrap.querySelector('.kp-ml-svg'), grid = wrap.querySelector('.kp-ml-grid');
     if (!svg || !grid) return;
@@ -9937,7 +13359,33 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     else if (c) c.textContent = T('regalStand').replace('{k}', n).replace('{n}', k);
     const btn = box.querySelector('[data-regal-check]'); if (btn) btn.disabled = n !== k;
   });
+  // Tabelle zum Ausfüllen: die Wahl gleich merken, ohne neu zu zeichnen (der Fokus bleibt in der Auswahl)
+  root.addEventListener('change', e => {
+    const sel = e.target.closest && e.target.closest('select[data-tf-sel]');
+    if (!sel) return;
+    const b = findBlock(sel.dataset.block);
+    if (!b) return;
+    const st = state.self[b.id] || {};
+    st.a = st.a || {}; st.a[sel.dataset.tfSel] = sel.value;
+    state.self[b.id] = st;
+    sel.classList.toggle('has-value', !!sel.value);
+    if (sel.value) sel.closest('td').classList.remove('kp-tf-missing');
+    uiSound('klick');
+    report();
+  });
   // „Weiß ich nicht“ schließt die anderen Antworten aus (und umgekehrt), auch bei Mehrfachauswahl
+  // Liste mit Auswahl: Bereich merken, ohne neu zu zeichnen (Fokus bleibt im Feld)
+  root.addEventListener('change', e => {
+    const sel = e.target.closest && e.target.closest('[data-sl-pick]');
+    if (!sel) return;
+    const b = findBlock(sel.dataset.block); if (!b) return;
+    const st = state.self[b.id] || { place: {} };
+    const i = Number(sel.dataset.slPick);
+    if (sel.value === '') delete st.place[i]; else st.place[i] = Number(sel.value);
+    state.self[b.id] = st;
+    const row = sel.closest('.kp-sl-row'); if (row) { row.classList.remove('kp-wrong'); const n = row.querySelector('.kp-sl-note'); if (n) n.remove(); }
+    uiSound('klick');
+  });
   root.addEventListener('change', e => {
     const inp = e.target.closest && e.target.closest('.kp-has-dk input');
     if (!inp || !inp.checked) return;
@@ -10007,6 +13455,16 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     const box = e.target.closest('[data-mail-coach]');
     if (box && !box.hidden) { e.preventDefault(); e.stopPropagation(); mailCoachClose(box.closest('[data-mdd]')); }
   });
+  // Bildfolge: Escape verlässt den Zeigemodus
+  root.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !e.target.closest) return;
+    const box = e.target.closest('[data-hf]');
+    if (!box || !box.classList.contains('is-zeigen')) return;
+    e.preventDefault(); e.stopPropagation();
+    const b = findBlock(box.dataset.hf), ui = hfUi[b.id] || {};
+    Object.assign(ui, { zeigen: false, msg: '', kind: '', tap: null }); hfUi[b.id] = ui;
+    hfRefresh(b, '[data-hf-alarm]');
+  });
   // Ohne Maus: Nummer des Begriffs am Kärtchen drücken
   root.addEventListener('keydown', e => {
     const card = e.target.closest && e.target.closest('[data-mdd-card]');
@@ -10053,6 +13511,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     if (!b) return;
     const st = state.self[b.id] || { place: {}, done: false };
     if (st.done) return;
+    if (b.look === 'stapel') { if (box.dataset.sortCat != null) sortPut(b, Number(idx), Number(box.dataset.sortCat), box); return; }
     if (box.dataset.sortCat != null) st.place[Number(idx)] = Number(box.dataset.sortCat);
     else delete st.place[Number(idx)];
     state.self[b.id] = st;
@@ -10101,8 +13560,9 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     if (!b || st.done) return;
     if (/^[1-9]$/.test(e.key) && Number(e.key) <= (b.categories || []).length) {
       e.preventDefault();
+      if (b.look === 'stapel') return sortPut(b, Number(item.dataset.sortItem), Number(e.key) - 1, item);
       st.place[Number(item.dataset.sortItem)] = Number(e.key) - 1;
-    } else if (e.key === 'Backspace' || e.key === 'Delete') {
+    } else if ((e.key === 'Backspace' || e.key === 'Delete') && b.look !== 'stapel') {
       e.preventDefault();
       delete st.place[Number(item.dataset.sortItem)];
     } else return;
@@ -10191,6 +13651,12 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       return resumeCopies[key];
     });
   }
+  // Fällige Karten beim Wiedereinstieg: Zahl und Sprung zur Stapelseite (der erste Stapel mit fälligen Karten)
+  function dueResumeHtml() {
+    const dd = dueDecks(); if (!dd.length) return '';
+    const n = dd.reduce((a, x) => a + x.n, 0);
+    return `<div class="kp-resume-deck" data-resume-deck><p>${n === 1 ? T('resumeFaellig1') : T('resumeFaellig').replace('{n}', n)}</p><button type="button" class="kp-btn kp-sec" data-goto="${dd[0].pi}">${T('zumStapel')}</button></div>`;
+  }
   function showResume(loc) {
     const rq = resumeReviewQuestions(loc);
     rq.forEach(q => { if (!items.some(x => x.id === q.id)) items.push({ id: q.id, pageIndex: loc, q, graded: false, points: 0, objective: '' }); });
@@ -10198,8 +13664,9 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     box.className = 'kp-resume' + (rq.length ? ' kp-resume-wide' : '');
     box.innerHTML = `<div class="kp-resume-box" role="dialog" aria-modal="true" aria-label="${T('willkommenZurueck')}">
       <h2 style="margin-top:0">${firstName() ? T('willkommenZurueckName').replace('{n}', esc(firstName())) : T('willkommenZurueck')}</h2>
-      <p>${T('zuletztAuf')} ${loc + 1}: „${esc(pages[loc].title)}“.</p>
+      <p>${T('zuletztAuf')} ${loc + 1}: „<span data-kp-page="${loc}">${esc(pages[loc].title)}</span>“.</p>
       ${lastOwnWords(loc)}${goalCard('kp-goal-resume')}
+      ${dueResumeHtml()}
       ${rq.length ? `<div class="kp-resume-review"><p class="kp-label">${T('kurzWiederholen')}</p><p class="kp-resume-hint">${T('kurzWiederholenHinweis')}</p>${rq.map(q => renderQuiz(q, false)).join('')}</div>` : ''}
       <div class="kp-quiz-actions"><button class="kp-btn" data-resume="yes">${T('dortWeitermachen')}</button><button class="kp-btn kp-sec" data-resume="no">${T('vonVorn')}</button></div></div>`;
     // Im Player-Wurzelelement, damit die Fragen darin über die normalen Klick-Handler laufen
@@ -10207,6 +13674,8 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     box.querySelector(rq.length ? '.kp-resume-box' : '[data-resume="yes"]').focus({ preventScroll: true });
     if (rq.length) activateComponents(box);
     box.addEventListener('click', ev => {
+      // „Zum Kartenstapel“: das Fenster schließen, den Sprung macht der allgemeine Klick-Handler über data-goto
+      if (ev.target.closest('[data-goto]')) { box.remove(); return; }
       const btn = ev.target.closest('[data-resume]');
       if (!btn) return;
       box.remove();
@@ -10256,8 +13725,8 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     if (opts.startPage != null && opts.startPage >= 0 && opts.startPage < pages.length) state.current = opts.startPage;
     render();
     if (resumeAt > 0 && resumeAt < pages.length) {
-      // Mit Wiederholungsrunde erscheint das Fenster auch bei „automatisch weitermachen“
-      if (set.resume === 'auto' && !(Number(set.resumeReview) > 0)) { state.current = resumeAt; render(); }
+      // Mit Wiederholungsrunde oder fälligen Karten erscheint das Fenster auch bei „automatisch weitermachen“
+      if (set.resume === 'auto' && !(Number(set.resumeReview) > 0) && !dueDecks().length) { state.current = resumeAt; render(); }
       else showResume(resumeAt);
     }
   })();

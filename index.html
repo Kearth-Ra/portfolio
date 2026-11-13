@@ -79,7 +79,24 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 .nav a { text-decoration: none; font-size: 16px; font-weight: 500; color: var(--on-night-2); }
 .nav a:hover { color: var(--on-night); }
 .top .btn { min-height: 42px; padding: 8px 18px; font-size: 15px; }
-@media (max-width: 900px) { .nav { display: none; } .top .btn { margin-left: auto; } }
+.menu-btn { display: none; }
+@media (max-width: 900px) {
+  .nav { display: none; }
+  .top .wrap { gap: 10px; }
+  .top .btn { margin-left: 0; }
+  .menu-btn { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; min-height: 42px; padding: 8px 14px; border: 1px solid var(--line-night); border-radius: 999px; background: transparent; color: var(--on-night); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .menu-ico, .menu-ico::before, .menu-ico::after { display: block; width: 16px; height: 2px; background: currentColor; transition: transform .25s, background .2s; }
+  .menu-ico { position: relative; }
+  .menu-ico::before, .menu-ico::after { content: ''; position: absolute; left: 0; }
+  .menu-ico::before { top: -5px; } .menu-ico::after { top: 5px; }
+  .top.open .menu-ico { background: transparent; }
+  .top.open .menu-ico::before { transform: translateY(5px) rotate(45deg); }
+  .top.open .menu-ico::after { transform: translateY(-5px) rotate(-45deg); }
+  .top.open, .top.open.solid { background: rgba(0,41,65,.98); border-bottom-color: var(--line-night); }
+  .top.open .nav { display: flex; flex-direction: column; gap: 0; position: absolute; top: 100%; left: 0; right: 0; padding: 8px clamp(18px, 4.5vw, 48px) 20px; background: rgba(0,41,65,.98); border-bottom: 1px solid var(--line-night); }
+  .top.open .nav a { padding: 14px 0; font-size: 20px; font-weight: 600; color: var(--on-night); border-bottom: 1px solid var(--line-night); }
+}
+@media (max-width: 380px) { .menu-btn { padding: 8px 12px; } .top .btn { padding: 8px 14px; } }
 
 /* Titel */
 .hero { padding-top: clamp(120px, 15vw, 190px); padding-bottom: 0; }
@@ -115,7 +132,7 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 .reel-play span { display: grid; place-items: center; width: clamp(88px, 9vw, 120px); aspect-ratio: 1; border-radius: 50%; background: var(--blue-ink); color: #fff; font-weight: 700; font-size: 17px; transition: transform .35s var(--ease); }
 .reel-play:hover span { transform: scale(1.08); }
 .reel-play[hidden] { display: none; }
-@media (max-width: 600px) { .reel-play span { width: 64px; font-size: 13px; } .tag { flex-wrap: wrap; gap: 4px 12px; } }
+@media (max-width: 600px) { .reel-play { place-items: end start; padding: 12px; } .reel-play span { width: auto; aspect-ratio: auto; min-height: 44px; padding: 10px 18px; border-radius: 999px; font-size: 15px; } .tag { flex-wrap: wrap; gap: 4px 12px; } }
 
 /* Angebot */
 .bento { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; margin-top: 48px; }
@@ -167,7 +184,7 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 .poster p { color: var(--on-night-2); margin-bottom: 18px; }
 .poster[hidden] { display: none; }
 .note { margin-top: 14px; font-size: 15px; color: var(--on-night-2); }
-@media (max-width: 1000px) { .cases { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 760px) { .cases { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .cases { grid-template-columns: 1fr; } .dev { display: none; } .view { height: 78svh; } }
 
 /* Looks */
@@ -403,6 +420,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 .about { background: var(--sand); color: var(--ink); }
 .helpsec { background: var(--night2); }
 .about .intro { color: var(--muted); margin-bottom: 16px; }
+.about .big { margin-bottom: clamp(20px, 2.4vw, 32px); }
 .about .tag b { color: var(--ink); }
 .about-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: clamp(32px, 5vw, 80px); align-items: center; }
 .about-pic { margin: 0; }
@@ -417,13 +435,14 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 <header class="top" data-top>
   <div class="wrap">
     <a class="brand" href="#start" aria-label="Kerstin Rafai, zur Startseite"><span class="logo" aria-hidden="true">KR</span></a>
-    <nav class="nav" aria-label="Bereiche">
+    <nav class="nav" id="hauptnav" aria-label="Bereiche">
       <a href="#angebot">Angebot</a>
       <a href="#unterstuetzung">Unterstützung</a>
       <a href="#kurse">Beispielkurse</a>
       <a href="#ueber-mich">Über mich</a>
       <a href="#ablauf">Ablauf</a>
     </nav>
+    <button class="menu-btn" type="button" aria-expanded="false" aria-controls="hauptnav" data-menu><span class="menu-ico" aria-hidden="true"></span><span data-menu-label>Menü</span></button>
     <a class="btn" href="#kontakt">Erstgespräch</a>
   </div>
 </header>
@@ -508,7 +527,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       </article>
     </div>
     <article class="special rv">
-      <div class="special-pic"><img src="kurse/fmk-workslop.jpg" alt="Titelfolie der Einheit „Workslop erkennen und benennen“ aus dem Programm Führen mit KI" loading="lazy"></div>
+      <div class="special-pic"><img src="media/fuehren-mit-ki.jpg" alt="Titelfolie der Einheit „Workslop erkennen und benennen“ aus dem Programm Führen mit KI" loading="lazy"></div>
       <div class="special-body">
         <span class="special-tag">Special · KI-Enablement</span>
         <h3>Schulungsprogramm „Führen mit KI“</h3>
@@ -516,7 +535,6 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       </div>
       <div class="special-links">
         <a class="btn" href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht (PDF) <span class="arr" aria-hidden="true">→</span></a>
-        <a class="special-try" href="#kurse" data-live="fmk-hebel">Eine Einheit ausprobieren</a>
       </div>
     </article>
     <p class="facts rv">Preise sind Richtwerte zzgl. USt., den festen Preis bekommen Sie nach dem Erstgespräch <i aria-hidden="true">·</i> KI-Einsatz gekennzeichnet nach Art. 50 KI-Verordnung <i aria-hidden="true">·</i> Auf Wunsch in Ihrem Corporate Design</p>
@@ -547,26 +565,23 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       <p class="intro">Beispielkurse aus meinem Angebot, so wie sie in Ihrem Lernsystem laufen. Klicken Sie sich durch die ersten fünf Folien. Wie es weitergeht, zeige ich Ihnen gern im Gespräch.</p>
     </div>
     <div class="cases">
-      <button class="case rv" type="button" aria-pressed="true" data-kurs="fmk-hebel" data-titel="Führen mit KI 0.4: Der Hebel bist du"><em class="chip">Führen mit KI</em><img src="kurse/fmk-hebel.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Einheit 0.4 · Microlearning</small><b>Der Hebel bist du</b></span><i aria-hidden="true">→</i></span></button>
-      <button class="case rv" style="--d:1" type="button" aria-pressed="false" data-kurs="fmk-workslop" data-titel="Führen mit KI 2.1: Workslop erkennen und benennen"><em class="chip">Führen mit KI</em><img src="kurse/fmk-workslop.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Einheit 2.1 · Microlearning</small><b>Workslop erkennen und benennen</b></span><i aria-hidden="true">→</i></span></button>
-      <button class="case rv" style="--d:2" type="button" aria-pressed="false" data-kurs="konflikt" data-titel="Abstieg in die Tiefen eines Konflikts"><img src="kurse/konflikt.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>3D-Abstieg · ca. 17 Min.</small><b>Abstieg in die Tiefen eines Konflikts</b></span><i aria-hidden="true">→</i></span></button>
-      <button class="case rv" type="button" aria-pressed="false" data-kurs="feedback" data-titel="Feedback, das ankommt"><img src="kurse/feedback.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Lektionen zum Scrollen</small><b>Feedback, das ankommt</b></span><i aria-hidden="true">→</i></span></button>
-      <button class="case rv" style="--d:1" type="button" aria-pressed="false" data-kurs="klar-ansprechen" data-titel="Klar ansprechen: SAG ES"><img src="kurse/klar-ansprechen.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Reihe · Teil 1 von 5</small><b>Klar ansprechen: SAG ES</b></span><i aria-hidden="true">→</i></span></button>
+      <button class="case rv" type="button" aria-pressed="true" data-kurs="feedback" data-titel="Feedback, das ankommt"><img src="kurse/feedback.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Lektionen zum Scrollen</small><b>Feedback, das ankommt</b></span><i aria-hidden="true">→</i></span></button>
+      <button class="case rv" style="--d:1" type="button" aria-pressed="false" data-kurs="teams-ki-wandel" data-titel="Teams durch den KI-Wandel führen"><img src="kurse/teams-ki-wandel.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Führungssimulation · KI</small><b>Teams durch den KI-Wandel führen</b></span><i aria-hidden="true">→</i></span></button>
       <button class="case rv" style="--d:2" type="button" aria-pressed="false" data-kurs="ki-basiswissen" data-titel="KI Basiswissen"><img src="kurse/ki-basiswissen.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Comic · Schulung nach Art. 4 KI-VO</small><b>KI Basiswissen</b></span><i aria-hidden="true">→</i></span></button>
     </div>
     <div class="stage rv" data-stage>
       <div class="stage-bar">
-        <span class="stage-title" data-stage-title>Führen mit KI 0.4: Der Hebel bist du</span>
+        <span class="stage-title" data-stage-title>Feedback, das ankommt</span>
         <span class="dev" role="group" aria-label="Ansicht">
           <button type="button" aria-pressed="true" data-dev="desk">Rechner</button>
           <button type="button" aria-pressed="false" data-dev="phone">Handy</button>
         </span>
-        <a class="stage-new" href="kurse/fmk-hebel/index.html" target="_blank" rel="noopener" data-stage-new>Im neuen Fenster ↗</a>
+        <a class="stage-new" href="kurse/feedback/index.html" target="_blank" rel="noopener" data-stage-new>Im neuen Fenster ↗</a>
       </div>
       <div class="view" data-view>
         <iframe title="Kursvorschau" data-frame tabindex="-1"></iframe>
-        <div class="poster" data-poster style="background-image:url(kurse/fmk-hebel.jpg)">
-          <div><b>Führen mit KI 0.4: Der Hebel bist du</b><p>Oder wählen Sie oben einen anderen Kurs.</p><button class="btn" type="button" data-start>Kurs hier starten <span class="arr" aria-hidden="true">→</span></button></div>
+        <div class="poster" data-poster style="background-image:url(kurse/feedback.jpg)">
+          <div><b>Feedback, das ankommt</b><p>Oder wählen Sie oben einen anderen Kurs.</p><button class="btn" type="button" data-start>Kurs hier starten <span class="arr" aria-hidden="true">→</span></button></div>
         </div>
       </div>
     </div>
@@ -582,7 +597,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
     </div>
     <div class="looks">
       <figure class="rv"><div class="frame"><img src="media/look-foto.jpg" alt="Foto mit sechs Fragen als Punkte im Bild" loading="lazy"></div><figcaption><b>Foto</b>Wenn sich Ihre Leute in der Situation wiedererkennen sollen.</figcaption></figure>
-      <figure class="rv" style="--d:1"><div class="frame"><img src="media/look-comic.jpg" alt="Titelseite mit Illustration: Eine Veränderung führen, die du nicht entschieden hast" loading="lazy"></div><figcaption><b>Comic und Illustration</b>Wenn ein Thema heikel ist und etwas Abstand braucht.</figcaption></figure>
+      <figure class="rv" style="--d:1"><div class="frame"><img src="media/look-comic.jpg" alt="Comic-Szene mit Mia und Can im Büro aus dem Kurs KI Basiswissen" loading="lazy"></div><figcaption><b>Comic und Illustration</b>Wenn ein Thema heikel ist und etwas Abstand braucht.</figcaption></figure>
       <figure class="rv" style="--d:2"><div class="frame"><img src="media/look-micro.jpg" alt="Titelfolie der Microlearning-Einheit Der Hebel bist du" loading="lazy"></div><figcaption><b>Microlearning</b>Für Reihen über mehrere Wochen, je Einheit 10 bis 15 Minuten.</figcaption></figure>
     </div>
   </div>
@@ -674,7 +689,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 
 <footer>
   <div class="wrap">
-    <nav class="foot-nav" aria-label="Fußzeile"><a href="#angebot">Angebot</a><a href="#unterstuetzung">Unterstützung</a><a href="#kurse">Beispielkurse</a><a href="#videos">Videos</a><a href="#kontakt">Kontakt</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a><a href="#start">Nach oben ↑</a></nav>
+    <nav class="foot-nav" aria-label="Fußzeile"><a href="#angebot">Angebot</a><a href="#unterstuetzung">Unterstützung</a><a href="#kurse">Beispielkurse</a><a href="#videos">Videos</a><a href="#ueber-mich">Über mich</a><a href="#ablauf">Ablauf</a><a href="#kontakt">Kontakt</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a><a href="#start">Nach oben ↑</a></nav>
     <span>© Kerstin Rafai</span>
     <span>Bilder in den Kursbeispielen: Pexels und Storyset (storyset.com). Erstellt mit KI-Unterstützung, von mir geprüft.</span>
   </div>
@@ -704,6 +719,12 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 
   // Kopfleiste bekommt beim Scrollen einen Grund, Foto bewegt sich leicht
   var top = $('[data-top]'), pic = $('[data-parallax]');
+  var mb = $('[data-menu]'), ml = $('[data-menu-label]');
+  function menu(open) { top.classList.toggle('open', open); mb.setAttribute('aria-expanded', open ? 'true' : 'false'); ml.textContent = open ? 'Schließen' : 'Menü'; }
+  mb.addEventListener('click', function () { menu(!top.classList.contains('open')); });
+  $$('#hauptnav a').forEach(function (a) { a.addEventListener('click', function () { menu(false); }); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && top.classList.contains('open')) { menu(false); mb.focus(); } });
+  window.matchMedia('(min-width: 901px)').addEventListener('change', function (m) { if (m.matches) menu(false); });
   function onScroll() {
     var y = window.scrollY;
     top.classList.toggle('solid', y > 40);
