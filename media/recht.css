@@ -3,7 +3,9 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--paper); color: var(--navy); font: 400 18px/1.65 "Archivo", "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
 a { color: var(--navy); text-underline-offset: 3px; text-decoration-color: var(--coral); }
-:focus-visible { outline: 3px solid var(--navy); outline-offset: 3px; }
+:focus, :focus-visible { outline: none; }
+:is(a, button):focus-visible { outline: 3px solid var(--navy); outline-offset: 3px; }
+.top :is(a, button):focus-visible, footer :is(a, button):focus-visible { outline-color: #F3F9FB; }
 .wrap { max-width: 860px; margin: 0 auto; padding: 0 clamp(18px, 4.5vw, 48px); }
 .top { background: var(--navy); color: #F3F9FB; }
 .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 68px; max-width: 1320px; }
