@@ -44,7 +44,10 @@
   --ease: cubic-bezier(.2,.7,.2,1);
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+html { scroll-behavior: smooth; scroll-padding-top: 76px; background: var(--night); scrollbar-color: #4A6578 #001A2A; }
+html::-webkit-scrollbar { width: 12px; background: #001A2A; }
+html::-webkit-scrollbar-thumb { background: #4A6578; border: 3px solid #001A2A; border-radius: 6px; }
+html::-webkit-scrollbar-thumb:hover { background: #6A8597; }
 body { margin: 0; background: var(--night); color: var(--on-night); font: 400 18px/1.6 "Archivo", "Helvetica Neue", Arial, sans-serif; font-stretch: 100%; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
 img, video { display: block; max-width: 100%; }
 a { color: inherit; text-underline-offset: 4px; }
