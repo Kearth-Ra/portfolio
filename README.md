@@ -1,7 +1,8 @@
-# Kerstin Rafai: E-Learning, Erklärvideos, Lernkonzepte
+# Kerstin Rafai: E-Learning, Erklärvideos, Schulungsprogramme
 
 Portfolio-Seite: https://kearth-ra.github.io/portfolio/
 
-Die Seite ist eine einzelne Datei (`index.html`), alle Bilder und Videoausschnitte sind eingebettet.
-
-Neue Fassung (eigene Seite, die alte bleibt unverändert): https://kearth-ra.github.io/portfolio/portfoliokr/
+- `index.html`: die Seite, Bilder, Videos und Schrift in `media/`
+- `kurse/`: Beispielkurse (je fünf Folien, danach Hinweis auf ein Gespräch)
+- `impressum.html`, `datenschutz.html`
+- `portfoliokr/`: alte Adresse der Seite, leitet auf die Hauptadresse weiter
