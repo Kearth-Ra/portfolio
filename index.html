@@ -68,7 +68,8 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 .light .btn:hover { background: var(--blue-ink); border-color: var(--blue-ink); }
 .btn .arr { transition: transform .25s var(--ease); }
 .btn:hover .arr { transform: translateX(4px); }
-:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+:focus, :focus-visible { outline: none; }
+:is(a, button, input, select, textarea, summary, video, [tabindex="0"]):focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
 
 /* Kopfleiste */
 .top { position: fixed; inset: 0 0 auto; z-index: 40; transition: background .3s, border-color .3s; border-bottom: 1px solid transparent; }
