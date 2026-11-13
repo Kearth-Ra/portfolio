@@ -307,8 +307,9 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 .offers { grid-template-columns: repeat(3, 1fr); gap: 20px; }
 @media (max-width: 1000px) { .offers { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 600px) { .offers { grid-template-columns: 1fr; } }
-.special { display: grid; grid-template-columns: 260px 1fr auto; gap: 28px; align-items: center; margin-top: 20px; padding: 14px 28px 14px 14px; border-radius: var(--r); background: var(--night); color: var(--on-night); }
-.special-pic { border-radius: var(--r); overflow: hidden; aspect-ratio: 16 / 9; }
+.special { display: grid; grid-template-columns: 132px 1fr auto; gap: 28px; align-items: center; margin-top: 20px; padding: 26px 32px 26px 34px; border-radius: var(--r); background: var(--night); color: var(--on-night); }
+.special-pic { display: block; overflow: hidden; aspect-ratio: 540 / 765; border-radius: 3px; box-shadow: 0 0 0 1px rgba(243,249,251,.35), 0 18px 34px -14px rgba(0,0,0,.8); transform: rotate(-2deg); transition: transform .3s var(--ease); }
+.special-pic:hover { transform: rotate(0) scale(1.03); }
 .special-pic img { width: 100%; height: 100%; object-fit: cover; object-position: 0 0; }
 .special-tag { display: inline-block; padding: 4px 12px; border-radius: 999px; background: var(--blue-ink); color: #fff; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .special h3 { margin: 10px 0 6px; font-size: clamp(22px, 2vw, 28px); font-stretch: 108%; letter-spacing: -.02em; }
@@ -317,8 +318,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: s
 .special .btn { background: var(--on-night); border-color: var(--on-night); color: var(--ink); }
 .special .btn:hover { background: var(--blue-ink); border-color: var(--blue-ink); color: #fff; }
 .special-try { font-size: 15px; font-weight: 600; text-decoration: underline; }
-@media (max-width: 1000px) { .special { grid-template-columns: 200px 1fr; } .special-links { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; } }
-@media (max-width: 600px) { .special { grid-template-columns: 1fr; padding: 14px 14px 22px; } }
+@media (max-width: 1000px) { .special { grid-template-columns: 120px 1fr; } .special-links { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; } }
+@media (max-width: 600px) { .special { grid-template-columns: 1fr; padding: 22px 20px 24px; } .special-pic { width: 112px; } }
 
 /* Feinschliff */
 h1, h2, h3 { text-wrap: balance; }
@@ -554,7 +555,7 @@ iframe:focus, iframe:focus-visible { outline: none; }
       </article>
     </div>
     <article class="special rv">
-      <div class="special-pic"><img src="media/fuehren-mit-ki.jpg" alt="Titelseite der Programmübersicht Führen mit KI" loading="lazy"></div>
+      <a class="special-pic" href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener" tabindex="-1" aria-hidden="true"><img src="media/fuehren-mit-ki.jpg" alt="" loading="lazy" width="480" height="680"></a>
       <div class="special-body">
         <span class="special-tag">Special · KI-Enablement</span>
         <h3>Schulungsprogramm „Führen mit KI“</h3>
