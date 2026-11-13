@@ -79,7 +79,24 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 .nav a { text-decoration: none; font-size: 16px; font-weight: 500; color: var(--on-night-2); }
 .nav a:hover { color: var(--on-night); }
 .top .btn { min-height: 42px; padding: 8px 18px; font-size: 15px; }
-@media (max-width: 900px) { .nav { display: none; } .top .btn { margin-left: auto; } }
+.menu-btn { display: none; }
+@media (max-width: 900px) {
+  .nav { display: none; }
+  .top .wrap { gap: 10px; }
+  .top .btn { margin-left: 0; }
+  .menu-btn { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; min-height: 42px; padding: 8px 14px; border: 1px solid var(--line-night); border-radius: 999px; background: transparent; color: var(--on-night); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .menu-ico, .menu-ico::before, .menu-ico::after { display: block; width: 16px; height: 2px; background: currentColor; transition: transform .25s, background .2s; }
+  .menu-ico { position: relative; }
+  .menu-ico::before, .menu-ico::after { content: ''; position: absolute; left: 0; }
+  .menu-ico::before { top: -5px; } .menu-ico::after { top: 5px; }
+  .top.open .menu-ico { background: transparent; }
+  .top.open .menu-ico::before { transform: translateY(5px) rotate(45deg); }
+  .top.open .menu-ico::after { transform: translateY(-5px) rotate(-45deg); }
+  .top.open, .top.open.solid { background: rgba(0,41,65,.98); border-bottom-color: var(--line-night); }
+  .top.open .nav { display: flex; flex-direction: column; gap: 0; position: absolute; top: 100%; left: 0; right: 0; padding: 8px clamp(18px, 4.5vw, 48px) 20px; background: rgba(0,41,65,.98); border-bottom: 1px solid var(--line-night); }
+  .top.open .nav a { padding: 14px 0; font-size: 20px; font-weight: 600; color: var(--on-night); border-bottom: 1px solid var(--line-night); }
+}
+@media (max-width: 380px) { .menu-btn { padding: 8px 12px; } .top .btn { padding: 8px 14px; } }
 
 /* Titel */
 .hero { padding-top: clamp(120px, 15vw, 190px); padding-bottom: 0; }
@@ -115,7 +132,7 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 .reel-play span { display: grid; place-items: center; width: clamp(88px, 9vw, 120px); aspect-ratio: 1; border-radius: 50%; background: var(--blue-ink); color: #fff; font-weight: 700; font-size: 17px; transition: transform .35s var(--ease); }
 .reel-play:hover span { transform: scale(1.08); }
 .reel-play[hidden] { display: none; }
-@media (max-width: 600px) { .reel-play span { width: 64px; font-size: 13px; } .tag { flex-wrap: wrap; gap: 4px 12px; } }
+@media (max-width: 600px) { .reel-play { place-items: end start; padding: 12px; } .reel-play span { width: auto; aspect-ratio: auto; min-height: 44px; padding: 10px 18px; border-radius: 999px; font-size: 15px; } .tag { flex-wrap: wrap; gap: 4px 12px; } }
 
 /* Angebot */
 .bento { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; margin-top: 48px; }
@@ -403,6 +420,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 .about { background: var(--sand); color: var(--ink); }
 .helpsec { background: var(--night2); }
 .about .intro { color: var(--muted); margin-bottom: 16px; }
+.about .big { margin-bottom: clamp(20px, 2.4vw, 32px); }
 .about .tag b { color: var(--ink); }
 .about-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: clamp(32px, 5vw, 80px); align-items: center; }
 .about-pic { margin: 0; }
@@ -417,13 +435,14 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 <header class="top" data-top>
   <div class="wrap">
     <a class="brand" href="#start" aria-label="Kerstin Rafai, zur Startseite"><span class="logo" aria-hidden="true">KR</span></a>
-    <nav class="nav" aria-label="Bereiche">
+    <nav class="nav" id="hauptnav" aria-label="Bereiche">
       <a href="#angebot">Angebot</a>
       <a href="#unterstuetzung">Unterstützung</a>
       <a href="#kurse">Beispielkurse</a>
       <a href="#ueber-mich">Über mich</a>
       <a href="#ablauf">Ablauf</a>
     </nav>
+    <button class="menu-btn" type="button" aria-expanded="false" aria-controls="hauptnav" data-menu><span class="menu-ico" aria-hidden="true"></span><span data-menu-label>Menü</span></button>
     <a class="btn" href="#kontakt">Erstgespräch</a>
   </div>
 </header>
@@ -578,7 +597,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
     </div>
     <div class="looks">
       <figure class="rv"><div class="frame"><img src="media/look-foto.jpg" alt="Foto mit sechs Fragen als Punkte im Bild" loading="lazy"></div><figcaption><b>Foto</b>Wenn sich Ihre Leute in der Situation wiedererkennen sollen.</figcaption></figure>
-      <figure class="rv" style="--d:1"><div class="frame"><img src="media/look-comic.jpg" alt="Titelseite mit Illustration: Eine Veränderung führen, die du nicht entschieden hast" loading="lazy"></div><figcaption><b>Comic und Illustration</b>Wenn ein Thema heikel ist und etwas Abstand braucht.</figcaption></figure>
+      <figure class="rv" style="--d:1"><div class="frame"><img src="media/look-comic.jpg" alt="Comic-Szene mit Mia und Can im Büro aus dem Kurs KI Basiswissen" loading="lazy"></div><figcaption><b>Comic und Illustration</b>Wenn ein Thema heikel ist und etwas Abstand braucht.</figcaption></figure>
       <figure class="rv" style="--d:2"><div class="frame"><img src="media/look-micro.jpg" alt="Titelfolie der Microlearning-Einheit Der Hebel bist du" loading="lazy"></div><figcaption><b>Microlearning</b>Für Reihen über mehrere Wochen, je Einheit 10 bis 15 Minuten.</figcaption></figure>
     </div>
   </div>
@@ -670,7 +689,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 
 <footer>
   <div class="wrap">
-    <nav class="foot-nav" aria-label="Fußzeile"><a href="#angebot">Angebot</a><a href="#unterstuetzung">Unterstützung</a><a href="#kurse">Beispielkurse</a><a href="#videos">Videos</a><a href="#kontakt">Kontakt</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a><a href="#start">Nach oben ↑</a></nav>
+    <nav class="foot-nav" aria-label="Fußzeile"><a href="#angebot">Angebot</a><a href="#unterstuetzung">Unterstützung</a><a href="#kurse">Beispielkurse</a><a href="#videos">Videos</a><a href="#ueber-mich">Über mich</a><a href="#ablauf">Ablauf</a><a href="#kontakt">Kontakt</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a><a href="#start">Nach oben ↑</a></nav>
     <span>© Kerstin Rafai</span>
     <span>Bilder in den Kursbeispielen: Pexels und Storyset (storyset.com). Erstellt mit KI-Unterstützung, von mir geprüft.</span>
   </div>
@@ -700,6 +719,12 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
 
   // Kopfleiste bekommt beim Scrollen einen Grund, Foto bewegt sich leicht
   var top = $('[data-top]'), pic = $('[data-parallax]');
+  var mb = $('[data-menu]'), ml = $('[data-menu-label]');
+  function menu(open) { top.classList.toggle('open', open); mb.setAttribute('aria-expanded', open ? 'true' : 'false'); ml.textContent = open ? 'Schließen' : 'Menü'; }
+  mb.addEventListener('click', function () { menu(!top.classList.contains('open')); });
+  $$('#hauptnav a').forEach(function (a) { a.addEventListener('click', function () { menu(false); }); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && top.classList.contains('open')) { menu(false); mb.focus(); } });
+  window.matchMedia('(min-width: 901px)').addEventListener('change', function (m) { if (m.matches) menu(false); });
   function onScroll() {
     var y = window.scrollY;
     top.classList.toggle('solid', y > 40);
