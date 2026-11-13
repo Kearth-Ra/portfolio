@@ -167,7 +167,7 @@ section { padding: clamp(72px, 9vw, 140px) 0; position: relative; }
 .poster p { color: var(--on-night-2); margin-bottom: 18px; }
 .poster[hidden] { display: none; }
 .note { margin-top: 14px; font-size: 15px; color: var(--on-night-2); }
-@media (max-width: 1000px) { .cases { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 760px) { .cases { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .cases { grid-template-columns: 1fr; } .dev { display: none; } .view { height: 78svh; } }
 
 /* Looks */
@@ -508,7 +508,7 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       </article>
     </div>
     <article class="special rv">
-      <div class="special-pic"><img src="kurse/fmk-workslop.jpg" alt="Titelfolie der Einheit „Workslop erkennen und benennen“ aus dem Programm Führen mit KI" loading="lazy"></div>
+      <div class="special-pic"><img src="media/fuehren-mit-ki.jpg" alt="Titelfolie der Einheit „Workslop erkennen und benennen“ aus dem Programm Führen mit KI" loading="lazy"></div>
       <div class="special-body">
         <span class="special-tag">Special · KI-Enablement</span>
         <h3>Schulungsprogramm „Führen mit KI“</h3>
@@ -516,7 +516,6 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       </div>
       <div class="special-links">
         <a class="btn" href="media/programmuebersicht-fuehren-mit-ki.pdf" target="_blank" rel="noopener">Programmübersicht (PDF) <span class="arr" aria-hidden="true">→</span></a>
-        <a class="special-try" href="#kurse" data-live="fmk-hebel">Eine Einheit ausprobieren</a>
       </div>
     </article>
     <p class="facts rv">Preise sind Richtwerte zzgl. USt., den festen Preis bekommen Sie nach dem Erstgespräch <i aria-hidden="true">·</i> KI-Einsatz gekennzeichnet nach Art. 50 KI-Verordnung <i aria-hidden="true">·</i> Auf Wunsch in Ihrem Corporate Design</p>
@@ -547,26 +546,23 @@ video:focus-visible, iframe:focus { outline: 3px solid var(--blue); outline-offs
       <p class="intro">Beispielkurse aus meinem Angebot, so wie sie in Ihrem Lernsystem laufen. Klicken Sie sich durch die ersten fünf Folien. Wie es weitergeht, zeige ich Ihnen gern im Gespräch.</p>
     </div>
     <div class="cases">
-      <button class="case rv" type="button" aria-pressed="true" data-kurs="fmk-hebel" data-titel="Führen mit KI 0.4: Der Hebel bist du"><em class="chip">Führen mit KI</em><img src="kurse/fmk-hebel.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Einheit 0.4 · Microlearning</small><b>Der Hebel bist du</b></span><i aria-hidden="true">→</i></span></button>
-      <button class="case rv" style="--d:1" type="button" aria-pressed="false" data-kurs="fmk-workslop" data-titel="Führen mit KI 2.1: Workslop erkennen und benennen"><em class="chip">Führen mit KI</em><img src="kurse/fmk-workslop.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Einheit 2.1 · Microlearning</small><b>Workslop erkennen und benennen</b></span><i aria-hidden="true">→</i></span></button>
-      <button class="case rv" style="--d:2" type="button" aria-pressed="false" data-kurs="konflikt" data-titel="Abstieg in die Tiefen eines Konflikts"><img src="kurse/konflikt.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>3D-Abstieg · ca. 17 Min.</small><b>Abstieg in die Tiefen eines Konflikts</b></span><i aria-hidden="true">→</i></span></button>
-      <button class="case rv" type="button" aria-pressed="false" data-kurs="feedback" data-titel="Feedback, das ankommt"><img src="kurse/feedback.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Lektionen zum Scrollen</small><b>Feedback, das ankommt</b></span><i aria-hidden="true">→</i></span></button>
-      <button class="case rv" style="--d:1" type="button" aria-pressed="false" data-kurs="klar-ansprechen" data-titel="Klar ansprechen: SAG ES"><img src="kurse/klar-ansprechen.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Reihe · Teil 1 von 5</small><b>Klar ansprechen: SAG ES</b></span><i aria-hidden="true">→</i></span></button>
+      <button class="case rv" type="button" aria-pressed="true" data-kurs="feedback" data-titel="Feedback, das ankommt"><img src="kurse/feedback.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Lektionen zum Scrollen</small><b>Feedback, das ankommt</b></span><i aria-hidden="true">→</i></span></button>
+      <button class="case rv" style="--d:1" type="button" aria-pressed="false" data-kurs="teams-ki-wandel" data-titel="Teams durch den KI-Wandel führen"><img src="kurse/teams-ki-wandel.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Führungssimulation · KI</small><b>Teams durch den KI-Wandel führen</b></span><i aria-hidden="true">→</i></span></button>
       <button class="case rv" style="--d:2" type="button" aria-pressed="false" data-kurs="ki-basiswissen" data-titel="KI Basiswissen"><img src="kurse/ki-basiswissen.jpg" alt="" loading="lazy"><span><span style="padding:0;display:block"><small>Comic · Schulung nach Art. 4 KI-VO</small><b>KI Basiswissen</b></span><i aria-hidden="true">→</i></span></button>
     </div>
     <div class="stage rv" data-stage>
       <div class="stage-bar">
-        <span class="stage-title" data-stage-title>Führen mit KI 0.4: Der Hebel bist du</span>
+        <span class="stage-title" data-stage-title>Feedback, das ankommt</span>
         <span class="dev" role="group" aria-label="Ansicht">
           <button type="button" aria-pressed="true" data-dev="desk">Rechner</button>
           <button type="button" aria-pressed="false" data-dev="phone">Handy</button>
         </span>
-        <a class="stage-new" href="kurse/fmk-hebel/index.html" target="_blank" rel="noopener" data-stage-new>Im neuen Fenster ↗</a>
+        <a class="stage-new" href="kurse/feedback/index.html" target="_blank" rel="noopener" data-stage-new>Im neuen Fenster ↗</a>
       </div>
       <div class="view" data-view>
         <iframe title="Kursvorschau" data-frame tabindex="-1"></iframe>
-        <div class="poster" data-poster style="background-image:url(kurse/fmk-hebel.jpg)">
-          <div><b>Führen mit KI 0.4: Der Hebel bist du</b><p>Oder wählen Sie oben einen anderen Kurs.</p><button class="btn" type="button" data-start>Kurs hier starten <span class="arr" aria-hidden="true">→</span></button></div>
+        <div class="poster" data-poster style="background-image:url(kurse/feedback.jpg)">
+          <div><b>Feedback, das ankommt</b><p>Oder wählen Sie oben einen anderen Kurs.</p><button class="btn" type="button" data-start>Kurs hier starten <span class="arr" aria-hidden="true">→</span></button></div>
         </div>
       </div>
     </div>
