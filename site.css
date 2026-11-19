@@ -448,3 +448,27 @@ iframe:focus, iframe:focus-visible { outline: none; }
 
 /* Zwei helle Abschnitte direkt nacheinander: nur ein Abstand dazwischen */
 .light + .light { padding-top: 0; }
+
+/* Angebotsseite: jede Leistung als Zeile mit Beispiel, abwechselnd links und rechts (19.11.2026) */
+.rows { display: grid; gap: clamp(48px, 6vw, 96px); margin-top: clamp(40px, 5vw, 72px); }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 5vw, 80px); align-items: center; }
+.row.flip .row-ex { order: 2; }
+.row-ex { margin: 0; }
+.row-media { display: block; overflow: hidden; border-radius: var(--r); border: 1px solid var(--line); background: var(--sand); aspect-ratio: 16 / 10; }
+.row-media img, .row-media video { width: 100%; height: 100%; object-fit: cover; object-position: 50% 0; transition: transform .8s var(--ease); }
+a.row-media:hover img { transform: scale(1.03); }
+.row-doc { aspect-ratio: auto; display: grid; place-items: center; padding: clamp(20px, 3vw, 40px); background: var(--night); border-color: var(--night); }
+.row-doc img { width: min(260px, 70%); height: auto; aspect-ratio: 480 / 680; border-radius: 3px; box-shadow: 0 0 0 1px rgba(243,249,251,.35), 0 18px 34px -14px rgba(0,0,0,.8); transform: rotate(-2deg); }
+a.row-doc:hover img { transform: rotate(0) scale(1.03); }
+.row-ex figcaption { margin-top: 14px; color: var(--muted); font-size: 16px; line-height: 1.5; }
+.row-ex figcaption b { display: inline-block; margin-right: 8px; padding: 2px 10px; border-radius: 999px; background: var(--coral); color: var(--ink); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; vertical-align: 2px; }
+.row-body h3 { margin: 10px 0 12px; font-size: clamp(28px, 3vw, 40px); font-stretch: 108%; letter-spacing: -.02em; line-height: 1.08; }
+.row-lead { margin: 0 0 18px; font-size: 19px; line-height: 1.5; color: var(--ink); }
+.row-list { margin: 0 0 20px; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.row-list li { padding: 11px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 16.5px; line-height: 1.5; }
+.row-list b { color: var(--ink); font-weight: 700; }
+.row .price { margin: 0 0 14px; padding-top: 4px; border-top: 0; }
+.row .more { font-weight: 700; text-decoration: none; color: var(--ink); }
+.row .more:hover { text-decoration: underline; text-underline-offset: 4px; }
+.row-links { display: flex; flex-wrap: wrap; gap: 10px 28px; }
+@media (max-width: 900px) { .row { grid-template-columns: 1fr; } .row.flip .row-ex { order: 0; } }
