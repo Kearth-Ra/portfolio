@@ -474,10 +474,11 @@ a.row-doc:hover img { transform: rotate(0) scale(1.03); }
 @media (max-width: 900px) { .row { grid-template-columns: 1fr; } .row.flip .row-ex { order: 0; } }
 
 /* Punkt-Illustrationen aus dem Spektrum-Design (19.11.2026) */
-.hero { overflow-x: clip; }
-.hwave { display: block; width: min(1300px, 108%); max-width: none; height: auto; margin: 8px 0 0 50%; transform: translateX(-50%); opacity: .5; pointer-events: none; }
 .funnel { margin: clamp(20px, 2.4vw, 32px) 0 4px; opacity: .85; }
 .funnel img { display: block; width: 100%; height: auto; }
 .partner { grid-template-columns: 140px 1fr auto; }
 .partner-art { width: 100%; height: auto; opacity: .95; }
-@media (max-width: 900px) { .partner { grid-template-columns: 1fr; } .partner-art { width: 110px; } .hwave { width: 170%; } }
+@media (max-width: 900px) { .partner { grid-template-columns: 1fr; } .partner-art { width: 110px; } }
+.about-facts .has-art { grid-template-columns: 190px 1fr 84px; align-items: start; }
+.fact-art { width: 84px; height: auto; opacity: .75; margin-top: -4px; }
+@media (max-width: 700px) { .about-facts .has-art { grid-template-columns: 1fr 64px; } .about-facts .has-art dt { grid-column: 1 / -1; } .fact-art { width: 64px; } }
