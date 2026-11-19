@@ -422,12 +422,12 @@ iframe:focus, iframe:focus-visible { outline: none; }
 .price small { font-weight: 500; font-size: 14px; color: var(--muted); font-stretch: 100%; }
 
 /* Faktenzeile im Einstieg */
-.hfacts { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); margin: clamp(56px, 7vw, 96px) 0 0; padding: 0; border-top: 1px solid var(--line-night); border-bottom: 1px solid var(--line-night); }
+.hfacts { list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); margin: clamp(56px, 7vw, 96px) 0 0; padding: 0; border-top: 1px solid var(--line-night); border-bottom: 1px solid var(--line-night); }
 .hfacts li { padding: 26px 24px 28px 0; }
 .hfacts li + li { padding-left: 24px; border-left: 1px solid var(--line-night); }
 .hfacts b { display: block; white-space: nowrap; font-size: clamp(34px, 3.6vw, 56px); font-weight: 700; font-stretch: 112%; letter-spacing: -.02em; line-height: 1.1; margin-bottom: 8px; }
 .hfacts span { display: block; color: var(--on-night-2); font-size: 16px; line-height: 1.45; hyphens: auto; overflow-wrap: break-word; }
-@media (max-width: 900px) { .hfacts { grid-template-columns: 1fr 1fr; } .hfacts li, .hfacts li + li { padding: 20px 16px 22px 0; border-left: 0; } .hfacts li:nth-child(2n) { padding-left: 16px; border-left: 1px solid var(--line-night); } .hfacts li:nth-child(n+3) { border-top: 1px solid var(--line-night); } }
+@media (max-width: 900px) { .hfacts { grid-template-columns: 1fr 1fr; } .hfacts li, .hfacts li + li { padding: 20px 16px 22px 0; border-left: 0; } .hfacts li:nth-child(2n) { padding-left: 16px; border-left: 1px solid var(--line-night); } .hfacts li:nth-child(n+3) { border-top: 1px solid var(--line-night); } .hfacts li:last-child:nth-child(odd) { grid-column: 1 / -1; } }
 .hero .intro strong { display: block; margin-bottom: 12px; color: var(--on-night); font-weight: 600; }
 
 /* Unterstützung auf hellem Grund */
@@ -494,8 +494,7 @@ iframe:focus, iframe:focus-visible { outline: none; }
   </div>
   <div class="wrap">
     <ul class="hfacts rv">
-      <li><b>Rund 10</b><span>Jahre Personal- und Führungskräfteentwicklung</span></li>
-      <li><b>23</b><span>E-Learnings im Programm „Führen mit KI“</span></li>
+      <li><b>Rund 10</b><span>Jahre Erfahrung in der Gestaltung von Lernformaten</span></li>
       <li><b>3</b><span>Videoarten, selbst produziert mit Sprecherstimme und Untertiteln</span></li>
       <li><b>1</b><span>Ansprechpartnerin für Konzept, Umsetzung und Live-Termine</span></li>
     </ul>
