@@ -77,6 +77,11 @@
     var rp = $('[data-kf-reply]', kf); rp.innerHTML = REPLY[+b.dataset.kf]; rp.hidden = false; $('[data-kf-opts]', kf).hidden = true; rp.focus();
   });
   $('[data-kf-reply]', kf).addEventListener('click', function (e) { if (e.target.closest('a')) { kf.hidden = true; kfo.hidden = false; } });
+  var prog = $('[data-progress]');
+  if (prog) {
+    if (reduce || !('IntersectionObserver' in window)) prog.classList.add('go');
+    else { var po = new IntersectionObserver(function (es) { if (es[0].isIntersecting) { prog.classList.add('go'); po.disconnect(); } }, { threshold: .4 }); po.observe(prog); }
+  }
   if ('IntersectionObserver' in window && $('#kontakt')) new IntersectionObserver(function (es) { document.body.classList.toggle('kf-away', es[0].isIntersecting); }, { threshold: .15 }).observe($('#kontakt'));
   var seen = false; try { seen = sessionStorage.getItem('kr-kf') === '1'; } catch (e) {}
   if (!seen) setTimeout(function () { if (kf.hidden) openKf(); try { sessionStorage.setItem('kr-kf', '1'); } catch (e) {} }, 9000);

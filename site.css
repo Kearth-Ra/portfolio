@@ -474,10 +474,69 @@ a.row-doc:hover img { transform: rotate(0) scale(1.03); }
 @media (max-width: 900px) { .row { grid-template-columns: 1fr; } .row.flip .row-ex { order: 0; } }
 
 /* Punkt-Illustrationen aus dem Spektrum-Design (19.11.2026) */
-.hero { overflow-x: clip; }
-.hwave { display: block; width: min(1400px, 112%); max-width: none; height: auto; margin: -8px 0 0 50%; transform: translateX(-50%); opacity: .8; pointer-events: none; }
-.funnel { margin: clamp(24px, 3vw, 40px) 0 8px; }
-.funnel img { display: block; width: 100%; height: auto; }
-.partner { grid-template-columns: 180px 1fr auto; }
-.partner-art { width: 100%; height: auto; }
-@media (max-width: 900px) { .partner { grid-template-columns: 1fr; } .partner-art { width: 160px; } .hwave { width: 170%; } }
+.partner { grid-template-columns: 140px 1fr auto; }
+.partner-art { position: relative; display: block; width: 100%; }
+.partner-art img { display: block; width: 100%; height: auto; opacity: .95; }
+@media (max-width: 900px) { .partner { grid-template-columns: 1fr; } .partner-art { width: 110px; } }
+.about-facts .has-art { grid-template-columns: 190px 1fr 84px; align-items: start; }
+.fact-art { position: relative; display: block; width: 84px; margin-top: -4px; }
+.fact-art img { display: block; width: 100%; height: auto; opacity: .75; }
+@media (max-width: 700px) { .about-facts .has-art { grid-template-columns: 1fr 64px; } .about-facts .has-art dt { grid-column: 1 / -1; } .fact-art { width: 64px; } }
+
+/* Beispielkurse auf hellem Grund (19.11.2026) */
+.light .case { background: #fff; color: var(--ink); border-color: var(--line); }
+.light .case small { color: var(--muted); }
+.light .case i { border-color: var(--line); }
+.light .case:hover, .light .case[aria-pressed="true"] { border-color: var(--ink); }
+.light .stage { background: #fff; color: var(--ink); border-color: var(--line); }
+.light .stage-bar { border-bottom-color: var(--line); }
+.light .stage-new { color: var(--ink); }
+.light .dev { border-color: var(--line); }
+.light .dev button { color: var(--muted); }
+.light .dev button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+.light .view { background: var(--sand); }
+.light .view.phone iframe { box-shadow: 0 0 0 9px var(--ink); }
+.light .note, .light .vnote { color: var(--muted); }
+.light .vcard { background: #fff; color: var(--ink); border-color: var(--line); }
+.light .vcard p { color: var(--muted); }
+.light.vids { background: var(--paper); border-top: 1px solid var(--line); padding-top: clamp(56px, 7vw, 96px); }
+.light .poster { color: var(--on-night); }
+.light .poster .btn { background: var(--on-night); border-color: var(--on-night); color: var(--ink); }
+.light .poster .btn:hover { background: var(--blue); border-color: var(--blue); }
+
+/* Dezente Bewegung (19.11.2026) */
+/* Ablauf: eine Linie läuft einmal von 01 bis 05, die Zahlen leuchten nacheinander auf */
+.steps[data-progress] { position: relative; }
+.steps[data-progress]::before { content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--coral); transform: scaleX(0); transform-origin: left; transition: transform 2.4s var(--ease); }
+.steps[data-progress].go::before { transform: scaleX(1); }
+.steps[data-progress] em { transition: color .6s ease; }
+.steps[data-progress].go div:nth-child(1) em { transition-delay: .2s; }
+.steps[data-progress].go div:nth-child(2) em { transition-delay: .7s; }
+.steps[data-progress].go div:nth-child(3) em { transition-delay: 1.2s; }
+.steps[data-progress].go div:nth-child(4) em { transition-delay: 1.7s; }
+.steps[data-progress].go div:nth-child(5) em { transition-delay: 2.2s; }
+.light .steps[data-progress] em { color: var(--line); }
+.light .steps[data-progress].go em { color: var(--blue-ink); }
+/* Kopf: das Zentrum glimmt langsam */
+.fact-art i { position: absolute; left: 58.6%; top: 33.6%; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; background: radial-gradient(circle, rgba(253,110,110,.55), rgba(253,110,110,0) 70%); animation: glimm 4.5s ease-in-out infinite; }
+@keyframes glimm { 0%, 100% { opacity: .25; transform: scale(.8); } 50% { opacity: .9; transform: scale(1.1); } }
+/* Teams: die Mittelpunkte senden versetzt einen feinen Ring aus */
+.partner-art i { position: absolute; left: var(--x); top: var(--y); width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%; border: 1px solid rgba(182,223,237,.7); opacity: 0; animation: ring 4.8s ease-out infinite; animation-delay: var(--t, 0s); }
+@keyframes ring { 0% { opacity: .8; transform: scale(.3); } 70%, 100% { opacity: 0; transform: scale(1.6); } }
+/* Fragen klappen weich auf (Browser ohne Unterstützung springen wie bisher) */
+@supports selector(::details-content) {
+  :root { interpolate-size: allow-keywords; }
+  .faq details::details-content { height: 0; overflow: clip; transition: height .35s var(--ease), content-visibility .35s allow-discrete; }
+  .faq details[open]::details-content { height: auto; }
+}
+/* Pfeile rücken beim Überfahren nach */
+.row .more span, .help .more span, .partner .btn .arr { display: inline-block; transition: transform .25s var(--ease); }
+.row .more:hover span, .help .more:hover span { transform: translateX(4px); }
+@media (prefers-reduced-motion: reduce) {
+  .steps[data-progress]::before { transition: none; }
+  .steps[data-progress] em { transition: none; }
+  .fact-art i, .partner-art i { animation: none; }
+  .fact-art i { opacity: .6; transform: none; }
+  .faq details::details-content { transition: none; }
+  .row .more:hover span, .help .more:hover span, .btn:hover .arr { transform: none; }
+}
