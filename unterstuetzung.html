@@ -14,7 +14,7 @@
 <meta property="og:description" content="Vom Storyboard bis zum fertigen Programm: Sie wählen, welchen Teil ich übernehme. Auch als externe Projektpartnerin für Agenturen und Teams.">
 <meta property="og:image" content="https://kearth-ra.github.io/portfolio/media/kerstin.jpg">
 <link rel="preload" href="media/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="site.css?v=6">
+<link rel="stylesheet" href="site.css?v=7">
 </head>
 <body class="sub">
 
@@ -28,7 +28,7 @@
       <a href="ueber-mich.html">Über mich</a>
     </nav>
     <button class="menu-btn" type="button" aria-expanded="false" aria-controls="hauptnav" data-menu><span class="menu-ico" aria-hidden="true"></span><span data-menu-label>Menü</span></button>
-    <a class="btn" href="#kontakt">Erstgespräch</a>
+    <a class="btn" href="ueber-mich.html#kontakt">Kontakt</a>
   </div>
 </header>
 
@@ -49,12 +49,13 @@
       <article class="help rv" style="--d:2"><em>06</em><h3>Ihr Team schulen</h3><p>Ich zeige Ihren Trainerinnen und Trainern, wie gute digitale Formate entstehen, damit Sie künftig mehr selbst machen können.</p></article>
     </div>
     <article class="partner rv">
+      <img class="partner-art" src="media/grafik-teams.webp" alt="" aria-hidden="true" width="720" height="578" loading="lazy">
       <div>
         <span class="special-tag">Für Agenturen und Teams</span>
         <h3>Als externe Projektpartnerin</h3>
         <p>Ich steige flexibel und kurzfristig in Ihre Kundenprojekte ein und übernehme klar abgegrenzte Arbeitspakete eigenständig. So gewinnt Ihr Team zusätzliche Umsetzungskapazität, flexibel buchbar und nach kurzer Abstimmung startklar.</p>
       </div>
-      <a class="btn" href="#kontakt">Projekt anfragen <span class="arr" aria-hidden="true">→</span></a>
+      <a class="btn" href="ueber-mich.html#kontakt">Projekt anfragen <span class="arr" aria-hidden="true">→</span></a>
     </article>
   </div>
 </section>
@@ -64,6 +65,7 @@
       <div><div class="tag"><b>(02)</b>Ablauf</div><h2 class="big" id="h-ablauf">So arbeiten wir zusammen</h2></div>
       <p class="intro">Sie sehen den Kurs früh als klickbare Fassung und schreiben Ihre Anmerkungen direkt hinein. So wissen Sie bei jedem Schritt, woran wir sind.</p>
     </div>
+    <figure class="funnel rv" aria-hidden="true"><img src="media/grafik-trichter.webp" alt="" width="1800" height="374" loading="lazy"></figure>
     <div class="steps">
       <div class="rv"><em>01</em><b>Erstgespräch</b><span>Wir klären, wer lernen soll und was danach anders sein soll.</span></div>
       <div class="rv" style="--d:1"><em>02</em><b>Konzept</b><span>Sie bekommen Lernziele und Storyboard zur Freigabe.</span></div>
@@ -81,43 +83,12 @@
   </div>
 </section>
 
-<section id="kontakt" class="contact" aria-labelledby="h-kontakt">
-  <div class="wrap">
-    <div class="tag"><b>(03)</b>Kontakt</div>
-    <h2 id="h-kontakt" class="rv">Sprechen wir über Ihr Thema.</h2>
-    <a class="mail rv" href="mailto:kerstinrafai@gmail.com">kerstinrafai@gmail.com</a>
-    <div class="contact-grid">
-      <div class="rv">
-        <p>Erzählen Sie mir in einer halben Stunde, worum es geht und wer lernen soll. Danach schicke ich Ihnen ein Angebot mit Preis und Zeitplan.</p>
-        <div class="me"><img src="media/kerstin.jpg" alt=""><div><b>Kerstin Rafai</b>Personal- und Führungskräfteentwicklung</div></div>
-      </div>
-      <form class="ask rv" style="--d:1" data-ask>
-        <h3>Kurze Anfrage</h3>
-        <span class="lbl" id="ask-was">Was brauchen Sie?</span>
-        <div class="choice" role="group" aria-labelledby="ask-was">
-          <button type="button" aria-pressed="false">E-Learning</button>
-          <button type="button" aria-pressed="false">Erklärvideo</button>
-          <button type="button" aria-pressed="false">Schulungsprogramm</button>
-          <button type="button" aria-pressed="false">Konzept und Storyboard</button>
-          <button type="button" aria-pressed="false">Präsenz digital machen</button>
-          <button type="button" aria-pressed="false">Programm „Führen mit KI“</button>
-        </div>
-        <label for="f-thema">Ihr Thema</label>
-        <input id="f-thema" name="thema" placeholder="z. B. Feedbackgespräche für neue Führungskräfte">
-        <label for="f-gruppe">Zielgruppe und Umfang</label>
-        <textarea id="f-gruppe" name="gruppe" placeholder="Wer soll lernen, wie viele Personen, gibt es einen Termin?"></textarea>
-        <button class="btn" type="submit">Anfrage per Mail vorbereiten <span class="arr" aria-hidden="true">→</span></button>
-        <small>Ihr Mailprogramm öffnet sich mit Ihrer Anfrage. Über diese Seite werden keine Daten verschickt.</small>
-      </form>
-    </div>
-  </div>
-</section>
 
 </main>
 
 <footer>
   <div class="wrap">
-    <nav class="foot-nav" aria-label="Fußzeile"><a href="angebot.html">Angebot</a><a href="beispielkurse.html">Beispielkurse</a><a href="unterstuetzung.html">Unterstützung</a><a href="beispielkurse.html#videos">Videos</a><a href="ueber-mich.html">Über mich</a><a href="#kontakt">Kontakt</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a><a href="index.html">Nach oben ↑</a></nav>
+    <nav class="foot-nav" aria-label="Fußzeile"><a href="angebot.html">Angebot</a><a href="beispielkurse.html">Beispielkurse</a><a href="unterstuetzung.html">Unterstützung</a><a href="beispielkurse.html#videos">Videos</a><a href="ueber-mich.html">Über mich</a><a href="ueber-mich.html#kontakt">Kontakt</a><a href="impressum.html">Impressum</a><a href="datenschutz.html">Datenschutz</a><a href="index.html">Nach oben ↑</a></nav>
     <span>© Kerstin Rafai</span>
     <span>Bilder in den Kursbeispielen: Pexels und Storyset (storyset.com). Erstellt mit KI-Unterstützung, von mir geprüft.</span>
   </div>
@@ -139,6 +110,6 @@
 </div>
 <button class="kf-open" type="button" data-kf-open aria-label="Kurz gefragt öffnen"><img src="media/kerstin.jpg" alt=""></button>
 
-<script src="site.js?v=6"></script>
+<script src="site.js?v=7"></script>
 </body>
 </html>

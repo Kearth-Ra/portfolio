@@ -3,7 +3,7 @@
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Frühere Sprungadressen der einen langen Seite (…/#kurse) führen auf die eigene Seite der Rubrik
-  var OLD = { '#angebot': 'angebot.html', '#kurse': 'beispielkurse.html', '#unterstuetzung': 'unterstuetzung.html', '#videos': 'beispielkurse.html#videos', '#ueber-mich': 'ueber-mich.html', '#ablauf': 'unterstuetzung.html#ablauf' };
+  var OLD = { '#angebot': 'angebot.html', '#kurse': 'beispielkurse.html', '#unterstuetzung': 'unterstuetzung.html', '#videos': 'beispielkurse.html#videos', '#ueber-mich': 'ueber-mich.html', '#ablauf': 'unterstuetzung.html#ablauf', '#kontakt': 'ueber-mich.html#kontakt' };
   if (OLD[location.hash] && !document.getElementById(location.hash.slice(1))) { location.replace(OLD[location.hash]); return; }
 
   // Kopfleiste bekommt beim Scrollen einen Grund, Foto bewegt sich leicht
@@ -77,7 +77,7 @@
     var rp = $('[data-kf-reply]', kf); rp.innerHTML = REPLY[+b.dataset.kf]; rp.hidden = false; $('[data-kf-opts]', kf).hidden = true; rp.focus();
   });
   $('[data-kf-reply]', kf).addEventListener('click', function (e) { if (e.target.closest('a')) { kf.hidden = true; kfo.hidden = false; } });
-  if ('IntersectionObserver' in window) new IntersectionObserver(function (es) { document.body.classList.toggle('kf-away', es[0].isIntersecting); }, { threshold: .15 }).observe($('#kontakt'));
+  if ('IntersectionObserver' in window && $('#kontakt')) new IntersectionObserver(function (es) { document.body.classList.toggle('kf-away', es[0].isIntersecting); }, { threshold: .15 }).observe($('#kontakt'));
   var seen = false; try { seen = sessionStorage.getItem('kr-kf') === '1'; } catch (e) {}
   if (!seen) setTimeout(function () { if (kf.hidden) openKf(); try { sessionStorage.setItem('kr-kf', '1'); } catch (e) {} }, 9000);
 
