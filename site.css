@@ -475,9 +475,9 @@ a.row-doc:hover img { transform: rotate(0) scale(1.03); }
 
 /* Punkt-Illustrationen aus dem Spektrum-Design (19.11.2026) */
 .hero { overflow-x: clip; }
-.hwave { display: block; width: min(1400px, 112%); max-width: none; height: auto; margin: -8px 0 0 50%; transform: translateX(-50%); opacity: .8; pointer-events: none; }
-.funnel { margin: clamp(24px, 3vw, 40px) 0 8px; }
+.hwave { display: block; width: min(1300px, 108%); max-width: none; height: auto; margin: 8px 0 0 50%; transform: translateX(-50%); opacity: .5; pointer-events: none; }
+.funnel { margin: clamp(20px, 2.4vw, 32px) 0 4px; opacity: .85; }
 .funnel img { display: block; width: 100%; height: auto; }
-.partner { grid-template-columns: 180px 1fr auto; }
-.partner-art { width: 100%; height: auto; }
-@media (max-width: 900px) { .partner { grid-template-columns: 1fr; } .partner-art { width: 160px; } .hwave { width: 170%; } }
+.partner { grid-template-columns: 140px 1fr auto; }
+.partner-art { width: 100%; height: auto; opacity: .95; }
+@media (max-width: 900px) { .partner { grid-template-columns: 1fr; } .partner-art { width: 110px; } .hwave { width: 170%; } }
