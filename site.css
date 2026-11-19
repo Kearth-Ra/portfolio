@@ -540,3 +540,4 @@ a.row-doc:hover img { transform: rotate(0) scale(1.03); }
   .faq details::details-content { transition: none; }
   .row .more:hover span, .help .more:hover span, .btn:hover .arr { transform: none; }
 }
+.row-media.wide { aspect-ratio: 16 / 9; }

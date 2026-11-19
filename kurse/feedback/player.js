@@ -206,11 +206,11 @@ function kursLms(opts) {
 }
 
 function kursZeit(pages) {
-  const SKIP = new Set(['id', 'link', 'startCard', 'hang', 'idea', 'align', 'ratio', 'filter', 'ideaKind', 'format', 'libs', 'swipe', 'maxSec', 'sampleAudio', 'refs', 'guessSkip', 'budget', 'voice', 'goalLinks', 'pick', 'shelfCols', 'short', 'bubble', 'good', 'deepLook', 'einflug', 'part', 'instant', 'noDesk', 'newMails', 'clock', 'sounds', 'mascotPose', 'shape', 'numbering', 'max', 'mapLook', 'mapLabels', 'labelSide', 'type', 'kind', 'code', 'scope', 'clue', 'hintAfter', 'impulses', 'transferCheck', 'sharesSource', 'factSource', 'height', 'mythOk', 'size', 'slot', 'arrange', 'figures', 'pattern', 'fillChoice', 'fillDistractors', 'tolerance', 'dontKnow', 'objectives', 'src', 'url', 'video', 'videoUrl', 'videoCredit', 'css', 'blockCss', 'customHtml', 'narration', 'narrationVtt', 'captions', 'captionsText', 'poster',
+  const SKIP = new Set(['id', 'doc', 'lib', 'captions', 'link', 'tint', 'fit', 'bright', 'contrast', 'sat', 'rotate', 'startCard', 'hang', 'idea', 'search', 'align', 'ratio', 'filter', 'ideaKind', 'format', 'libs', 'swipe', 'maxSec', 'sampleAudio', 'refs', 'guessSkip', 'budget', 'voice', 'goalLinks', 'pick', 'shelfCols', 'short', 'bubble', 'good', 'deepLook', 'einflug', 'part', 'instant', 'noDesk', 'newMails', 'clock', 'sounds', 'mascotPose', 'shape', 'numbering', 'max', 'mapLook', 'mapLabels', 'labelSide', 'type', 'kind', 'code', 'scope', 'clue', 'hintAfter', 'impulses', 'transferCheck', 'sharesSource', 'factSource', 'height', 'mythOk', 'size', 'slot', 'arrange', 'figures', 'pattern', 'fillChoice', 'fillDistractors', 'tolerance', 'dontKnow', 'objectives', 'src', 'url', 'video', 'videoUrl', 'videoCredit', 'css', 'blockCss', 'customHtml', 'narration', 'narrationVtt', 'captions', 'captionsText', 'poster',
     'design', 'showIf', 'objective', 'castId', 'char', 'look', 'pose', 'shot', 'audio', 'mechanic', 'spiel', 'style', 'layout', 'cardStyle', 'icon', 'decor',
     'focus', 'treat', 'frame', 'tone', 'credit', 'alt', 'person', 'blockName', 'lang', 'chapter', 'ref', 'target', 'after', 'orient', 'mosaic', 'cat', 'color', 'side', 'mode', 'source', 'image', 'bgImage', 'backImage', 'poses', 'film', 'stage', 'assets', 'consequence', 'help', 'stages', 'mood',
     // Verweise und Schalter mit Textwert (Ids, Namen von Symbolen und Varianten): kein Lesetext
-    'compareRef', 'planRef', 'page', 'skipTo', 'pos', 'normal', 'orbit', 'animName', 'ar', 'autoRotate', 'tour', 'stageBg', 'mapOrder', 'connect', 'marker', 'namePos', 'calloutIcon', 'icons', 'overlay', 'bgMotion', 'cover', 'anrede',
+    'compareRef', 'planRef', 'page', 'skipTo', 'pos', 'normal', 'orbit', 'animName', 'ar', 'autoRotate', 'tour', 'stageBg', 'mapOrder', 'connect', 'marker', 'namePos', 'calloutIcon', 'revealIcon', 'coverIcon', 'eyebrowIcon', 'certIcon', 'tagIcon', 'icons', 'overlay', 'bgMotion', 'cover', 'anrede',
     // Rückmeldungen und Begründungen liest man nur zur eigenen Wahl, Hinweise nur bei Bedarf: sie zählen nicht zur Lesezeit (die Zeit je Frage deckt sie ab)
     'feedback', 'feedbackCorrect', 'feedbackWrong', 'feedbackTrue', 'feedbackFalse', 'why', 'reply', 'hint', 'successText', 'placeholder']);
   const plain = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -256,6 +256,8 @@ function kursZeit(pages) {
       // je Eintrag mit Vermutung (guess) 8 s zum Überlegen
       case 'accordion': case 'tabs': case 'flipcards': return 20 * n('items') + 8 * (b.items || []).filter(it => it && it.guess && String(it.guess.q || '').trim()).length;
       case 'modell3d': return 20 + 12 * n('points') + (b.anim ? 15 : 0);
+      // Scribble: gesprochener Text im Sprechtempo des Videos plus Zeit zum Zeichnen je Szene
+      case 'scribble': { const d = b.doc || {}, sc = Array.isArray(d.scenes) ? d.scenes : [], wpm = Number((d.style || {}).wpm) >= 80 ? Number(d.style.wpm) : 158; return sc.reduce((s, x) => s + plain(x.narration).split(' ').filter(Boolean).length, 0) / wpm * 60 + 2 * sc.length; }
       case 'hotspots': if (b.panorama && b.mode !== 'folge') return 20 + 10 * n('points') + 8 * (b.points || []).filter(pt => pt && !pt.target && pt.guess && String(pt.guess.q || '').trim()).length; if (b.mode === 'folge') { const rs = (b.rounds || []).filter(x => x && x.image && x.image.src); return 8 * rs.length + 15 * rs.filter(x => (x.points || []).length).length; } return 15 * n('points') + 8 * (b.points || []).filter(pt => pt && !pt.target && pt.guess && String(pt.guess.q || '').trim()).length; case 'aufdecken': return 8 * n('stops'); case 'sortcats': return 12 * n('items'); case 'checklist': return 30; case 'takeaways': return b.recall && b.look !== 'zeilen' ? 10 * n('items') : 0;
       case 'ivideo': return b.src || b.url ? 45 : 0; case 'media': return b.media && (b.media.kind === 'video' || b.media.kind === 'embed' || b.media.url) ? 45 : 0;
       case 'linkcard': return 10; case 'table': return b.look === 'ausfuellen' ? 10 + 8 * (String(b.cells || '').match(/\[\[[\s\S]*?\]\]/g) || []).length : 10;
@@ -303,15 +305,19 @@ function kursPlayer(course, opts) {
   opts = opts || {};
   const root = document.getElementById('app');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const set = course.settings || {};
-  const theme = course.theme || {};
+  // Lektionen zum Scrollen als Wahl in jedem hellen Stil (settings.lessonScroll, Kerstin 01.11.2026): der Kurs behält Farben und Schriften,
+  // läuft aber mit der Leiste und den Lektionen des Scroll-Looks (intern Stil micro, sideLook scroll, Leiste links, ohne Bildschirmseiten)
+  const lessonScroll = !!((course.settings || {}).lessonScroll && (course.theme || {}).style !== 'micro' && (course.theme || {}).mode !== 'dunkel');
+  const set = lessonScroll ? Object.assign({}, course.settings, { layout: 'scroll', screen: false }) : (course.settings || {});
+  const theme = lessonScroll ? Object.assign({}, course.theme, { style: 'micro', sideLook: 'scroll', fromStyle: (course.theme || {}).style || 'klar' }) : (course.theme || {});
   let passScore = Number(course.passScore) || 0;
 
   // ---------- Sprachen ----------
   // Weitere Sprachen liegen als Übersetzungen (Pfad, Original, Text) in course.languages.
   // Beim Umschalten werden die Texte im Kurs ersetzt; das Original bleibt gemerkt.
   const UI_DE = {
-    inhalt: 'Inhalt', menue: 'Menü', duBistDran: 'Du bist dran', start: 'Start', ende: 'Ende', gehoertAn: 'gehört an Stelle', mlStatus: 'Abschlussstatus', mlInBearbeitung: 'in Bearbeitung', mlAbgeschlossen: 'abgeschlossen', mlMinuten: 'Minuten geschätzte Lernzeit', mlFortschritt: 'Fortschritt', mlErgebnis: 'Ergebnis', mlWeitere: 'Weitere Informationen', mlMedien: 'Mediennachweis', letzterVersuch: 'Letzter Versuch', besserAls: 'besser als beim letzten Mal', gleichWie: 'wie beim letzten Mal', unterLetztem: 'unter dem letzten Versuch', inFolge: 'richtig in Folge', runde: 'Runde', naechsteRunde: 'Nächste Runde', alleRunden: 'Alle Runden geschafft', vollbild: 'Vollbild', vollbildAus: 'Vollbild beenden', vollbildAnsehen: 'Im Vollbild ansehen', klangAn: 'Klänge an', klangAus: 'Klänge aus', ruhigAus: 'Bewegung reduzieren', ruhigAn: 'Bewegung reduziert', ruhigAnHinweis: 'Animationen, Einblendungen und bewegte Bilder sind jetzt aus.', ruhigAusHinweis: 'Animationen sind wieder an.', kursBeenden: 'Kurs beenden', kursBeendet: 'Dein Stand ist gespeichert. Du kannst dieses Fenster jetzt schließen.', keineVersuche: 'Du hast alle {n} Versuche für den Test genutzt. Wende dich an die Kursverantwortlichen, wenn du ihn noch einmal machen möchtest.', versuchVon: 'Versuch {n} von {m}', lektionVon: 'Lektion {n} von {m}', naechsteLektion: 'Nächste Lektion', slSituation: 'Die Situation', slSchritt: 'Dein Schritt', slLektionen: '{n} Lektionen', slRund: 'Rund {n} Min.', slAbschluss: 'Abschlusscheck', poolBereit: 'Bereit, wenn du es bist', poolFragen: '{n} Fragen, Rückmeldung nach jeder', poolWiederholen: 'Beliebig oft wiederholen', poolBestehen: '{n} von {m} richtig', poolBestehenHint: 'zum Bestehen', poolPass: 'Bestanden', poolStart: 'Check starten', minAbk: 'Min.', vorigeLektion: 'Vorige Lektion', slAbgeschlossen: '{n} % abgeschlossen', zumErgebnis: 'Zum Ergebnis', thema: 'Thema', dieseFrage: 'die nächste Frage', wieGutVorher: 'Wie gut kennst du dich damit aus? Schätz dich ein, bevor du die Frage siehst.', kenne0: 'Kaum', kenne1: 'Etwas', kenne2: 'Gut', vorherUeber: 'Du hast gesagt, du kennst dich gut aus, aber die Antwort stimmt nicht. Hier hast du dich überschätzt: Genau das lohnt einen zweiten Blick.', vorherUnter: 'Du warst unsicher und lagst trotzdem richtig. Du weißt mehr, als du denkst.', selbsteinschaetzung: 'Deine Selbsteinschätzung', eingeschaetztPassend: 'Bei {n} von {m} Übungsfragen passte deine Einschätzung vorher.', ueberschaetzt: 'Überschätzt', unterschaetzt: 'Unterschätzt', iaFehlt: 'Hier erscheint die eigene Interaktion, sobald eine Datei hinterlegt ist.', iaTitel: 'Interaktive Übung', iaErledigt: 'Übung abgeschlossen', leisteZu: 'Leiste einklappen', leisteAuf: 'Leiste ausklappen', folgeLabel: 'Was daraus wird', nochmalEntscheiden: 'Nochmal entscheiden', fragHilfe: 'Frag {n}', hilfe: 'Hilfe holen', arbeitshilfe: 'Arbeitshilfe öffnen', triBewertung: 'Bewertung durch den Kunden', verlauf: 'Bisheriger Gesprächsverlauf', entscheidung: 'Wie reagierst du?', spielGeschafft: 'Geschafft. Du kannst das Spiel gern noch einmal spielen.', erzaehler: 'Erzähler',
+    kursinhalt: 'Kursinhalt', meineNotizen: 'Meine Notizen', zusammenfassungDrucken: 'Zusammenfassung drucken',
+    inhalt: 'Inhalt', menue: 'Menü', duBistDran: 'Du bist dran', start: 'Start', ende: 'Ende', gehoertAn: 'gehört an Stelle', mlStatus: 'Abschlussstatus', mlInBearbeitung: 'in Bearbeitung', mlAbgeschlossen: 'abgeschlossen', mlMinuten: 'Minuten geschätzte Lernzeit', mlFortschritt: 'Fortschritt', mlErgebnis: 'Ergebnis', mlWeitere: 'Weitere Informationen', mlMedien: 'Mediennachweis', letzterVersuch: 'Letzter Versuch', besserAls: 'besser als beim letzten Mal', gleichWie: 'wie beim letzten Mal', unterLetztem: 'unter dem letzten Versuch', inFolge: 'richtig in Folge', runde: 'Runde', naechsteRunde: 'Nächste Runde', alleRunden: 'Alle Runden geschafft', vollbild: 'Vollbild', vollbildAus: 'Vollbild beenden', tocEinstellungen: 'Einstellungen', klaenge: 'Klänge', an: 'an', aus: 'aus', vollbildAnsehen: 'Im Vollbild ansehen', klangAn: 'Klänge an', klangAus: 'Klänge aus', ruhigAus: 'Bewegung reduzieren', ruhigAn: 'Bewegung reduziert', ruhigAnHinweis: 'Animationen, Einblendungen und bewegte Bilder sind jetzt aus.', ruhigAusHinweis: 'Animationen sind wieder an.', kursBeenden: 'Kurs beenden', kursBeendet: 'Dein Stand ist gespeichert. Du kannst dieses Fenster jetzt schließen.', keineVersuche: 'Du hast alle {n} Versuche für den Test genutzt. Wende dich an die Kursverantwortlichen, wenn du ihn noch einmal machen möchtest.', versuchVon: 'Versuch {n} von {m}', lektionVon: 'Lektion {n} von {m}', naechsteLektion: 'Nächste Lektion', slSituation: 'Die Situation', slSchritt: 'Dein Schritt', slLektionen: '{n} Lektionen', slRund: 'Rund {n} Min.', slAbschluss: 'Abschlusscheck', poolBereit: 'Bereit, wenn du es bist', poolFragen: '{n} Fragen, Rückmeldung nach jeder', poolWiederholen: 'Beliebig oft wiederholen', poolBestehen: '{n} von {m} richtig', poolBestehenHint: 'zum Bestehen', poolPass: 'Bestanden', poolStart: 'Check starten', minAbk: 'Min.', vorigeLektion: 'Vorige Lektion', slAbgeschlossen: '{n} % abgeschlossen', zumErgebnis: 'Zum Ergebnis', thema: 'Thema', dieseFrage: 'die nächste Frage', wieGutVorher: 'Wie gut kennst du dich damit aus? Schätz dich ein, bevor du die Frage siehst.', kenne0: 'Kaum', kenne1: 'Etwas', kenne2: 'Gut', vorherUeber: 'Du hast gesagt, du kennst dich gut aus, aber die Antwort stimmt nicht. Hier hast du dich überschätzt: Genau das lohnt einen zweiten Blick.', vorherUnter: 'Du warst unsicher und lagst trotzdem richtig. Du weißt mehr, als du denkst.', selbsteinschaetzung: 'Deine Selbsteinschätzung', eingeschaetztPassend: 'Bei {n} von {m} Übungsfragen passte deine Einschätzung vorher.', ueberschaetzt: 'Überschätzt', unterschaetzt: 'Unterschätzt', iaFehlt: 'Hier erscheint die eigene Interaktion, sobald eine Datei hinterlegt ist.', iaTitel: 'Interaktive Übung', iaErledigt: 'Übung abgeschlossen', leisteZu: 'Leiste einklappen', leisteAuf: 'Leiste ausklappen', folgeLabel: 'Was daraus wird', nochmalEntscheiden: 'Nochmal entscheiden', fragHilfe: 'Frag {n}', hilfe: 'Hilfe holen', arbeitshilfe: 'Arbeitshilfe öffnen', triBewertung: 'Bewertung durch den Kunden', verlauf: 'Bisheriger Gesprächsverlauf', entscheidung: 'Wie reagierst du?', spielGeschafft: 'Geschafft. Du kannst das Spiel gern noch einmal spielen.', erzaehler: 'Erzähler',
     cbBereiche: 'Bereiche', cbAlle: 'Alle Fälle', cbFall: 'Fall', cbBesprochen: 'Besprochen', cbOffen: 'Noch offen', cbOeffnen: 'Öffnen',
     cbStand: '{n} von {z} nötigen Fällen besprochen · {m} stehen zur Auswahl', cbMl: 'Musterlösung', cbAnekdote: 'Beispiel aus der Praxis',
     cbUeberlegungen: 'Unsere Überlegungen', cbNotieren: 'Diskutieren und notieren', cbNotiert: 'notiert', cbVergleichen: 'Antworten vergleichen',
@@ -358,12 +364,12 @@ function kursPlayer(course, opts) {
     panoOhneBild: 'Das Rundumfoto fehlt. Hier stehen alle Punkte mit ihren Erklärungen.', panoLadefehler: 'Das Rundumfoto lässt sich nicht laden. Hier stehen alle Punkte mit ihren Erklärungen.',
     wischHinweis: 'Wische nach links oder rechts, oder nutze die Knöpfe.',
     erstVermuten: 'Erst vermuten', vermutungFeld: 'Dein Stichwort', vermutungAufdecken: 'Aufdecken', vermutungFehlt: 'Schreib erst ein Stichwort.', vermutungStimmt: 'stimmt', vermutungAntwort: 'Die Antwort ist', alleAufdecken: 'Alle aufdecken',
-    stapelHinweis: 'Zieh die oberste Karte in den richtigen Behälter. Ohne Maus: Karte anwählen und die Nummer des Behälters drücken.', stapelRichtig: 'Richtig: „{k}“ gehört zu „{c}“.', stapelFalsch: 'Nicht ganz: „{k}“ gehört nicht zu „{c}“. Die Karte kommt später noch einmal.', stapelIn: 'In „{c}“ legen', stapelImBehaelter: '{n} Karten im Behälter', stapelRest: 'Noch {n} von {m} Karten', stapelFertig: 'Alle Karten sortiert.', stapelErgebnis: '{n} von {m} beim ersten Versuch richtig.', geoeffnet: '{n} von {z} geöffnet',
+    stapelHinweis: 'Zieh die oberste Karte in den richtigen Behälter. Ohne Maus: Karte anwählen und die Nummer des Behälters drücken.', stapelRichtig: 'Richtig: „{k}“ gehört zu „{c}“.', stapelFalsch: 'Nicht ganz: „{k}“ gehört nicht zu „{c}“. Die Karte kommt später noch einmal.', stapelIn: 'In „{c}“ legen', leerAuswahl: 'Wähl zuerst eine Antwort aus.', leerLuecke: 'Füll zuerst eine Lücke aus.', leerZahl: 'Gib zuerst eine Zahl ein.', leerZuordnen: 'Ordne zuerst mindestens einen Begriff zu.', leerPins: 'Setz zuerst alle Nummern ins Bild.', leerAussagen: 'Beurteile zuerst jede Aussage.', stapelImBehaelter: '{n} Karten im Behälter', stapelRest: 'Noch {n} von {m} Karten', stapelFertig: 'Alle Karten sortiert.', stapelErgebnis: '{n} von {m} beim ersten Versuch richtig.', geoeffnet: '{n} von {z} geöffnet',
     warteFrage: 'Beantworte zuerst die Frage. Danach geht es weiter.',
     warteEntscheidung: 'Triff zuerst eine Entscheidung. Danach geht es weiter.',
     warteSelbstcheck: 'Beantworte zuerst den Selbstcheck. Danach geht es weiter.',
     scNicht: 'Nicht sicher', scEtwas: 'Etwas sicher', scSicher: 'Sicher', scOffen: 'noch nicht eingestellt',
-    m3dHinweis: 'Dreh das Modell mit Maus oder Finger, zoom mit dem Mausrad oder zwei Fingern. Klick auf die Nummern.', m3dStart: 'Klick auf eine Nummer am Modell oder in der Liste.', m3dTeile: '{n} von {z} Teilen angesehen', m3dVor: 'Nächstes Teil', m3dZurueck: 'Voriges Teil', m3dAnimStart: 'Bewegung abspielen', m3dAnimStop: 'Bewegung anhalten', m3dReset: 'Ansicht zurücksetzen', m3dAr: 'In deinem Raum ansehen', m3dOhne: 'Das 3D-Modell lässt sich hier nicht anzeigen. Alle Teile stehen in der Liste.', m3dLaden: 'Modell wird geladen …', m3dTeil: 'Teil {n}', m3dModell: '3D-Modell', warteModell: 'Sieh dir zuerst alle Teile des Modells an. Danach geht es weiter.',
+    m3dHinweis: 'Dreh das Modell mit Maus oder Finger, zoom mit dem Mausrad oder zwei Fingern. Klick auf die Nummern.', m3dStart: 'Klick auf eine Nummer am Modell oder in der Liste.', m3dTeile: '{n} von {z} Teilen angesehen', m3dVor: 'Nächstes Teil', m3dZurueck: 'Voriges Teil', m3dAnimStart: 'Bewegung abspielen', m3dAnimStop: 'Bewegung anhalten', m3dReset: 'Ansicht zurücksetzen', m3dAr: 'In deinem Raum ansehen', m3dOhne: 'Das 3D-Modell lässt sich hier nicht anzeigen. Alle Teile stehen in der Liste.', m3dLaden: 'Modell wird geladen …', m3dTeil: 'Teil {n}', m3dModell: '3D-Modell', warteModell: 'Sieh dir zuerst alle Teile des Modells an. Danach geht es weiter.', scrStart: 'Video starten', scrLaden: 'Das Video wird vorbereitet …', scrAbspielen: 'Abspielen', scrPause: 'Anhalten', scrVorige: 'Vorige Szene', scrNaechste: 'Nächste Szene', scrStelle: 'Stelle im Video', scrSzene: 'Szene {n} von {m}', scrUntertitel: 'Untertitel', scrNachlesen: 'Zum Nachlesen', scrBild: 'Gezeichnetes Erklärvideo. Den gesprochenen Text findest du unter „Zum Nachlesen“.', scrOhne: 'Das Video lässt sich hier nicht abspielen. Der Text steht unter „Zum Nachlesen“.', scrFolgt: 'Scribble-Video folgt: Datei im Formular unter „Scribble-Datei laden“ wählen.', warteScribble: 'Sieh dir das Video bis zum Ende an oder lies den Text unter „Zum Nachlesen“. Danach geht es weiter.',
     schritte: 'Schritte', sbSchritt: 'Schritt {n} von {z}', sbAbspielen: 'Abspielen', sbWiederholen: 'Wiederholen', sbListe: 'Die Animation lässt sich hier nicht zeigen. Die Schritte stehen als Liste da.', warteSchritte: 'Sieh dir zuerst alle Schritte an. Danach geht es weiter.', lottieAnhalten: 'Animation anhalten', lottieAbspielen: 'Animation abspielen',
     seitenImKapitel: 'Seiten in diesem Kapitel', aufdecken: 'Aufdecken', ortGesperrt: 'noch gesperrt', ortErkundet: 'erkundet', ortNaechster: 'als Nächstes', ortGesperrtHinweis: 'Dieser Ort öffnet sich, sobald du den vorherigen erkundet hast.', orteErkundet: 'Orten erkundet', mapStart: 'Wähl einen Ort auf der Karte. Ich begleite dich.', playbookNeu: 'Playbook-Seite hinzugefügt', playbookPraxis: 'Im Alltag', urteil_richtig: 'Richtig', urteil_teilweise: 'Teilweise', urteil_falsch: 'Daneben', duWaehltest: 'Du hast {x} gewählt', dieFolge: 'Die Folge', zurueckspulen: 'Zurückspulen und neu entscheiden', wahlFolgen: 'Wähl eine Antwort. Deine Wahl verändert, was als Nächstes passiert.', situationVon: 'Situation {n} von {z}', festlegen: 'Festlegen', deinZug: 'Dein Zug', textNachricht: 'Nachricht', nachrichtAn: 'Nachricht in {c}', notizMarkieren: 'Zum Markieren antippen', markierungenPruefen: 'Markierungen prüfen', notizMarkiert: 'markiert', wochenablauf: 'Wochenablauf', mapWeiter: 'Als Nächstes: {ort}.', mapFertig: 'Du hast alle Orte erkundet. Gut gemacht.', mapGeschafft: '{ort} ist erkundet.', mgZeigen: 'Hinweis zeigen', mgZu: 'Hinweis ausblenden', mapStand: 'Stand der Karte', zurueckZurKarte: 'Zurück zur Karte', platzN: '{n}. Platz', ja: 'Ja', nein: 'Nein', weissNicht: 'Weiß ich nicht', mehrLesen: 'Mehr lesen', danke: 'Danke für deine Antwort.', punkteHinweis: 'Klick auf die Punkte in den Bildern.', wenigerLesen: 'Weniger anzeigen', weissNichtFb: 'Gut, dass du nicht rätst. Hier ist die Antwort mit Erklärung.', deineZahl: 'Deine Zahl', bis: 'bis', linieHinweis: 'Klick links einen Begriff und rechts, was dazu passt. Ein zweiter Klick löst die Linie.', linieWaehlen: 'Begriff wählen, dann rechts die Zuordnung', auswerten: 'Auswerten', pinNummer: 'Nummer {n}', pinGesetzt: 'gesetzt', pinStelle: 'Stelle {n}', pinRichtig: 'Richtige Nummer an dieser Stelle', pinHinweis: 'Zieh jede Nummer auf die passende Stelle im Bild. Ohne Maus: Nummer wählen, dann die Stelle.', nachLinks: 'nach links', nachRechts: 'nach rechts', scAbsenden: 'Absenden', scAendern: 'Neu einschätzen', deinProfil: 'Dein Profil',
     warteSchaetzung: 'Gib zuerst deine Schätzung ab. Danach geht es weiter.',
@@ -379,7 +385,7 @@ function kursPlayer(course, opts) {
     wbOffen: 'Offen', wbSpaeter: 'Später', wbFertig: 'Erledigt', wbStarten: 'Aufgaben starten', wbWeiterMit: 'Weiter mit Aufgabe {n}', wbAufgabeVon: 'Aufgabe {n} von {m}', wbErstDie: 'Diese Aufgabe öffnet sich später. Mach erst Aufgabe {n}.', szeneVon: 'Szene {n} von {m}', szeneWeiter: 'Nächste Szene', szeneZurueck: 'Vorige Szene', hilfeNachlesen: 'Nachlesen',
     tszAufgabe: 'Lies den Kommentar. Tipp auf die passende Einordnung.', tszKommentar: 'Kommentar {n} von {m}', tszRichtig: 'Richtig!', tszNichtGanz: 'Nicht ganz.', tszNochmal: 'Schau noch einmal hin und versuch es erneut.', tszWarnzeichen: 'Warnzeichen', tszNaechster: 'Nächster Kommentar', tszAuswertung: 'Zur Auswertung', tszFertig: 'Alle {n} Kommentare eingeordnet.', tszErsterVersuch: '{n} von {m} beim ersten Versuch richtig.', falsch: 'falsch',
     slHinweis: 'Wähl für jeden Punkt einen Bereich und prüf dann deine Zuordnung.', slWaehle: 'Bereich wählen', slBereichFuer: 'Bereich für „{k}“', slPruefen: 'Zuordnung prüfen', slOffen: 'Noch {n} Punkte ohne Bereich.', slStand: '{n} von {m} richtig. Ändere die markierten Punkte und prüf noch einmal.', slNochNicht: 'Noch nicht. Schau noch einmal.', slGehoertZu: 'Gehört zu „{c}“.', slCheckliste: 'Deine Checkliste', slRichtig: 'Richtig.', slDrucken: 'Checkliste drucken',
-    triLeer: 'Noch keine Karten.', nochEinmal: 'Noch einmal', von: 'von', karteVon: 'Karte {n} von {m}',
+    triLeer: 'Noch keine Karten.', nochEinmal: 'Noch einmal', nochmalKnopf: 'Nochmal versuchen', nochmalUebrig: 'Nochmal versuchen ({n} übrig)', loesungZeigen: 'Lösung zeigen', fastGeschafft: 'Fast geschafft', testfrageOffen: 'Es ist noch 1 Testfrage offen.', testfragenOffen: 'Es sind noch {n} Testfragen offen.', testWiederholen: 'Test wiederholen', zumZertifikat: 'Zum Zertifikat', ueberspringen: 'Überspringen', trotzdemDurcharbeiten: 'Trotzdem durcharbeiten', antwortenAendern: 'Antworten ändern', zertBestaetigt: 'Hiermit wird bestätigt, dass', sortHinweis: 'Zieh die Karten in die passende Spalte. Mit der Tastatur: Karte anwählen und die Nummer der Spalte drücken.', sortErgebnis: '{n} von {m} richtig zugeordnet.', sortFalschHinweis: 'Die richtige Spalte steht jetzt hinter den falschen Karten.', sortOffen: 'Noch {n} offen', sortOffenEins: 'Noch 1 Karte offen', von: 'von', karteVon: 'Karte {n} von {m}',
     clStand: '{n} von {z} erledigt', clAlle: 'Alles erledigt: {z} von {z}', nochmalVersuchen: 'Versuch es noch einmal.',
     szene: 'Szene', abspielen: 'Abspielen', pause: 'Pause', naechsteZeile: 'Nächste Zeile', vollbild: 'Vollbild', ende: 'Ende', nochmalAnsehen: 'Noch einmal ansehen',
     szeneStarten: 'Szene starten', vorlesen: 'Vorlesen', vorlesenStopp: 'Vorlesen anhalten', tonAus: 'Ton aus', tonAn: 'Ton an', weiterAbspielen: 'Weiter abspielen', allesAnzeigen: 'Alles anzeigen', szeneNochmal: 'Szene noch einmal',
@@ -407,7 +413,7 @@ function kursPlayer(course, opts) {
     alleRichtigen: 'Wähle alle Antworten, die stimmen', tabelle: 'Tabelle', denkpauseStart: 'Denkpause starten ({m})', denkpauseEnde: 'Zeit ist um. Schreib jetzt auf, was dir eingefallen ist.', gedankenPh: 'Deine Gedanken …', deineAntwort: 'Deine Antwort', loesung: 'Lösung', antwortLoesung: 'Antwort und Lösung', tippLabel: 'Tipp', nichtBeantwortet: 'nicht beantwortet', stellenRichtig: '{r} von {n} Stellen richtig', stelleImBild: 'die markierte Stelle im Bild',
     kalenderTitel: 'Wiederholung: {k}', kalenderText: 'Fünf Minuten: Was war der Kern? Was habe ich seitdem davon umgesetzt?', kalenderFragen: 'Drei Fragen zum Abrufen, erst antworten, dann im Kurs nachsehen:',
     kurzWiederholen: 'Kurz wiederholen', kurzWiederholenHinweis: 'Ein paar Fragen aus dem, was du schon gelernt hast. Sie zählen nicht zur Bewertung. Wiederholen mit Abstand hilft dem Behalten.',
-    allesZugeordnet: 'Alles zugeordnet', nichtZugeordnet: 'Nichts zugeordnet',
+    allesZugeordnet: 'Alles zugeordnet', sortNochNichts: 'Noch nichts zugeordnet', sortPruefen: 'Zuordnung prüfen', sortAbgelegt: '„{k}“ liegt jetzt in „{c}“.', nichtZugeordnet: 'Nichts zugeordnet',
     notizen: 'Notizen', glossar: 'Glossar', ergebnis: 'Ergebnis', abgeschlossen: 'abgeschlossen', ca: 'ca.', min: 'Min',
     zumVergleich: 'Zum Vergleich:', kritTitel: 'Deine Antwort im Vergleich', kritHinweis: 'Lies die Musterantwort und hake ab, was deine Antwort erfüllt.', kritErfuellt: 'Kriterien erfüllt', kritAlle: 'Alle Kriterien erfüllt. Gut gemacht.',
     hallo: 'Hallo', willkommenZurueckName: 'Willkommen zurück, {n}!', msAlleKapitel: 'Das war das letzte Kapitel. Jetzt noch der Abschluss.',
@@ -460,13 +466,27 @@ function kursPlayer(course, opts) {
     spFehler: 'Die Aufnahme ließ sich nicht starten. Schreib deine Antwort deshalb auf.', spZeitUm: 'Die Zeit ist um.', spBeendet: 'Aufnahme beendet, {t}. Du kannst sie jetzt anhören.',
     spSekunden: 'Aufnahme läuft, {n} Sekunden', spAufgenommen: 'aufgenommen', spLautGesagt: 'Laut gesagt (die Aufnahme wird nicht gespeichert)', spMusterHoeren: 'Musterantwort anhören',
     warteSprechen: 'Sag oder schreib zuerst deine Antwort. Danach geht es weiter.',
+    // Bisher fest im Code, seit 08.11.2026 Bedientexte (in „Direkt bearbeiten“ änderbar)
+    qhMehrere: 'Mehrere Antworten sind richtig', qhEine: 'Eine Antwort ist richtig', qhWahrFalsch: 'Wahr oder falsch?', qhLuecken: 'Lücken ausfüllen', qhZahl: 'Zahl eingeben',
+    qhReihenfolge: 'In die richtige Reihenfolge bringen', qhZuordnen: 'Passendes zuordnen', qhStelle: 'Die richtige Stelle im Bild anklicken', qhNummern: 'Nummern an die passende Stelle im Bild bringen',
+    uebungMarke: 'Übung', wdhMarke: 'Wiederholung', wdhIntro: 'Fragen aus früheren Abschnitten. Was zuletzt nicht saß, kommt zuerst. Sie zählen nicht zur Bewertung.',
+    wdhLeer: 'Es gibt noch keine früheren Fragen zum Wiederholen.', rueckmeldungMarke: 'Rückmeldung', skalaNiedrig: 'trifft nicht zu', skalaHoch: 'trifft voll zu', okKnopf: 'OK',
+    tkDrucken: 'Als Merkkarte drucken oder speichern', quellenTitel: 'Quellen',
+    warteFragen: 'Bitte beantworte zuerst die Fragen auf dieser Seite.', warteUebungAb: 'Bitte schließe zuerst die Übung auf dieser Seite ab.', warteEntscheidungBitte: 'Bitte triff zuerst eine Entscheidung.',
+    warteAufgabe: 'Bitte bearbeite zuerst die Aufgabe auf dieser Seite.', warteMission: 'Bitte schließe zuerst die Mini-Mission auf dieser Seite ab.', warteSpiel: 'Bitte spiele zuerst das Level-Spiel auf dieser Seite zu Ende.',
+    zertBereit: 'Das Zertifikat steht bereit, sobald alle Testfragen beantwortet sind.', denkpause: 'Denkpause',
+    // Bedientexte seit 11.11.2026 (vorher fest im Code)
+    confGeraten: 'Geraten', confEher: 'Eher sicher', confSicher: 'Sicher', confFrage: 'Wie sicher bist du?',
+    nachbesprechung: 'Nachbesprechung', debriefTitel: 'Deine Entscheidungen im Überblick',
+    planMarke: 'Umsetzungsplan', planTitel: 'Mein Umsetzungsplan', planSpeichern: 'Plan speichern', planDrucken: 'Drucken oder als PDF sichern',
+    zertDrucken: 'Zertifikat anzeigen und drucken', nochKeinVideo: 'Noch kein Video',
   };
   const langs = course.languages || [];
   const langOriginals = {};
   let langUi = {};
   // Sie-Fassung der Bedientexte (settings.anrede: 'Sie'). Jeder Text aus UI_DE mit du, dich, dir, dein … oder einer Du-Aufforderung
   // braucht hier ein Gegenstück; der Selbsttest „Anrede: du, Du oder Sie“ meldet fehlende Einträge.
-  const UI_SIE = { slSchritt: 'Ihr Schritt', poolBereit: 'Bereit, wenn Sie es sind', nahtStart: 'Starten Sie jetzt ins Training.', kursBeendet: 'Ihr Stand ist gespeichert. Sie können dieses Fenster jetzt schließen.', keineVersuche: 'Sie haben alle {n} Versuche für den Test genutzt. Wenden Sie sich an die Kursverantwortlichen, wenn Sie ihn noch einmal machen möchten.',
+  const UI_SIE = { sortHinweis: 'Ziehen Sie die Karten in die passende Spalte. Mit der Tastatur: Karte anwählen und die Nummer der Spalte drücken.', leerAuswahl: 'Wählen Sie zuerst eine Antwort aus.', leerLuecke: 'Füllen Sie zuerst eine Lücke aus.', leerZahl: 'Geben Sie zuerst eine Zahl ein.', leerZuordnen: 'Ordnen Sie zuerst mindestens einen Begriff zu.', leerPins: 'Setzen Sie zuerst alle Nummern ins Bild.', leerAussagen: 'Beurteilen Sie zuerst jede Aussage.', slSchritt: 'Ihr Schritt', poolBereit: 'Bereit, wenn Sie es sind', nahtStart: 'Starten Sie jetzt ins Training.', kursBeendet: 'Ihr Stand ist gespeichert. Sie können dieses Fenster jetzt schließen.', keineVersuche: 'Sie haben alle {n} Versuche für den Test genutzt. Wenden Sie sich an die Kursverantwortlichen, wenn Sie ihn noch einmal machen möchten.',
     spPrivat: 'Die Aufnahme bleibt auf Ihrem Gerät und wird nicht gespeichert.', spDeine: 'Ihre Aufnahme', spAnhoeren: 'Hören Sie sich an, wie es klingt. Passt es, klicken Sie auf „Fertig“.',
     spGesagt: 'Sie haben Ihre Antwort laut gesagt. Die Aufnahme ist nicht gespeichert.', spSchreibPh: 'Schreiben Sie den Satz so, wie Sie ihn sagen würden …',
     spDreiWoerter: 'Schreiben Sie mindestens drei Wörter.', spKeinGeraet: 'Dieser Browser kann hier nicht aufnehmen. Schreiben Sie Ihre Antwort deshalb auf.',
@@ -480,7 +500,7 @@ function kursPlayer(course, opts) {
     udZielKommt: 'Ihr Ziel kommt vor in', udZielOffen: 'Kein Kapitel nennt Ihr Ziel wörtlich. Sehen Sie in die Kapitelübersicht und wählen Sie, was am nächsten liegt.', vpHinweis: 'Sehen Sie sich beide Szenen an und wählen Sie eine.', warteVideopaar: 'Sehen Sie sich beide Szenen an und wählen Sie eine.', vpFalsch: 'Sehen Sie noch einmal genau hin.', promptMarkieren: 'Kopieren ging nicht. Markieren Sie den Text und kopieren Sie ihn von Hand.',
 
     mapStart: 'Wählen Sie einen Ort auf der Karte. Ich begleite Sie.', duWaehltest: 'Sie haben {x} gewählt', wahlFolgen: 'Wählen Sie eine Antwort. Ihre Wahl verändert, was als Nächstes passiert.', deinZug: 'Ihr Zug', mapFertig: 'Sie haben alle Orte erkundet. Gut gemacht.',
-    m3dHinweis: 'Drehen Sie das Modell mit Maus oder Finger, zoomen Sie mit dem Mausrad oder zwei Fingern. Klicken Sie auf die Nummern.', m3dStart: 'Klicken Sie auf eine Nummer am Modell oder in der Liste.', m3dAr: 'In Ihrem Raum ansehen', warteModell: 'Sehen Sie sich zuerst alle Teile des Modells an. Danach geht es weiter.', warteSchritte: 'Sehen Sie sich zuerst alle Schritte an. Danach geht es weiter.',
+    m3dHinweis: 'Drehen Sie das Modell mit Maus oder Finger, zoomen Sie mit dem Mausrad oder zwei Fingern. Klicken Sie auf die Nummern.', m3dStart: 'Klicken Sie auf eine Nummer am Modell oder in der Liste.', m3dAr: 'In Ihrem Raum ansehen', warteModell: 'Sehen Sie sich zuerst alle Teile des Modells an. Danach geht es weiter.', scrBild: 'Gezeichnetes Erklärvideo. Den gesprochenen Text finden Sie unter „Zum Nachlesen“.', warteScribble: 'Sehen Sie sich das Video bis zum Ende an oder lesen Sie den Text unter „Zum Nachlesen“. Danach geht es weiter.', warteSchritte: 'Sehen Sie sich zuerst alle Schritte an. Danach geht es weiter.',
     postfachHinweis: 'Mit dieser Mail stimmt etwas nicht. Finden Sie die Warnzeichen? Ziehen Sie jedes Etikett auf die Stelle der Mail, an der Sie es erkennen.', postfachStart: 'In Ihrem Postfach warten ein paar neue Mails. Sehen wir sie uns an?', postfachDaneben: 'Das passt hier noch nicht. Sehen Sie sich die Stelle noch einmal an.', postfachFertig: 'Alle Warnzeichen gefunden. Bei der nächsten Mail sehen Sie sie schneller.',
     mkcNeu: 'Neue Karte für Ihren Stapel', mkcHinweis: 'Überlegen Sie kurz, dann drehen Sie die Karte um.', mkcImStapel: 'Liegt in Ihrem Kartenstapel ({n} von {m} gesammelt).',
     deckAnzahl: '{n} Karten in Ihrem Stapel, {g} davon haben Sie schon umgedreht.', deckWiederholen: 'Diese Karten schauen Sie sich in ein paar Tagen noch einmal an:',
@@ -611,7 +631,10 @@ function kursPlayer(course, opts) {
     warteMatrix: 'Ordnen Sie zuerst alle Begriffe ein und vergleichen Sie.',
     schlossFalsch: 'Das passt noch nicht. Sehen Sie sich Ihre Fundstücke noch einmal an.', schlossLeer: 'Bitte füllen Sie zuerst alle Stellen aus.', fundstuecke: 'Ihre Fundstücke',
     warteSchloss: 'Öffnen Sie zuerst das Schloss. Danach geht es weiter.', wbGeschafft: 'Geschafft: {n} erledigt. Weitere Aufgaben können Sie freiwillig wählen.',
-    warteWahlbrett: 'Wählen Sie zuerst {m} Aufgaben aus dem Wahlbrett und erledigen Sie sie.', warteListe: 'Gehen Sie zuerst alle Herausforderungen durch.'
+    warteWahlbrett: 'Wählen Sie zuerst {m} Aufgaben aus dem Wahlbrett und erledigen Sie sie.', warteListe: 'Gehen Sie zuerst alle Herausforderungen durch.',
+    warteFragen: 'Bitte beantworten Sie zuerst die Fragen auf dieser Seite.', warteUebungAb: 'Bitte schließen Sie zuerst die Übung auf dieser Seite ab.', warteEntscheidungBitte: 'Bitte treffen Sie zuerst eine Entscheidung.',
+    warteAufgabe: 'Bitte bearbeiten Sie zuerst die Aufgabe auf dieser Seite.', warteMission: 'Bitte schließen Sie zuerst die Mini-Mission auf dieser Seite ab.', warteSpiel: 'Bitte spielen Sie zuerst das Level-Spiel auf dieser Seite zu Ende.',
+    confFrage: 'Wie sicher sind Sie?', debriefTitel: 'Ihre Entscheidungen im Überblick'
   };
   // Anrede (settings.anrede): 'du' (Standard), 'Du' (Pronomen groß, z. B. TBW) oder 'Sie'; eigene Bedientexte über settings.uiTexts { Schlüssel: Text }
   const ANREDE = set.anrede === 'Sie' || set.anrede === 'Du' ? set.anrede : 'du';
@@ -682,11 +705,20 @@ function kursPlayer(course, opts) {
     // Schrift auf der Hauptfarbe nach demselben Maßstab (ein helles Türkis trägt dunkle Schrift)
     const pri = hex(theme.primary);
     if (pri) rootStyle.setProperty('--kp-on-primary', ratio(pri, [255, 255, 255]) >= ratio(pri, [4, 17, 31]) ? '#fff' : '#04111f');
+    // Tiefe Hauptfarbe für Flächen mit kleiner weißer Schrift (Seite der großen Merkkarte): so weit Richtung Nachtblau gemischt,
+    // dass auch leicht getöntes Weiß 4,5 : 1 hat (Sichtprüfung 10.11.2026: Hellblau auf Blau 3,0 : 1 im Wandel-Kurs)
+    if (pri) {
+      let p = 0.82, deep = pri;
+      const mixD = q => pri.map((x, i) => Math.round(x * q + [11, 16, 32][i] * (1 - q)));
+      for (deep = mixD(p); p > 0.3 && ratio(deep, [255, 255, 255]) < 6; p -= 0.04) deep = mixD(p);
+      rootStyle.setProperty('--kp-primary-deep', `rgb(${deep.join(',')})`);
+    }
     // Stil-Paket und Darstellung als Klassen, damit das CSS darauf reagieren kann
     document.documentElement.classList.add('kp-style-' + (theme.style || 'klar'));
     if (theme.style === 'micro' && theme.sideLook === 'lektion') document.documentElement.classList.add('kp-ml-lektion');
     // Lektionen zum Scrollen (sideLook 'scroll', Vorbild Rise): baut auf dem Lektions-Look auf und läuft immer als Scroll-Darstellung
     if (theme.style === 'micro' && theme.sideLook === 'scroll') document.documentElement.classList.add('kp-ml-lektion', 'kp-ml-scroll', 'kp-layout-scroll');
+    if (lessonScroll) document.documentElement.classList.add('kp-sl-wahl', 'kp-sl-von-' + theme.fromStyle);
     if (theme.look !== 'klassisch') document.documentElement.classList.add('kp-modern');
     // Effekte „hochwertig“ ist der Standard; „dezent“ lässt nur die Grundbewegungen
     // „Bewegung reduzieren“ der Lernenden (Schalter im Inhaltsverzeichnis) schaltet die hochwertigen Effekte mit ab
@@ -703,7 +735,7 @@ function kursPlayer(course, opts) {
   // Verweise wie "assets/logo.png" in HTML und CSS auf die hinterlegten Dateien umbiegen
   const res = s => String(s || '').replace(/assets\/[\w.\-]+/g, m => assetMap[m] || m);
   // Eigene Kopf- und Fußzeile (leer = Standard); das globale CSS steht danach und kann alles überschreiben
-  const chrome = course.chrome || {};
+  const chrome = lessonScroll ? Object.assign({}, course.chrome, { navPos: 'links' }) : (course.chrome || {});
   // Lage der Leiste: oben (Standard), unten oder links. Farben leer = Farben des Designs.
   // „menue“ ist die dezente dunkle Leiste unten: Symbole links, Menü in der Mitte (klappt das Inhaltsverzeichnis links auf), Pfeile rechts
   const dezent = chrome.navPos === 'menue';
@@ -723,8 +755,34 @@ function kursPlayer(course, opts) {
     if (chrome.navInk) ns.setProperty('--kp-nav-ink', chrome.navInk);
     else if (chrome.navColor) ns.setProperty('--kp-nav-ink', navInkFor(chrome.navColor));
   }
+  // Eigene Farben der Leiste und des Lektionskopfs (chrome.sl, aus „Direkt bearbeiten“ oder dem Design-Reiter):
+  // Kopf der Leiste, Liste, Akzent und Symbole der Lektionen, Grund und Schrift des Lektionskopfs, Etikett, die Karten „Situation“ und „Schritt“.
+  // Ohne eigene Schriftfarbe richtet sie sich nach der Helligkeit der Fläche. Das ID-Gewicht schlägt die Regeln der Stil-Pakete.
+  function slColorCss() {
+    const c = chrome.sl && typeof chrome.sl === 'object' ? chrome.sl : {};
+    const ok = v => /^#[0-9a-f]{6}$/i.test(v || '');
+    const H = 'html:not(#kp-frei).kp-ml-scroll', A = 'html:not(#kp-frei)', r = [];
+    const topInk = ok(c.topInk) ? c.topInk : ok(c.topBg) ? navInkFor(c.topBg) : '';
+    if (ok(c.topBg)) r.push(`${H} .kp-sl-top, ${H}.kp-nav-links .kp-navbar .kp-head { background: ${c.topBg}; }`);
+    if (topInk) r.push(`${H} :is(.kp-sl-top, .kp-sl-title, .kp-sl-sub, .kp-sl-prog span) { color: ${topInk}; }`, `${H} .kp-sl-prog i { background: color-mix(in srgb, ${topInk} 30%, transparent); }`, `${H} .kp-sl-prog i::after { background: ${topInk}; }`, `${H}.kp-nav-links .kp-navbar .kp-head .kp-iconbtn { color: ${topInk}; border-color: color-mix(in srgb, ${topInk} 32%, transparent); }`);
+    const ink = ok(c.ink) ? c.ink : ok(c.bg) ? navInkFor(c.bg) : '';
+    if (ok(c.bg)) r.push(`${H}.kp-nav-links .kp-navbar { background: ${c.bg}; }`, `${H} .kp-sl-item button:hover:not(:disabled), ${H} .kp-sl-item.current button { background: color-mix(in srgb, ${ink} 8%, ${c.bg}); }`);
+    if (ink) r.push(`${H} :is(.kp-sl-item button, .kp-sl-ico, .kp-sl-sec, .kp-ml-info, .kp-ml-info *) { color: ${ink}; }`, `${H} .kp-sl-item { border-bottom-color: color-mix(in srgb, ${ink} 14%, transparent); }`, `${H} .kp-sl-track { stroke: color-mix(in srgb, ${ink} 38%, transparent); }`);
+    if (ok(c.accent)) r.push(`${H} .kp-sl-item.current button { box-shadow: inset 5px 0 0 ${c.accent}; }`, `${H} .kp-sl-fill { stroke: ${c.accent}; }`, `${H} .kp-sl-ring.is-done .kp-sl-fill { fill: ${c.accent}; }`);
+    if (ok(c.icon)) r.push(`${H} .kp-sl-ico { color: ${c.icon}; }`);
+    if (ok(c.heroBg)) r.push(`${H} .kp-page-head.kp-sl-hero { background-color: ${c.heroBg}; }`, `${H} .kp-sl-hero::after { background: linear-gradient(90deg, color-mix(in srgb, ${c.heroBg} 95%, transparent) 0%, transparent 76%); }`, `@media (max-width: 760px) { ${H} .kp-sl-hero::after { background: linear-gradient(0deg, color-mix(in srgb, ${c.heroBg} 96%, transparent) 0%, transparent 84%); } }`);
+    const heroInk = ok(c.heroInk) ? c.heroInk : ok(c.heroBg) ? navInkFor(c.heroBg) : '';
+    if (heroInk) r.push(`${H} .kp-page-head.kp-sl-hero, ${H} .kp-page-head.kp-sl-hero :is(h1, .kp-sl-lead, .kp-sl-eyebrow, .kp-sl-pill, .kp-sl-dots span, .kp-sl-credit) { color: ${heroInk}; }`);
+    if (ok(c.badge)) r.push(`${H} .kp-sl-badge { background: ${c.badge}; color: ${navInkFor(c.badge)}; }`, `${H} .kp-page-head.kp-sl-hero h1::after, ${H} .kp-sl-dots i.now { background: ${c.badge}; }`);
+    [['momentBg', 'moment'], ['moveBg', 'move']].forEach(([k, n]) => {
+      if (!ok(c[k])) return;
+      const i2 = navInkFor(c[k]);
+      r.push(`${A} .kp-sl-mini.kp-sl-mini-${n} { background: ${c[k]}; color: ${i2}; }`, `${A} .kp-sl-mini.kp-sl-mini-${n} :is(.kp-sl-label, p.kp-sl-mtext) { color: ${i2}; }`);
+    });
+    return r.join('\n');
+  }
   const globalStyle = document.createElement('style');
-  globalStyle.textContent = res(chrome.css) + '\n' + res(course.css);
+  globalStyle.textContent = slColorCss() + '\n' + res(chrome.css) + '\n' + res(course.css);
   const pageStyle = document.createElement('style');
   if (!opts.renderer) {
     document.head.appendChild(globalStyle);
@@ -1023,10 +1081,10 @@ function kursPlayer(course, opts) {
   function openReason(i) {
     const p = pages[i];
     const hid = condHiddenIds(p); // durch eine Bedingung verborgen: hält nicht auf
-    if (items.some(it => it.pageIndex === i && !it.branch && !it.play && !hid.has(it.id) && state.answers[it.id] == null)) return 'Bitte beantworte zuerst die Fragen auf dieser Seite.';
-    if (items.some(it => it.pageIndex === i && it.play && !hid.has(it.id) && playFraction(it.play) == null)) return 'Bitte schließe zuerst die Übung auf dieser Seite ab.';
+    if (items.some(it => it.pageIndex === i && !it.branch && !it.play && !hid.has(it.id) && state.answers[it.id] == null)) return T('warteFragen');
+    if (items.some(it => it.pageIndex === i && it.play && !hid.has(it.id) && playFraction(it.play) == null)) return T('warteUebungAb');
     for (const br of branchesIn(p)) {
-      if (!hid.has(br.id) && ((br.options || []).some(o => o.target) || br.scored) && state.branch[br.id] == null) return 'Bitte triff zuerst eine Entscheidung.';
+      if (!hid.has(br.id) && ((br.options || []).some(o => o.target) || br.scored) && state.branch[br.id] == null) return T('warteEntscheidungBitte');
     }
     // Ein Abschnitt, der erst nach einer Übung erscheint, hält auf, bis diese Übung gemacht ist –
     // sonst käme man an dem verborgenen Teil vorbei, ohne ihn je gesehen zu haben.
@@ -1039,10 +1097,10 @@ function kursPlayer(course, opts) {
     for (const b of (p.blocks || []).filter(x => !hid.has(x.id))) {
       // „Weiter erst, wenn bearbeitet“ – gilt für jeden Baustein mit etwas zu tun
       if (b.required && !['reflection', 'actionplan', 'mission', 'game', 'casebank'].includes(b.type) && !blockDone(b)) return waitReason(b);
-      if ((b.type === 'reflection' || b.type === 'actionplan') && b.required && state.texts[b.id] == null) return 'Bitte bearbeite zuerst die Aufgabe auf dieser Seite.';
+      if ((b.type === 'reflection' || b.type === 'actionplan') && b.required && state.texts[b.id] == null) return T('warteAufgabe');
       if (b.type === 'ivideo' && b.requireWatch && !state.watched[b.id]) return T('warteVideo2');
-      if (b.type === 'mission' && b.skippable === false && !(state.self.mm || {})[b.id]) return 'Bitte schließe zuerst die Mini-Mission auf dieser Seite ab.';
-      if (b.type === 'game' && b.required && !(state.self.mm || {})[b.id]) return 'Bitte spiele zuerst das Level-Spiel auf dieser Seite zu Ende.';
+      if (b.type === 'mission' && b.skippable === false && !(state.self.mm || {})[b.id]) return T('warteMission');
+      if (b.type === 'game' && b.required && !(state.self.mm || {})[b.id]) return T('warteSpiel');
       if (b.type === 'casebank' && b.required && cbDoneCount(b) < cbGoal(b)) return T('cbZiel').replace('{z}', cbGoal(b));
       if (b.type === 'schloss' && !blockDone(b)) return T('warteSchloss');
     }
@@ -1305,6 +1363,7 @@ function kursPlayer(course, opts) {
     if (t === 'debrief') return T('warteKarteZweig');
     if (t === 'hotspots') return T(b.mode === 'folge' ? 'warteFolge' : 'wartePunkte');
     if (t === 'modell3d') return T('warteModell');
+    if (t === 'scribble') return T('warteScribble');
     if (t === 'lottie' || t === 'anim') return T('warteSchritte');
     if (t === 'triage') return T('warteKarten');
     if (t === 'promptbuild') return T('warteBausteine');
@@ -1485,13 +1544,21 @@ function kursPlayer(course, opts) {
   const IMG_RATIOS = { '16:9': '16 / 9', '4:3': '4 / 3', '3:2': '3 / 2', '1:1': '1 / 1', '3:4': '3 / 4', '21:9': '21 / 9' };
   const IMG_FILTERS = { sw: 'grayscale(1)', hell: 'brightness(1.12) saturate(1.05)', kontrast: 'contrast(1.18) saturate(1.12)', warm: 'sepia(.22) saturate(1.15)', kuehl: 'saturate(.88) hue-rotate(-10deg) brightness(1.04)', weich: 'contrast(.92) brightness(1.06) saturate(.9)' };
   const imgW = o => { const w = Number(o && o.width); return w >= 10 && w < 100 ? Math.round(w) : 0; };
+  // Korrekturen wie in PowerPoint (bright, contrast, sat in Prozent, 100 = unverändert; Helligkeit und Kontrast 50–150,
+  // Sättigung 0–200) laufen zusammen mit dem Filter über --kp-img-filter. fit: 'ganz' zeigt das Bild ganz statt angeschnitten.
+  const corrVal = (v, lo, hi) => { const n = Number(v); return v == null || v === '' || !Number.isFinite(n) ? 100 : Math.min(hi, Math.max(lo, Math.round(n))); };
+  function imgCorr(img) {
+    const b = corrVal(img.bright, 50, 150), c = corrVal(img.contrast, 50, 150), s = corrVal(img.sat, 0, 200);
+    return [b !== 100 ? `brightness(${b / 100})` : '', c !== 100 ? `contrast(${c / 100})` : '', s !== 100 ? `saturate(${s / 100})` : ''].filter(Boolean).join(' ');
+  }
   function imgAdj(img) {
     if (!img) return { cls: '', style: '' };
     const st = [], z = Math.min(4, Math.max(1, Number(img.zoom) || 1)), pos = img.focus ? esc(img.focus) : '';
     if (pos) st.push('object-position:' + pos);
     if (z > 1 || img.flip) st.push(`--kp-img-tf:scale(${img.flip ? -z : z}, ${z})`, '--kp-img-org:' + (pos || '50% 50%'));
-    if (IMG_FILTERS[img.filter]) st.push('--kp-img-filter:' + IMG_FILTERS[img.filter]);
-    const cls = (z > 1 || img.flip ? ' kp-img-tf' : '') + (IMG_FILTERS[img.filter] ? ' kp-img-filt' : '');
+    const filt = [IMG_FILTERS[img.filter] || '', imgCorr(img)].filter(Boolean).join(' ');
+    if (filt) st.push('--kp-img-filter:' + filt);
+    const cls = (z > 1 || img.flip ? ' kp-img-tf' : '') + (filt ? ' kp-img-filt' : '') + (img.fit === 'ganz' ? ' kp-img-fit' : '');
     return { cls, style: st.length ? ` style="${st.join(';')}"` : '' };
   }
   function frameAdj(img) {
@@ -1501,6 +1568,18 @@ function kursPlayer(course, opts) {
     if (img && ['left', 'right'].includes(img.align)) cls.push('kp-img-al-' + img.align);
     if (img && (Number(img.zoom) > 1)) cls.push('kp-img-zoomed');
     return { cls: cls.length ? ' ' + cls.join(' ') : '', style: st.length ? ` style="${st.join(';')}"` : '' };
+  }
+  // Platzhalter für das Bild einer Folie als SVG (Hintergrund): Kamera, Art und die Idee in Zeilen, nur in der Vorschau
+  function slideIdeaSvg(o, compact) {
+    const words = plainText(o.idea).split(/\s+/), lines = [];
+    words.forEach(w => { const l = lines[lines.length - 1]; if (l && (l + ' ' + w).length <= 34) lines[lines.length - 1] = l + ' ' + w; else lines.push(w); });
+    const xe = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+    const txt = lines.slice(0, 6).map((l, i) => `<text x="400" y="${388 + i * 40}" text-anchor="middle" font-family="system-ui, Segoe UI, Arial, sans-serif" font-size="28" fill="#3a4254">${xe(l)}</text>`).join('');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" preserveAspectRatio="xMidYMid slice"><rect width="800" height="800" fill="#e7ebf2"/><rect x="24" y="24" width="752" height="752" rx="18" fill="none" stroke="#9aa6bb" stroke-width="4" stroke-dasharray="16 12"/><g fill="none" stroke="#5b6780" stroke-width="5" stroke-linejoin="round" transform="translate(352 220) scale(4)"><path d="M4 7.5h3l1.5-2h7l1.5 2h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></g><text x="400" y="340" text-anchor="middle" font-family="system-ui, Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="2" fill="#5b6780">${o.ideaKind === 'illustration' ? 'BILDIDEE · ILLUSTRATION' : 'BILDIDEE · FOTO'}</text>${txt}</svg>`;
+    // Hinter einer Übung: nur ein schmales Band oben mit Art und Idee, die Mitte bleibt für die Übung frei
+    const one = xe(plainText(o.idea).slice(0, 70) + (plainText(o.idea).length > 70 ? ' …' : ''));
+    const band = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMin slice"><rect width="1600" height="900" fill="#c9d1de"/><rect x="20" y="20" width="1560" height="860" rx="18" fill="none" stroke="#7d899f" stroke-width="5" stroke-dasharray="20 14"/><text x="800" y="96" text-anchor="middle" font-family="system-ui, Segoe UI, Arial, sans-serif" font-size="30" font-weight="700" letter-spacing="2" fill="#1f2635">${o.ideaKind === 'illustration' ? 'BILDIDEE · ILLUSTRATION' : 'BILDIDEE · FOTO'}: ${one}</text></svg>`;
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(compact ? band : svg).replace(/'/g, '%27').replace(/\(/g, '%28').replace(/\)/g, '%29');
   }
   function ideaBox(o, kind, cls) {
     if (!opts.preview || !o || o.src || !plainText(o.idea)) return '';
@@ -1525,7 +1604,9 @@ function kursPlayer(course, opts) {
     const drawing = /\.svg(\?|$)|^data:image\/svg/i.test(String(img.src || '')) ? ' kp-drawing' : '';
     // Form hinter oder um die Illustration (Vorbild bildungsinnovator „EU AI Act“, „Kognitive Flexibilität“)
     const shape = IMG_SHAPES.includes(img.shape) ? ' kp-form kp-form-' + img.shape : '';
-    return `<figure class="kp-fig${drawing}${shape} ${cls || ''} ${img.treat ? 'kp-treat-' + esc(img.treat) : ''} ${img.ai ? 'kp-ai' : ''}${frame.open ? ' kp-framed' : ''}">${frame.open}<div class="kp-fig-frame${fa.cls}"${glitch}><img loading="lazy" decoding="async" class="${ia.cls.trim()}" src="${esc(res(img.src))}" alt="${esc(img.alt)}"${ia.style}>${img.ai ? `<span class="kp-ai-badge">${T('kiBild')}</span>` : ''}
+    // Einfärben (img.tint: duo = in der Hauptfarbe, duotone = Haupt- und Akzentfarbe) gilt zusätzlich zu den Ecken aus treat
+    const tint = ['duo', 'duotone'].includes(img.tint) && img.tint !== img.treat ? ' kp-treat-' + img.tint : '';
+    return `<figure class="kp-fig${drawing}${shape}${tint} ${cls || ''} ${img.treat ? 'kp-treat-' + esc(img.treat) : ''} ${img.ai ? 'kp-ai' : ''}${frame.open ? ' kp-framed' : ''}">${frame.open}<div class="kp-fig-frame${fa.cls}"${glitch}><img loading="lazy" decoding="async" class="${ia.cls.trim()}" src="${esc(res(img.src))}" alt="${esc(img.alt)}"${ia.style}>${img.ai ? `<span class="kp-ai-badge">${T('kiBild')}</span>` : ''}
       <button type="button" class="kp-zoom" data-zoom aria-label="Bild vergrößern"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M11 8.5v5M8.5 11h5"/></svg></button></div>${frame.close}
       ${cap.length ? `<figcaption>${img.caption ? esc(img.caption) : ''}${img.credit ? `<span class="kp-credit">${esc(cap[cap.length - 1])}</span>` : ''}</figcaption>` : ''}</figure>`;
   }
@@ -1546,11 +1627,34 @@ function kursPlayer(course, opts) {
     return url;
   }
 
+  const trimSec = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.round(n * 10) / 10 : 0; };
+  function setupVideoTrim(scope) {
+    scope.querySelectorAll('video[data-vtrim]:not([data-vtrim-on])').forEach(v => {
+      v.dataset.vtrimOn = '1';
+      const s = Number(v.dataset.vs) || 0, e = Number(v.dataset.ve) || 0, loop = v.hasAttribute('data-vloop');
+      const seek = t => { try { v.currentTime = t; } catch (x) { /* noch nicht geladen */ } };
+      if (v.readyState >= 1) { if (s && v.currentTime < s) seek(s); } else v.addEventListener('loadedmetadata', () => { if (s && v.currentTime < s) seek(s); }, { once: true });
+      // je Videobild nachsehen (genauer als timeupdate, das nur rund viermal je Sekunde kommt)
+      const watch = () => { if (!e || v.paused) return; if (v.currentTime >= e) { atEnd(); return; } if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(watch); };
+      v.addEventListener('play', () => { if ((s && v.currentTime < s - .3) || (e && v.currentTime >= e - .05)) seek(s); watch(); });
+      const atEnd = () => {
+        if (loop) { seek(s); v.play().catch(() => {}); return; }
+        v.pause(); v.dispatchEvent(new Event('kp-vtrim-ende'));
+      };
+      v.addEventListener('timeupdate', () => { if (e && v.currentTime >= e && !v.paused) atEnd(); });
+      v.addEventListener('ended', () => { if (loop) atEnd(); });
+    });
+  }
   function renderMedia(m) {
     m = m || {};
     // Vollbild-Knopf am Video (Prüfung 19.10.2026): startet das Video gleich im Vollbild, auch auf dem iPhone (webkitEnterFullscreen)
-    if (m.kind === 'video' && m.src) return `<div class="kp-vid${frameAdj(m).cls}" data-vid${frameAdj(m).style}><video controls playsinline${m.loop ? ' loop' : ''}${m.autoplay ? ' autoplay muted' : ''} ${m.poster ? `poster="${esc(res(m.poster))}"` : ''}${m.focus ? ` style="object-position:${esc(m.focus)}"` : ''} src="${esc(res(m.src))}">${trackHtml(m.captions, m.captionsText)}</video>${vidFsOk() ? `<button type="button" class="kp-vid-full" data-vid-full>${icon('expand')}<span>${esc(T('vollbildAnsehen'))}</span></button>` : ''}</div>`;
+    // Video kürzen (media.start, media.end in Sekunden): setupVideoTrim() springt an den Anfang und hält am Ende an;
+    // mit Schleife läuft dann nur der Ausschnitt im Kreis, deshalb ohne das loop-Attribut
+    const vs = trimSec(m.start), ve = trimSec(m.end), trim = vs || (ve && ve > vs);
+    if (m.kind === 'video' && m.src) return `<div class="kp-vid${frameAdj(m).cls}" data-vid${frameAdj(m).style}><video controls playsinline${trim ? ` data-vtrim data-vs="${vs}" data-ve="${ve > vs ? ve : 0}"${m.loop ? ' data-vloop' : ''}` : m.loop ? ' loop' : ''}${m.autoplay ? ' autoplay muted' : ''} ${m.poster ? `poster="${esc(res(m.poster))}"` : ''}${m.focus ? ` style="object-position:${esc(m.focus)}"` : ''} src="${esc(res(m.src))}">${trackHtml(m.captions, m.captionsText)}</video>${vidFsOk() ? `<button type="button" class="kp-vid-full" data-vid-full>${icon('expand')}<span>${esc(T('vollbildAnsehen'))}</span></button>` : ''}</div>`;
     if (m.kind === 'video' && !m.src && ideaBox(m, 'video')) return ideaBox(m, 'video');
+    // Leeres Video oder leere Adresse in der Vorschau: Kasten zum Hochladen statt einer Zeile ohne Ausweg (UX-Prüfung 02.11.2026)
+    if (opts.preview && ((m.kind === 'video' && !m.src && !plainText(m.transcript)) || (m.kind === 'embed' && !m.url))) return ideaBox(Object.assign({}, m, { idea: 'Video hochladen oder im Formular eine Adresse eintragen', format: m.format || 'quer' }), 'video');
     if (m.kind === 'video' && plainText(m.transcript)) return videoDummy(m.transcript, m.poster);
     if (m.kind === 'audio' && m.src) return `<audio controls src="${esc(res(m.src))}"></audio>${m.transcript ? `<details class="kp-acc"><summary>Transkript</summary><div class="kp-text">${res(m.transcript)}</div></details>` : ''}`;
     if (m.kind === 'embed' && m.url) return `<div class="kp-embed"><iframe src="${esc(embedUrl(m.url))}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen title="Video"></iframe></div>`;
@@ -1558,7 +1662,7 @@ function kursPlayer(course, opts) {
     if (m.kind === 'compare' && m.before && m.after) {
       return `<div class="kp-compare" data-compare><img loading="lazy" decoding="async" src="${esc(res(m.before))}" alt="vorher"><div class="kp-after" style="width:50%"><img loading="lazy" decoding="async" src="${esc(res(m.after))}" alt="nachher"></div><input type="range" min="0" max="100" value="50" aria-label="Vergleich verschieben"></div>`;
     }
-    return '<p class="kp-label">Für diesen Block ist noch kein Medium hinterlegt.</p>';
+    return '<p class="kp-label">Für diesen Baustein ist noch kein Medium hinterlegt.</p>';
   }
 
   const itemsHtml = (list, fn) => (list || []).map(fn).join('');
@@ -1568,15 +1672,16 @@ function kursPlayer(course, opts) {
   const cardsRv = b => (b.items || []).map((it, i) => plainText(it.reveal) ? i : -1).filter(i => i >= 0);
   function cardRvHtml(b, it, i, open) {
     if (!plainText(it.reveal)) return '';
-    return open ? `<p class="kp-card-rv on" tabindex="-1">${icon('arrow-circle')}<span>${esc(plainText(it.reveal))}</span></p>`
-      : `<button type="button" class="kp-card-rv" data-card-rv="${i}" aria-expanded="false">${icon('arrow-circle')}<span>${esc(b.revealLabel || T('karteDahinter'))}</span></button>`;
+    return open ? `<p class="kp-card-rv on" tabindex="-1">${iconOr(b.revealIcon, 'arrow-circle')}<span>${esc(plainText(it.reveal))}</span></p>`
+      : `<button type="button" class="kp-card-rv" data-card-rv="${i}" aria-expanded="false">${iconOr(b.revealIcon, 'arrow-circle')}<span>${esc(b.revealLabel || T('karteDahinter'))}</span></button>`;
   }
   // Fuß einer Karte (Vorbild Fernhill „Need-to-know“): Quellenlink mit Pfeil (items[].link, linkLabel) und Pille mit Haken
   // (items[].tag, etwa „Hausregel“); eine Karte mit Pille trägt kp-card-tagged (grüne Oberkante im Scroll-Look)
-  function cardFoot(it) {
+  function cardFoot(it, b) {
+    b = b || {};
     const link = String(it.link || '').trim(), tag = plainText(it.tag);
     if (!link && !tag) return '';
-    return `<div class="kp-card-foot">${link ? `<a class="kp-card-src" href="${esc(link)}" target="_blank" rel="noopener">${esc(it.linkLabel || T('quelle'))}${icon('arrow-ur')}</a>` : ''}${tag ? `<span class="kp-card-tag">${icon('check')}${esc(it.tag)}</span>` : ''}</div>`;
+    return `<div class="kp-card-foot">${link ? `<a class="kp-card-src" href="${esc(link)}" target="_blank" rel="noopener">${esc(it.linkLabel || T('quelle'))}${icon('arrow-ur')}</a>` : ''}${tag ? `<span class="kp-card-tag">${iconOr(b.tagIcon, 'check')}${esc(it.tag)}</span>` : ''}</div>`;
   }
   function renderCards(b) {
     const rv = cardsRv(b), open = (state.self[b.id] || {}).open || [];
@@ -1636,9 +1741,9 @@ function kursPlayer(course, opts) {
       // Methoden nebeneinander (Vorbild Rise „Mit Struktur zum Ziel“): großes Liniensymbol, darunter „Typ 1:“ und der Name in
       // Versalien, kurzer Text und ein rundes Plus, das die Aufdeckzeile öffnet. Ohne Kasten, auf dunkler Folie hell.
       const lab = plainText(b.numLabel);
-      return `${status}<div class="kp-cards kp-cards-methode${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}" style="--n:${Math.min(3, Math.max(1, (b.items || []).length))}">${itemsHtml(b.items, (it, i) => {
+      return `${status}<div class="kp-cards kp-cards-methode${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}" style="--n:${Math.min(4, Math.max(1, (b.items || []).length))}">${itemsHtml(b.items, (it, i) => {
         const has = plainText(it.reveal), on = open.includes(i);
-        return `<div class="kp-card kp-card-methode fx-reveal">${it.icon ? `<span class="kp-mt-icon" aria-hidden="true">${icon(it.icon)}</span>` : ''}<h3>${lab ? `<span class="kp-mt-num">${esc(lab)} ${i + 1}:</span>` : ''}${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${has && !on ? `<button type="button" class="kp-mt-plus" data-card-rv="${i}" aria-expanded="false" aria-label="${esc((b.revealLabel || T('karteDahinter')) + ': ' + plainText(it.title))}"><span aria-hidden="true"></span></button>` : ''}${has && on ? cardRvHtml(b, it, i, true) : ''}</div>`;
+        return `<div class="kp-card kp-card-methode fx-reveal">${it.icon ? `<span class="kp-mt-icon" aria-hidden="true">${icon(it.icon)}</span>` : ''}<h3>${lab ? `<span class="kp-mt-num">${esc(lab)} ${i + 1}:</span>` : ''}${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${has && !on ? `<button type="button" class="kp-mt-plus" data-card-rv="${i}" aria-expanded="false" aria-label="${esc((b.revealLabel || T('karteDahinter')) + ': ' + plainText(it.title))}"><span aria-hidden="true"></span></button>` : ''}${has && on ? cardRvHtml(b, it, i, true) : ''}${cardFoot(it, b)}</div>`;
       })}</div>`;
     }
     if (b.look === 'nummer') {
@@ -1646,7 +1751,7 @@ function kursPlayer(course, opts) {
       // steht eine riesige Ziffer in der Hauptfarbe, das Foto ragt unten links hinein; Titel und Text darunter, Aufdeckzeile wie sonst
       return `${status}<div class="kp-cards kp-cards-nummer${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}" style="--n:${Math.min(3, Math.max(1, (b.items || []).length))}">${itemsHtml(b.items, (it, i) => `<div class="kp-card kp-card-nummer fx-reveal" style="--kp-i:${i}"><div class="kp-nc-stage"><span class="kp-nc-num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span>${it.image && it.image.src ? `<img class="kp-nc-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}</div><h3>${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${cardRvHtml(b, it, i, open.includes(i))}</div>`)}</div>`;
     }
-    return `${status}<div class="kp-cards${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}">${itemsHtml(b.items, (it, i) => `<div class="kp-card fx-reveal fx-hover-lift${it.icon ? ' kp-card-iconed' : ''}${it.icon && !plainText(it.html) ? ' kp-card-tile' : ''}${it.image && it.image.src ? ' kp-card-pic' : ''}${plainText(it.tag) ? ' kp-card-tagged' : ''}">${it.image && it.image.src ? `<img class="kp-card-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}${plainText(it.badge) ? `<span class="kp-card-badge">${esc(it.badge)}</span>` : ''}${it.icon ? `<span class="kp-card-icon" aria-hidden="true">${icon(it.icon, 'kp-ico-lg')}</span>` : ''}<h3>${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${cardRvHtml(b, it, i, open.includes(i))}${cardFoot(it)}</div>`)}</div>${calloutHtml(b)}`;
+    return `${status}<div class="kp-cards${rv.length ? ' kp-cards-rv' : ''}" data-cards="${b.id}">${itemsHtml(b.items, (it, i) => `<div class="kp-card fx-reveal fx-hover-lift${it.icon ? ' kp-card-iconed' : ''}${it.icon && !plainText(it.html) ? ' kp-card-tile' : ''}${it.image && it.image.src ? ' kp-card-pic' : ''}${plainText(it.tag) ? ' kp-card-tagged' : ''}">${it.image && it.image.src ? `<img class="kp-card-img" src="${esc(res(it.image.src))}" alt="${esc(it.image.alt || '')}" loading="lazy"${focusStyle(it.image)}>` : ''}${plainText(it.badge) ? `<span class="kp-card-badge">${esc(it.badge)}</span>` : ''}${it.icon ? `<span class="kp-card-icon" aria-hidden="true">${icon(it.icon, 'kp-ico-lg')}</span>` : ''}<h3>${esc(it.title)}</h3>${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}${cardRvHtml(b, it, i, open.includes(i))}${cardFoot(it, b)}</div>`)}</div>${calloutHtml(b)}`;
   }
 
   function renderBlock(b) {
@@ -1733,6 +1838,7 @@ function kursPlayer(course, opts) {
       case 'layers': return renderLayers(b);
       case 'aufdecken': return renderAufdecken(b);
       case 'modell3d': return renderModell3d(b);
+      case 'scribble': return renderScribble(b);
       case 'comicstrip': return renderStrip(b);
       case 'sortcats': return renderSort(b);
       case 'triage': return renderTriage(b);
@@ -1785,12 +1891,12 @@ function kursPlayer(course, opts) {
     if (q.kind === 'multiple' && q.look === 'regal') return T('regalWaehle').replace('{n}', regalPick(q));
     if (set.sameBoxes && (q.kind === 'multiple' || sameBoxes(q))) return T('alleRichtigen');
     return {
-      multiple: 'Mehrere Antworten sind richtig', single: 'Eine Antwort ist richtig', truefalse: 'Wahr oder falsch?',
-      fill: 'Lücken ausfüllen', numeric: 'Zahl eingeben', order: 'In die richtige Reihenfolge bringen', match: 'Passendes zuordnen', hotspot: 'Die richtige Stelle im Bild anklicken', pins: 'Nummern an die passende Stelle im Bild bringen', claims: T('jedeAussage')
-    }[q.kind] || 'Eine Antwort ist richtig';
+      multiple: T('qhMehrere'), single: T('qhEine'), truefalse: T('qhWahrFalsch'),
+      fill: T('qhLuecken'), numeric: T('qhZahl'), order: T('qhReihenfolge'), match: T('qhZuordnen'), hotspot: T('qhStelle'), pins: T('qhNummern'), claims: T('jedeAussage')
+    }[q.kind] || T('qhEine');
   }
 
-  const CONF = ['Geraten', 'Eher sicher', 'Sicher'];
+  const CONF = { get 0() { return T('confGeraten'); }, get 1() { return T('confEher'); }, get 2() { return T('confSicher'); } };
 
   // Serie: wie viele Fragen in Kursreihenfolge bis zu dieser am Stück richtig sind (settings.streak, kein Vergleich mit anderen)
   function streakOf(q) {
@@ -1805,13 +1911,23 @@ function kursPlayer(course, opts) {
     }
     return n;
   }
+  // Lösung erst nach dem letzten Versuch (Kerstin 12.11.2026): solange „Nochmal versuchen“ möglich ist, zeigt die Frage nur,
+  // was an der eigenen Antwort stimmt. Richtige Antwort, Lösungswort, richtiger Platz und die Begründung des Kurses kommen
+  // nach dem letzten Versuch, nach der richtigen Antwort oder bei unbegrenzten Versuchen über „Lösung zeigen“ (ab dem zweiten Fehlversuch).
+  const solShown = {};
   function renderQuiz(q, isGraded) {
     const given = state.answers[q.id];
     const done = given != null;
+    const maxTry = Number(q.attempts) || 0, triesNow = state.tries[q.id] || 0;
+    // „Weiß ich nicht“ ist kein Fehlversuch, sondern die Bitte um die Lösung: sie steht dann sofort da
+    const gaveUp = Array.isArray(given) && given.length === 1 && given[0] === -1 && !!q.dontKnow;
+    const hideSol = done && !gaveUp && evaluate(q, given) < 1 && (maxTry === 0 || triesNow < maxTry) && !solShown[q.id];
     // Postfach (Vorbild Storyline-Phishing-Übung): Etiketten auf Stellen einer Mail; als Übung sofort je Etikett Rückmeldung durch die Figur
     const mailLook = q.kind === 'match' && q.dragdrop && q.look === 'postfach';
     const mailLive = mailLook && !isGraded && q.instant !== false;
     const tries = state.tries[q.id] || 0;
+    // Mischung: nach dem Prüfen bleibt die gezeigte Reihenfolge stehen (der Versuch ist schon gezählt), neu gemischt wird erst beim neuen Versuch
+    const mixTries = done ? Math.max(0, tries - 1) : tries;
     if (!state.seen[q.id]) state.seen[q.id] = Date.now();
     let body = '';
 
@@ -1825,7 +1941,7 @@ function kursPlayer(course, opts) {
         i++;
         if (!done) return choices ? `<select data-blank="${i}" aria-label="Lücke ${i + 1}"><option value="">…</option>${choices.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>` : `<input type="text" data-blank="${i}" autocomplete="off" aria-label="Lücke ${i + 1}">`;
         const ok = sol[i].some(s => normStr(s) === normStr(given[i]));
-        return `<input type="text" value="${esc(given[i] || '')}" disabled class="${ok ? 'kp-right' : 'kp-wrong'}" aria-label="Lücke ${i + 1}: ${ok ? 'richtig' : 'falsch'}">` + (ok ? '' : ` <span class="kp-solution">(${esc(sol[i][0])})</span>`);
+        return `<input type="text" value="${esc(given[i] || '')}" disabled class="${ok ? 'kp-right' : 'kp-wrong'}" aria-label="Lücke ${i + 1}: ${ok ? 'richtig' : 'falsch'}">` + (ok || hideSol ? '' : ` <span class="kp-solution">(${esc(sol[i][0])})</span>`);
       }) + '</p>';
     } else if (q.kind === 'numeric') {
       // Zahl mit Toleranz (Fristen, Grenzwerte, Mengen): ein Eingabefeld, Einheit dahinter, nach dem Prüfen der erlaubte Bereich
@@ -1834,7 +1950,7 @@ function kursPlayer(course, opts) {
       const range = tol ? `${fmtNum(ans - tol)} ${T('bis')} ${fmtNum(ans + tol)}` : fmtNum(ans);
       body = `<p class="kp-numeric"><label><span class="kp-label">${esc(q.prompt || T('deineZahl'))}</span>
         <input type="text" inputmode="decimal" data-num="${q.id}" value="${done ? esc(given[0] || '') : ''}" ${done ? 'disabled' : ''} class="${done ? (ok ? 'kp-right' : 'kp-wrong') : ''}" autocomplete="off" aria-label="${esc(q.prompt || T('deineZahl'))}${q.unit ? ' in ' + esc(q.unit) : ''}"></label>${q.unit ? `<em class="kp-num-unit">${esc(q.unit)}</em>` : ''}
-        ${done && !ok ? `<span class="kp-solution">(${T('richtigWaere')}: ${esc(range)}${q.unit ? ' ' + esc(q.unit) : ''})</span>` : ''}</p>`;
+        ${done && !ok && !hideSol ? `<span class="kp-solution">(${T('richtigWaere')}: ${esc(range)}${q.unit ? ' ' + esc(q.unit) : ''})</span>` : ''}</p>`;
     } else if (q.kind === 'order') {
       const order = done ? given : shuffled((q.items || []).length, q.id + tries);
       // Pfeil (Vorbild PUMA „Structure your talk“): Start oben, Ende unten, die Schritte als Streifen am Pfeil;
@@ -1855,7 +1971,7 @@ function kursPlayer(course, opts) {
       const list = `<div class="kp-order" data-order>${order.map((idx, pos) => `
         <div class="kp-order-item ${done ? (idx === pos ? 'kp-right' : 'kp-wrong') : ''}" draggable="${!done}" data-item="${idx}">
           <span class="kp-grip" aria-hidden="true">≡</span><span>${esc(q.items[idx])}</span>
-          ${done ? (pfeil && idx !== pos ? `<b class="kp-order-pos">${T('gehoertAn')} ${idx + 1}</b>` : '') : '<span class="kp-move"><button data-up aria-label="nach oben">▲</button><button data-down aria-label="nach unten">▼</button></span>'}
+          ${done ? (pfeil && idx !== pos && !hideSol ? `<b class="kp-order-pos">${T('gehoertAn')} ${idx + 1}</b>` : '') : '<span class="kp-move"><button data-up aria-label="nach oben">▲</button><button data-down aria-label="nach unten">▼</button></span>'}
         </div>`).join('')}</div>`;
       body = pfeil ? `<div class="kp-pfeil"><span class="kp-pfeil-end kp-pfeil-top">${esc(q.startLabel || T('start'))}</span>${list}<span class="kp-pfeil-end kp-pfeil-bottom">${esc(q.endLabel || T('ende'))}</span></div>` : list;
       }
@@ -1888,7 +2004,7 @@ function kursPlayer(course, opts) {
             <ul class="kp-mdd-drop" data-mdd-drop="${i}" data-quiz="${q.id}" aria-label="${esc(pair.left)}">
               ${placed[i] >= 0 ? card(placed[i]) : (done ? `<li class="kp-sort-empty">${T('nichtZugeordnet')}</li>` : '')}
             </ul>
-            ${done && given[i] !== i ? `<span class="kp-solution">(${esc(pair.right)})</span>` : ''}
+            ${done && given[i] !== i && !hideSol ? `<span class="kp-solution">(${esc(pair.right)})</span>` : ''}
           </div>`).join('')}</div>
       </div>`;
     } else if (q.kind === 'match' && q.look === 'linien') {
@@ -1902,7 +2018,7 @@ function kursPlayer(course, opts) {
       const right = rights.map(r => `<button type="button" class="kp-ml-item kp-ml-right" data-ml-right="${r}" ${done ? 'disabled' : ''}>${esc(q.pairs[r].right)}</button>`).join('');
       body = `<div class="kp-match-lines${done ? ' kp-ml-done' : ''}" data-ml="${q.id}"><p class="kp-ml-hint">${T('linieHinweis')}</p>
         <div class="kp-ml-grid"><div class="kp-ml-col">${left}</div><div class="kp-ml-col">${right}</div><svg class="kp-ml-svg" aria-hidden="true"></svg></div>
-        ${done ? `<ol class="kp-ml-sol">${(q.pairs || []).map((pair, i) => given[i] === i ? '' : `<li>${esc(pair.left)} → <b>${esc(pair.right)}</b></li>`).join('')}</ol>` : ''}</div>`;
+        ${done && !hideSol ? `<ol class="kp-ml-sol">${(q.pairs || []).map((pair, i) => given[i] === i ? '' : `<li>${esc(pair.left)} → <b>${esc(pair.right)}</b></li>`).join('')}</ol>` : ''}</div>`;
     } else if (q.kind === 'match') {
       const rights = shuffled((q.pairs || []).length, q.id);
       const pairImg = pair => pair.image && pair.image.src ? `<img class="kp-match-img" loading="lazy" decoding="async" src="${esc(res(pair.image.src))}" alt="${esc(pair.image.alt || '')}">` : '';
@@ -1922,7 +2038,7 @@ function kursPlayer(course, opts) {
         const opt = (val, lab) => `<label class="kp-claim-opt"><input type="radio" name="cl-${q.id}-${i}" value="${val}" ${v === val ? 'checked' : ''} ${done ? 'disabled' : ''}><span>${esc(lab)}</span></label>`;
         return `<div class="kp-claim${done ? (ok ? ' kp-right' : ' kp-wrong') : ''}" style="--kp-i:${Math.min(i, 8)}" role="radiogroup" aria-labelledby="cl-${q.id}-${i}-t">
           <span class="kp-claim-text" id="cl-${q.id}-${i}-t">${esc(x.text)}</span><span class="kp-claim-btns">${opt(1, yes)}${opt(0, no)}</span>
-          ${done && (x.feedback || !ok) ? `<span class="kp-claim-fb">${ok ? '' : `${T('richtigWaere')}: <b>${esc(x.yes === false ? no : yes)}</b>. `}${esc(x.feedback || '')}</span>` : ''}</div>`;
+          ${done && (x.feedback || !ok) && !(hideSol && !ok) ? `<span class="kp-claim-fb">${ok ? '' : `${T('richtigWaere')}: <b>${esc(x.yes === false ? no : yes)}</b>. `}${esc(x.feedback || '')}</span>` : ''}</div>`;
       }).join('')}</div>`;
     } else if (q.kind === 'pins') {
       // Nummern ins Bild (Vorbild „Drag and drop on image“): links die nummerierten Aussagen, rechts das Bild mit Zielen
@@ -1931,7 +2047,7 @@ function kursPlayer(course, opts) {
     } else if (q.kind === 'hotspot') {
       const img = q.image && q.image.src ? res(q.image.src) : '';
       const mark = done ? `<span class="kp-marker ${evaluate(q, given) ? 'kp-right' : 'kp-wrong'}" style="left:${given[0]}%;top:${given[1]}%;width:34px;height:34px"></span>` : '';
-      const sol = done ? (q.spots || []).filter(s => s.correct).map(s => `<span class="kp-marker kp-right" style="left:${s.x}%;top:${s.y}%;width:${(Number(s.r) || 8) * 2}%;aspect-ratio:1"></span>`).join('') : '';
+      const sol = done && !hideSol ? (q.spots || []).filter(s => s.correct).map(s => `<span class="kp-marker kp-right" style="left:${s.x}%;top:${s.y}%;width:${(Number(s.r) || 8) * 2}%;aspect-ratio:1"></span>`).join('') : '';
       const cross = state.cross[q.id] || [50, 50];
       body = img ? `<div class="kp-hotspot" data-hotspot="${q.id}" ${done ? '' : 'tabindex="0" role="application" aria-label="Bild. Mit den Pfeiltasten das Fadenkreuz bewegen, mit der Eingabetaste die Stelle wählen."'}>
           <img src="${esc(img)}" alt="${esc(q.image.alt)}">${sol}${mark}${done ? '' : `<span class="kp-cross" style="left:${cross[0]}%;top:${cross[1]}%"></span>`}</div>` : '<p class="kp-label">Kein Bild hinterlegt.</p>';
@@ -1949,7 +2065,7 @@ function kursPlayer(course, opts) {
       // Farbbalken (q.look 'balken', Vorbild LUCYDATE): jede Antwort als volle Fläche in der Hauptfarbe mit heller Schrift
       const notes = q.look === 'notizen' && q.kind === 'multiple';
       const lookCls = notes ? ' kp-ans-notizen' : regler ? ' kp-ans-regler' : q.look === 'bilder' ? ' kp-ans-cards' : q.look === 'balken' ? ' kp-ans-balken' : q.look === 'raster' ? ' kp-ans-raster' : q.look === 'pillen' ? ' kp-ans-pillen' : '';
-      const order = q.shuffle && q.kind !== 'truefalse' && !regler ? shuffled(ans.length, q.id + tries) : ans.map((a, i) => i);
+      const order = q.shuffle && q.kind !== 'truefalse' && !regler ? shuffled(ans.length, q.id + mixTries) : ans.map((a, i) => i);
       const perAnswer = q.answerFeedback || q.kind === 'truefalse';
       const ansImg = a => (a.image && a.image.src ? `<img class="kp-answer-img" loading="lazy" decoding="async" src="${esc(res(a.image.src))}" alt="${esc(a.image.alt || '')}">` : '');
       // „Weiß ich nicht“ (q.dontKnow): eigene Antwort mit Wert −1 am Ende, schließt die anderen aus; senkt das Raten,
@@ -1961,8 +2077,8 @@ function kursPlayer(course, opts) {
       body = `<div class="kp-answers${lookCls}${kurz}${dk ? ' kp-has-dk' : ''}" role="${type === 'radio' ? 'radiogroup' : 'group'}" aria-label="Antworten"${regler ? ` style="--n:${order.length}"` : ''}>${order.map(i => {
         const a = ans[i];
         const checked = done && given.indexOf(i) >= 0;
-        const cls = done ? (a.correct ? 'kp-right' : (checked ? 'kp-wrong' : '')) : '';
-        const showFb = done && perAnswer && a.feedback && (checked || (a.correct && q.kind === 'multiple'));
+        const cls = done ? (hideSol ? (checked ? (a.correct ? 'kp-right' : 'kp-wrong') : '') : (a.correct ? 'kp-right' : (checked ? 'kp-wrong' : ''))) : '';
+        const showFb = done && perAnswer && a.feedback && (checked || (a.correct && q.kind === 'multiple' && !hideSol));
         const nt = notes ? String(a.text || '').split('|') : null;
         return `<label class="kp-answer ${cls}"><input type="${type}" name="q-${q.id}" value="${i}" ${checked ? 'checked' : ''} ${done ? 'disabled' : ''}>${ansImg(a)}
           <span class="kp-answer-text">${nt && nt.length > 1 ? `<span class="kp-note-who">${esc(nt[0].trim())} · <span class="kp-note-tap">${esc(T('notizMarkieren'))}</span><span class="kp-note-flag">${icon('flag')} ${esc(T('notizMarkiert'))}</span></span><span>${esc(nt.slice(1).join('|').trim())}</span>` : `<span>${esc(a.text)}</span>`}${showFb ? `<span class="kp-answer-fb">${esc(a.feedback)}</span>` : ''}</span></label>`;
@@ -1975,7 +2091,7 @@ function kursPlayer(course, opts) {
     const pre = confBefore(q, isGraded);
     if (pre && !done && state.conf[q.id] == null) {
       return `<div class="kp-quiz" data-quiz="${q.id}">
-      <p class="kp-label">${esc(quizHint(q))}<span class="kp-badge">Übung</span></p>
+      <p class="kp-label">${esc(quizHint(q))}<span class="kp-badge">${esc(T('uebungMarke'))}</span></p>
       <div class="kp-conf-pre" role="group" aria-labelledby="cp-${q.id}">
         <p class="kp-conf-topic"><span class="kp-label">${T('thema')}</span><b>${esc(confTopic(q))}</b></p>
         <p class="kp-conf-ask" id="cp-${q.id}">${T('wieGutVorher')}</p>
@@ -1983,7 +2099,7 @@ function kursPlayer(course, opts) {
       </div></div>`;
     }
     const askConf = (q.confidence || set.confidence) && !done && !pre;
-    const confHtml = askConf ? `<div class="kp-conf" role="radiogroup" aria-label="Wie sicher bist du?"><span>Wie sicher bist du?</span>
+    const confHtml = askConf ? `<div class="kp-conf" role="radiogroup" aria-label="${esc(T('confFrage'))}"><span>${esc(T('confFrage'))}</span>
       ${[2, 1, 0].map(v => `<label><input type="radio" name="c-${q.id}" value="${v}" ${state.conf[q.id] === v ? 'checked' : ''}>${CONF[v]}</label>`).join('')}
       <span class="kp-conf-msg" data-conf-msg></span></div>` : '';
 
@@ -2003,12 +2119,12 @@ function kursPlayer(course, opts) {
       if (c === 2 && !ok) bottom += `<div class="kp-note kp-conf-fb" style="margin-top:10px">${pre ? T('vorherUeber') : T('sicherFalsch')}</div>`;
       if (c === 0 && ok) bottom += `<div class="kp-note kp-conf-fb" style="margin-top:10px">${pre ? T('vorherUnter') : T('geratenRichtig')}</div>`;
       const mine = why ? loadText(q.id + '~why') : null;
-      if (mine) bottom += `<div class="kp-why-cmp"><div class="kp-why-mine"><span class="kp-label">${T('deineBegruendung')}</span><p>${esc(mine)}</p></div>${q.explanation ? `<div class="kp-note kp-text"><span class="kp-label">${T('musterBegruendung')}</span>${res(q.explanation)}</div>` : ''}</div>`;
-      else if (q.explanation) bottom += `<div class="kp-note kp-text" style="margin-top:10px">${res(q.explanation)}</div>`;
+      if (mine) bottom += `<div class="kp-why-cmp"><div class="kp-why-mine"><span class="kp-label">${T('deineBegruendung')}</span><p>${esc(mine)}</p></div>${q.explanation && !hideSol ? `<div class="kp-note kp-text"><span class="kp-label">${T('musterBegruendung')}</span>${res(q.explanation)}</div>` : ''}</div>`;
+      else if (q.explanation && !hideSol) bottom += `<div class="kp-note kp-text" style="margin-top:10px">${res(q.explanation)}</div>`;
       const max = Number(q.attempts) || 0; // 0 = unbegrenzt
-      if (!ok && (max === 0 || tries < max)) bottom += `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-retry-one="${q.id}">Nochmal versuchen${max ? ` (${max - tries} übrig)` : ''}</button></div>`;
+      if (!ok && (max === 0 || tries < max)) bottom += `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-retry-one="${q.id}">${esc(max ? T('nochmalUebrig').replace('{n}', max - tries) : T('nochmalKnopf'))}</button>${hideSol && !max && tries >= 2 ? `<button class="kp-btn kp-sec" data-show-sol="${q.id}">${T('loesungZeigen')}</button>` : ''}</div>`;
     }
-    const badge = isGraded ? '' : '<span class="kp-badge">Übung</span>';
+    const badge = isGraded ? '' : `<span class="kp-badge">${esc(T('uebungMarke'))}</span>`;
     // Person stellt die Frage (q.person, Vorbild „Laura Paulsen, Texterin“): rundes Porträt oder Video links, Name und Rolle darunter
     const zlLook = q.kind === 'match' && q.dragdrop && q.look === 'zerlegen';
     const regalLook = q.kind === 'multiple' && q.look === 'regal';
@@ -2108,7 +2224,7 @@ function kursPlayer(course, opts) {
   function regalName(a) { return plainText(a.text) || (a.image && plainText(a.image.alt)) || ''; }
   function regalHtml(q, done, given) {
     const ans = normAnswers(q), per = Math.max(2, Math.min(8, Number(q.shelfCols) || 5));
-    const order = q.shuffle ? shuffled(ans.length, q.id + (state.tries[q.id] || 0)) : ans.map((a, i) => i);
+    const order = q.shuffle ? shuffled(ans.length, q.id + Math.max(0, (state.tries[q.id] || 0) - (done ? 1 : 0))) : ans.map((a, i) => i);
     const item = i => {
       const a = ans[i], img = a.image && a.image.src ? a.image : null, name = regalName(a);
       const chosen = done && given.indexOf(i) >= 0;
@@ -2365,8 +2481,8 @@ function kursPlayer(course, opts) {
 
   function renderReview(b) {
     const qs = reviewQuestions(b);
-    return `<div class="kp-review-head"><p class="kp-label">Wiederholung</p><h2 class="kp-q" style="margin:0">${esc(b.title || T('weisstDuNoch'))}</h2>
-      <p style="margin:6px 0 0">${qs.length ? 'Fragen aus früheren Abschnitten. Was zuletzt nicht saß, kommt zuerst. Sie zählen nicht zur Bewertung.' : 'Es gibt noch keine früheren Fragen zum Wiederholen.'}</p></div>
+    return `<div class="kp-review-head"><p class="kp-label">${esc(T('wdhMarke'))}</p><h2 class="kp-q" style="margin:0">${esc(b.title || T('weisstDuNoch'))}</h2>
+      <p style="margin:6px 0 0">${esc(qs.length ? T('wdhIntro') : T('wdhLeer'))}</p></div>
       <div class="kp-review-list">${qs.map(q => renderQuiz(q, false)).join('')}</div>`;
   }
 
@@ -2379,7 +2495,7 @@ function kursPlayer(course, opts) {
       const passed = s.pct >= (Number(b.passPct) || 80);
       box = `<div class="kp-pretest-box" data-pretest="${b.id}"><p class="kp-label">Einstiegstest</p><div class="kp-score" style="font-size:44px">${s.pct} %</div>
         ${passed && target >= 0 ? `<p>Du kennst dich schon gut aus. Du kannst direkt zu „${plainTitle(pages[target].title)}“ springen oder trotzdem alles durcharbeiten.</p>
-          <div class="kp-quiz-actions" style="justify-content:center"><button class="kp-btn" data-skip="${b.id}">Überspringen</button><button class="kp-btn kp-sec" data-next>Trotzdem durcharbeiten</button></div>`
+          <div class="kp-quiz-actions" style="justify-content:center"><button class="kp-btn" data-skip="${b.id}">${T('ueberspringen')}</button><button class="kp-btn kp-sec" data-next>${T('trotzdemDurcharbeiten')}</button></div>`
           : `<p>${passed ? 'Gut gemacht.' : 'Kein Problem: Der folgende Abschnitt erklärt alles Schritt für Schritt.'}</p>`}</div>`;
     }
     return `${b.intro ? `<div class="kp-text" style="margin-bottom:16px">${res(b.intro)}</div>` : ''}
@@ -2444,7 +2560,7 @@ function kursPlayer(course, opts) {
   function helpButton(b) {
     const h = helpOf(b); if (!h) return '';
     const { name } = helpWho(h), open = helpOpen.has(b.id);
-    return `<button type="button" class="kp-help-btn${open ? ' open' : ''}" data-help-open="${esc(b.id)}" aria-expanded="${open}">${icon('question')}<span>${name ? T('fragHilfe').replace('{n}', esc(name)) : T('hilfe')}</span></button>`;
+    return `<button type="button" class="kp-help-btn${open ? ' open' : ''}" data-help-open="${esc(b.id)}" aria-expanded="${open}">${iconOr((b.help || {}).icon, 'question')}<span>${name ? T('fragHilfe').replace('{n}', esc(name)) : T('hilfe')}</span></button>`;
   }
   function helpPanel(b) {
     const h = helpOf(b); if (!h || !helpOpen.has(b.id)) return '';
@@ -2697,7 +2813,7 @@ function kursPlayer(course, opts) {
       return `<li class="kp-dmap-node${n.chosen != null ? ' is-done' : ''}">${head}<ul class="kp-dmap-brs" style="--n:${Math.min(4, n.opts.length)}">${brs}</ul>${panels}</li>`;
     };
     const total = nodes.length;
-    return `<div class="kp-debrief kp-dmap${DMAP_SHOWN.has(b.id) ? ' is-drawn' : ''}" data-dmap-box="${esc(b.id)}"><p class="kp-label">Nachbesprechung</p><h2 class="kp-q">${esc(b.title || 'Deine Entscheidungen im Überblick')}</h2>
+    return `<div class="kp-debrief kp-dmap${DMAP_SHOWN.has(b.id) ? ' is-drawn' : ''}" data-dmap-box="${esc(b.id)}"><p class="kp-label">${esc(T('nachbesprechung'))}</p><h2 class="kp-q">${esc(b.title || T('debriefTitel'))}</h2>
       <p class="kp-dmap-sum">${esc((total === 1 ? T('dmapWeg1') : T('dmapWeg').replace('{n}', total)) + (nOpen ? ', ' + T('dmapNochOffen').replace('{n}', nOpen) : ''))}</p>
       ${total ? `${nodes.some(n => n.chosen != null && n.opts.length > 1) ? `<p class="kp-dmap-hint">${esc(T('dmapHinweis'))}</p>` : ''}<div class="kp-dmap-map"><svg class="kp-dmap-svg" aria-hidden="true" focusable="false"></svg><ol class="kp-dmap-path" aria-label="${esc(T('dmapListe'))}">${nodes.map(nodeHtml).join('')}</ol></div>`
         : `<p>${esc(T('nochKeineEntscheidung'))}</p>`}
@@ -2775,7 +2891,7 @@ function kursPlayer(course, opts) {
       if (x.scored) got += Number(o.points) || 0;
       list.push(`<div class="kp-debrief-item"><small>${esc(x.prompt || p.title)}</small><strong>${esc(o.text)}</strong>${o.feedback ? `<span>${esc(o.feedback)}</span>` : ''}</div>`);
     }));
-    return `<div class="kp-debrief"><p class="kp-label">Nachbesprechung</p><h2 class="kp-q">${esc(b.title || 'Deine Entscheidungen im Überblick')}</h2>
+    return `<div class="kp-debrief"><p class="kp-label">${esc(T('nachbesprechung'))}</p><h2 class="kp-q">${esc(b.title || T('debriefTitel'))}</h2>
       ${list.length ? list.join('') : `<p>${esc(T('nochKeineEntscheidung'))}</p>`}
       ${(course.meters || []).length ? `<p class="kp-label" style="margin-top:16px">${T('werteStand')}</p>${meterPanel(null)}` : ''}
       ${max ? `<div class="kp-feedback neutral" style="margin-top:14px">Punkte im Szenario: ${got} von ${max}</div>` : ''}
@@ -3130,10 +3246,14 @@ function kursPlayer(course, opts) {
     scale: '<path d="M12 4v16M6 20h12M4 8h16"/><path d="M6 8l-3 6a3 3 0 0 0 6 0zM18 8l-3 6a3 3 0 0 0 6 0z"/>',
     seedling: '<path d="M12 21v-9"/><path d="M12 12c0-4-3-6-7-6 0 4 3 6 7 6zM12 10c0-3.5 2.5-6 7-6 0 4-2.5 6-7 6z"/>'
   };
+  // Symbol mit Standard: leerer Text = bewusst ohne Symbol (Wahl „Kein Symbol“ in „Direkt bearbeiten“)
+  function iconOr(name, def, cls) { return name === '' ? '' : icon(name || def, cls); }
   function icon(name, cls) {
     const p = ICONS[name];
-    return p ? `<svg class="kp-ico ${cls || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>` : '';
+    return p ? `<svg class="kp-ico ${cls || ''}" data-ico="${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>` : '';
   }
+  // Vorschau im Editor: die Symbolwahl in „Direkt bearbeiten“ zeichnet dieselben Symbole
+  if (opts.preview && typeof window !== 'undefined') { window.kpIconNames = Object.keys(ICONS); window.kpIconSvg = n => icon(n); }
   // *Wort* in Überschriften wird zum kursiven Akzent
   const accent = s => esc(s).replace(/\*(.+?)\*/g, '<em class="kp-accent">$1</em>');
   // Derselbe Titel als schlichter Text: die Sternchen des Akzentworts gehören nicht in
@@ -3209,12 +3329,13 @@ function kursPlayer(course, opts) {
     const parts = t.split('\u0001');
     const strip = x => String(x || '').replace(/\s*\?\s*$/, '').trim();
     const pre = parts.length === 3 ? parts[0].trim() : '', word = parts.length === 3 ? parts[1].trim() : strip(t), post = parts.length === 3 ? strip(parts[2]) : '';
-    const n = Math.max(5, ...word.split(/\s+/).map(w => Array.from(w).length));
-    const pic = b.image && b.image.src ? photo(b.image, 'Titelbild') : mascotHtml(b.pose, 'kp-mascot-hero');
+    // Das Fragezeichen steht am Schlagwort, wenn danach nichts mehr kommt: es zählt dann zur Breite des letzten Worts
+    const n = Math.max(5, ...word.split(/\s+/).map((w, k, a) => Array.from(w).length + (!post && k === a.length - 1 ? 1 : 0)));
+    const pic = b.image && (b.image.src || (opts.preview && plainText(b.image.idea))) ? photo(b.image, 'Titelbild') : mascotHtml(b.pose, 'kp-mascot-hero');
     return `<div class="kp-hero2 kp-hero-frage${b.cover ? ' kp-hero-cover' : ''}${pic ? ' kp-frage-haspic' : ''}">
       <div class="kp-frage-stage">
         <h2 class="kp-frage" style="--n:${n}" aria-label="${esc(strip(t.replace(/\u0001/g, '')) + '?')}"><span aria-hidden="true">
-          ${pre ? `<span class="kp-frage-pre">${esc(pre)}</span>` : ''}<span class="kp-frage-word">${esc(word)}<span class="kp-frage-q">?</span></span>${post ? `<span class="kp-frage-post">${esc(post)}</span>` : ''}</span></h2>
+          ${pre ? `<span class="kp-frage-pre">${esc(pre)}</span>` : ''}<span class="kp-frage-word">${post ? esc(word) : esc(word).replace(/(\S+)$/, '<span class="kp-frage-last">$1<span class="kp-frage-q">?</span></span>')}</span>${post ? `<span class="kp-frage-post">${esc(post)}<span class="kp-frage-q">?</span></span>` : ''}</span></h2>
         ${pic ? `<div class="kp-frage-pic">${pic}</div>` : ''}
       </div>
       <div class="kp-frage-body">
@@ -3365,7 +3486,7 @@ function kursPlayer(course, opts) {
       const sum = st.a.reduce((x, y) => x + Math.max(0, Number(y) || 0), 0);
       const r = (b.results || []).find(x => sum >= Number(x.min) && sum <= Number(x.max));
       result = `${scale && b.profile ? scProfile(b, st) : ''}<div class="kp-sc-result fx-fade-in" role="status">${r ? res(r.html) : ''}</div>
-        <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-self-reset="${b.id}">Antworten ändern</button></div>`;
+        <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-self-reset="${b.id}">${T('antwortenAendern')}</button></div>`;
     }
     // Zweispaltig (Vorbild „Was sind deine Herausforderungen?“): Titel und Einleitung links, die Aussagen mit Ja/?/Nein rechts
     const zwei = b.look === 'zweispaltig';
@@ -4775,14 +4896,14 @@ function kursPlayer(course, opts) {
     const saved = loadText(b.id) || [];
     const done = state.texts[b.id] != null;
     return `<div class="kp-plan" data-plan="${b.id}">
-      <p class="kp-label">Umsetzungsplan</p>
-      <h2 class="kp-q">${esc(b.title || 'Mein Umsetzungsplan')}</h2>
+      <p class="kp-label">${esc(T('planMarke'))}</p>
+      <h2 class="kp-q">${esc(b.title || T('planTitel'))}</h2>
       ${b.intro ? `<div class="kp-text" style="margin-bottom:14px">${res(b.intro)}</div>` : ''}
       ${(b.fields || []).map((f, i) => `<div class="kp-plan-row"><label for="pl-${b.id}-${i}">${esc(f.label)}</label>
         <textarea id="pl-${b.id}-${i}" data-plan-field="${i}" placeholder="${esc(f.placeholder || '')}">${esc(saved[i] || '')}</textarea></div>`).join('')}
       <div class="kp-quiz-actions">
-        <button class="kp-btn" data-plan-save="${b.id}">${done ? 'Aktualisieren' : 'Plan speichern'}</button>
-        <button class="kp-btn kp-sec" data-plan-print="${b.id}">Drucken oder als PDF sichern</button>
+        <button class="kp-btn" data-plan-save="${b.id}">${esc(done ? T('spAktualisieren') : T('planSpeichern'))}</button>
+        <button class="kp-btn kp-sec" data-plan-print="${b.id}">${esc(T('planDrucken'))}</button>
         ${done ? '<span class="kp-saved" role="status">✔ gespeichert</span>' : ''}
       </div></div>`;
   }
@@ -4790,12 +4911,12 @@ function kursPlayer(course, opts) {
   function renderSurvey(b) {
     const s = state.survey[b.id];
     const scale = Number(b.scale) || 5;
-    if (s) return `<div class="kp-survey"><p class="kp-label">Rückmeldung</p><h2 class="kp-q">${esc(b.thanks || T('umfrageDanke'))}</h2></div>`;
+    if (s) return `<div class="kp-survey"><p class="kp-label">${esc(T('rueckmeldungMarke'))}</p><h2 class="kp-q">${esc(b.thanks || T('umfrageDanke'))}</h2></div>`;
     return `<div class="kp-survey" data-survey="${b.id}">
-      <p class="kp-label">Rückmeldung</p><h2 class="kp-q">${esc(b.title || T('umfrageFrage'))}</h2>
+      <p class="kp-label">${esc(T('rueckmeldungMarke'))}</p><h2 class="kp-q">${esc(b.title || T('umfrageFrage'))}</h2>
       ${(b.statements || []).map((st, i) => `<div class="kp-survey-row"><span id="sv-${b.id}-${i}">${esc(st)}</span>
         <div class="kp-scale" role="radiogroup" aria-labelledby="sv-${b.id}-${i}">${Array.from({ length: scale }, (v, k) => `<label title="${k + 1}"><input type="radio" name="s-${b.id}-${i}" value="${k + 1}">${k + 1}</label>`).join('')}</div></div>`).join('')}
-      <p class="kp-scale-legend"><span>1 = ${esc(b.low || 'trifft nicht zu')}</span><span>${scale} = ${esc(b.high || 'trifft voll zu')}</span></p>
+      <p class="kp-scale-legend"><span>1 = ${esc(b.low || T('skalaNiedrig'))}</span><span>${scale} = ${esc(b.high || T('skalaHoch'))}</span></p>
       ${b.comment !== false ? `<div class="kp-plan-row" style="margin-top:14px"><label for="svc-${b.id}">${esc(b.commentLabel || T('umfrageKommentar'))}</label><textarea id="svc-${b.id}" data-survey-comment></textarea></div>` : ''}
       <div class="kp-quiz-actions"><button class="kp-btn" data-survey-send="${b.id}">Absenden</button></div></div>`;
   }
@@ -4817,7 +4938,7 @@ function kursPlayer(course, opts) {
   function certReady(b) {
     if (!graded().length) return { ok: true };
     const s = score();
-    if (s.open) return { ok: false, why: 'Das Zertifikat steht bereit, sobald alle Testfragen beantwortet sind.' };
+    if (s.open) return { ok: false, why: T('zertBereit') };
     if (b.requirePass !== false && s.pct < passScore) return { ok: false, why: T('zertAb').replace('{p}', passScore).replace('{s}', s.pct) };
     return { ok: true, s };
   }
@@ -5178,8 +5299,12 @@ function kursPlayer(course, opts) {
   let lbwWait = false;
   function lbwSeen() { try { return (opts.preview ? sessionStorage : localStorage).getItem(lbwKey) === '1'; } catch (e) { return true; } }
   function lbwMark() { try { (opts.preview ? sessionStorage : localStorage).setItem(lbwKey, '1'); } catch (e) { /* kein Speicher */ } }
+  // Nie zwei Startfenster übereinander: läuft die Bedienhilfe gerade, wartet die Karte, bis sie fertig ist;
+  // erscheint die Karte zuerst, startet die Bedienhilfe erst nach ihrem Schließen (tourAfterLbw)
+  let tourAfterLbw = false;
   function lernbuchWelcome() {
     if (document.querySelector('.kp-lbw')) return;
+    if (document.querySelector('.driver-popover')) { const tm = setTimeout(lernbuchWelcome, 800); mediaTimers.push(tm); return; }
     const rows = [set.notes ? ['pencil', 'lbwNotizT', 'lbwNotiz'] : null, ['book', 'lbwSammeltT', 'lbwSammelt'], ['mail', 'lbwMailT', 'lbwMail']].filter(Boolean);
     const box = document.createElement('div');
     box.className = 'kp-lbw';
@@ -5195,10 +5320,28 @@ function kursPlayer(course, opts) {
       <ul class="kp-lbw-list">${rows.map((r, i) => `<li style="--kp-i:${i}"><span class="kp-lbw-ico">${icon(r[0])}</span><span><strong>${T(r[1])}</strong><span>${T(r[2])}</span></span></li>`).join('')}</ul>
       <div class="kp-lbw-actions"><button type="button" class="kp-btn" data-lbw-close>${T('lbwLos')}</button>${set.notes ? `<button type="button" class="kp-btn kp-sec" data-lbw-notes>${T('lbwProbieren')}</button>` : ''}</div>
       <p class="kp-lbw-where">${icon('menu')} ${T('lbwWo')}</p></div>`;
-    const close = () => { lbwMark(); box.classList.add('out'); document.removeEventListener('keydown', onKey); setTimeout(() => box.remove(), reducedMotion() ? 0 : 250); };
-    const onKey = e => { if (e.key === 'Escape') close(); };
+    // Fokus bleibt in der Karte (UX-Prüfung 07.11.2026, WCAG 2.4.3 und 2.4.11): der Kurs dahinter ist inert, Tab läuft im Kasten im Kreis,
+    // beim Schließen geht der Fokus dorthin zurück, wo er vorher war
+    const opener = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+    const wasInert = root.inert;
+    root.inert = true;
+    const close = tour => {
+      root.inert = wasInert;
+      if (opener && opener.isConnected && box.contains(document.activeElement)) { try { opener.focus({ preventScroll: true }); } catch (e) { /* weg */ } }
+      lbwMark(); box.classList.add('out'); document.removeEventListener('keydown', onKey); setTimeout(() => box.remove(), reducedMotion() ? 0 : 250);
+      if (tourAfterLbw) { tourAfterLbw = false; if (tour !== false && !tourSeen()) { const tm = setTimeout(startTour, reducedMotion() ? 50 : 400); mediaTimers.push(tm); } }
+    };
+    const onKey = e => {
+      if (e.key === 'Escape') return close();
+      if (e.key !== 'Tab') return;
+      const f = [...box.querySelectorAll('button, a[href], input, textarea, select')].filter(x => !x.disabled);
+      if (!f.length) return;
+      const i = f.indexOf(document.activeElement);
+      if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && (i === f.length - 1 || i < 0)) { e.preventDefault(); f[0].focus(); }
+    };
     box.addEventListener('click', e => {
-      if (e.target.closest('[data-lbw-notes]')) { close(); openDrawer('notes'); const ta = root.querySelector('#kp-drawer [data-notes]'); if (ta) ta.focus(); return; }
+      if (e.target.closest('[data-lbw-notes]')) { close(false); openDrawer('notes'); const ta = root.querySelector('#kp-drawer [data-notes]'); if (ta) ta.focus(); return; }
       if (e.target === box || e.target.closest('[data-lbw-close]')) close();
     });
     document.addEventListener('keydown', onKey);
@@ -5314,12 +5457,12 @@ function kursPlayer(course, opts) {
     return `<div class="kp-cert ${motif ? 'kp-cert-motif' : ''}" data-cert="${b.id}">
       ${motif ? `<div class="kp-cert-pic${/\.svg($|\?)|^data:image\/svg/i.test(motif) ? ' kp-cert-drawing' : ''}" aria-hidden="true"><img src="${esc(motif)}" alt="" loading="lazy"></div>` : ''}
       <div class="kp-cert-body">
-      <div class="kp-cert-icon" aria-hidden="true">${icon('trophy', 'kp-ico-lg')}</div>
+      ${b.certIcon === '' ? '' : `<div class="kp-cert-icon" aria-hidden="true">${icon(b.certIcon || 'trophy', 'kp-ico-lg')}</div>`}
       <h2 class="kp-q">${esc(b.title || 'Teilnahmezertifikat')}</h2>
       ${st.ok ? `${learnerName() ? `<p class="kp-cert-name">${esc(learnerName())}</p>` : `<div><input type="text" data-cert-name placeholder="${esc(T('zertName'))}" aria-label="${esc(T('zertName'))}"></div>`}
         ${planCard(b)}
         ${b.anlass ? `<label class="kp-cert-anlass"><span>${esc(T('anlassFrage'))}</span><input type="date" data-cert-anlass="${b.id}" value="${esc(an)}"><small>${esc(T('anlassHinweis'))}</small></label>` : ''}
-        <div class="kp-quiz-actions kp-cert-actions"><button class="kp-btn" data-cert-open="${b.id}">Zertifikat anzeigen und drucken</button>
+        <div class="kp-quiz-actions kp-cert-actions"><button class="kp-btn" data-cert-open="${b.id}">${esc(T('zertDrucken'))}</button>
         ${b.calendar !== false ? `<button class="kp-btn kp-sec" data-cert-ics="${b.id}">${icon('calendar')} ${T('kalenderKnopf')}</button>` : ''}
         ${b.lead ? `<a class="kp-btn kp-sec" data-cert-lead="${b.id}" href="${esc(certLeadMailto(b))}">${icon('mail')}${esc(T('fuehrungKnopf'))}</a>` : ''}</div>
         ${b.calendar !== false ? `<p class="kp-cert-hint">${esc(hint)}</p>` : ''}
@@ -5374,7 +5517,7 @@ function kursPlayer(course, opts) {
         </div>
         <div class="main">${logo}
           <h1>${esc(b.title || 'Teilnahmezertifikat')}</h1>
-          <div class="muted">Hiermit wird bestätigt, dass</div>
+          <div class="muted">${T('zertBestaetigt')}</div>
           <div><span class="name">${esc(name || ' ')}</span></div>
           <div class="muted">den Kurs</div>
           <div class="course-t">${esc(plainTitle(course.title))}</div>
@@ -5454,7 +5597,7 @@ function kursPlayer(course, opts) {
       </article>`;
     }).join('');
     if (b.look === 'ueberblick') return renderUeberblick(b, liste, own, maxOk);
-    const leer = '<p class="kp-lock">Noch keine Kapitel. Kapitel vergibst du in den Seiteneinstellungen.</p>';
+    const leer = '<p class="kp-lock">Noch keine Kapitel. Kapitel vergibst du in den Folieneinstellungen.</p>';
     // Überblick als Startseite (Vorbild bildungsinnovator „ChatGPT Basics“, „Digitale Wissensquellen“): oben Dauer und zwei
     // Fortschrittsringe (gelesen, geübt) mit „Weiter“, darunter die Kapitel als Fotokarten über die ganze Breite
     if (b.look === 'start') {
@@ -5919,7 +6062,7 @@ function kursPlayer(course, opts) {
   }
   function renderPredictPicto(b, st) {
     const n = pkTotal(b);
-    const head = `<p class="kp-eyebrow">${icon('bulb')} ${esc(b.eyebrow || 'Denkpause')}</p><p class="kp-q" id="pkq-${b.id}">${accent(b.prompt)}</p>`;
+    const head = `<p class="kp-eyebrow">${iconOr(b.eyebrowIcon, 'bulb')} ${esc(b.eyebrow || T('denkpause'))}</p><p class="kp-q" id="pkq-${b.id}">${accent(b.prompt)}</p>`;
     if (!st.done) {
       const v = typeof st.v === 'number' ? Math.max(0, Math.min(n, st.v)) : 0;
       return `<div class="kp-predict kp-predict-pk" data-predict="${b.id}">${head}
@@ -5987,7 +6130,7 @@ function kursPlayer(course, opts) {
       const hits = all.filter(x => Number(x.actual) >= state.self[x.id].v[0] && Number(x.actual) <= state.self[x.id].v[1]).length;
       const u = b.unit ? ' ' + esc(b.unit) : '';
       return `<div class="kp-predict" data-predict="${b.id}">
-        <p class="kp-eyebrow">${icon('bulb')} ${esc(b.eyebrow || 'Denkpause')}</p>
+        <p class="kp-eyebrow">${iconOr(b.eyebrowIcon, 'bulb')} ${esc(b.eyebrow || T('denkpause'))}</p>
         <p class="kp-q">${accent(b.prompt)}</p>
         <div class="kp-predict-reveal" role="status">
           <p class="kp-range-verdict ${hit ? 'ok' : 'no'}">${hit ? T('bereichDrin') : T('bereichDaneben')}</p>
@@ -6019,7 +6162,7 @@ function kursPlayer(course, opts) {
       </div>`;
     }
     return `<div class="kp-predict" data-predict="${b.id}">
-      <p class="kp-eyebrow">${icon('bulb')} ${esc(b.eyebrow || 'Denkpause')}</p>
+      <p class="kp-eyebrow">${iconOr(b.eyebrowIcon, 'bulb')} ${esc(b.eyebrow || T('denkpause'))}</p>
       <p class="kp-q">${accent(b.prompt)}</p>
       ${input}
       ${st.done ? `<div class="kp-predict-reveal" role="status">
@@ -6033,14 +6176,14 @@ function kursPlayer(course, opts) {
     // recall: erst überlegen, dann aufdecken (Abrufen statt Lesen, Roediger & Karpicke 2006); Stand in state.self[id].open
     const items = b.items || [];
     // Zeilen (Vorbild Rise „Kurz zusammengefasst“): je Kernaussage eine getönte Zeile mit Pfeil im Kreis, ohne Aufdecken
-    if (b.look === 'zeilen') return `<div class="kp-takeaways kp-tk-zeilen" data-takeaways="${b.id}">${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}<ul class="kp-tk-rows">${items.map((it, i) => `<li class="fx-reveal" style="--kp-i:${i}"><span class="kp-tk-arrow" aria-hidden="true">${icon('arrow')}</span><div>${it.title ? `<strong>${esc(it.title)}</strong>` : ''}${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}</div></li>`).join('')}</ul>${b.print === true ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tk-print="${b.id}">${icon('book')} Als Merkkarte drucken oder speichern</button></div>` : ''}</div>`;
+    if (b.look === 'zeilen') return `<div class="kp-takeaways kp-tk-zeilen" data-takeaways="${b.id}">${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}<ul class="kp-tk-rows">${items.map((it, i) => `<li class="fx-reveal" style="--kp-i:${i}"><span class="kp-tk-arrow" aria-hidden="true">${icon('arrow')}</span><div>${it.title ? `<strong>${esc(it.title)}</strong>` : ''}${plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : ''}</div></li>`).join('')}</ul>${b.print === true ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tk-print="${b.id}">${icon('book')} ${esc(T('tkDrucken'))}</button></div>` : ''}</div>`;
     const open = b.recall ? ((state.self[b.id] || {}).open || []) : null;
     const body = it => (plainText(it.html) ? `<div class="kp-text">${res(it.html)}</div>` : '');
     return `<div class="kp-takeaways ${b.recall ? 'kp-tk-recall' : ''}" data-takeaways="${b.id}">
       ${b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : ''}
       ${b.recall ? `<p class="kp-tk-hint" data-tk-status>${esc(T('aufdeckenHinweis'))} <b>${esc(T('aufgedeckt').replace('{n}', open.length).replace('{z}', items.length))}</b></p>` : ''}
       <ol class="kp-tk-list">${items.map((it, i) => `<li class="fx-reveal ${open && !open.includes(i) ? 'kp-tk-closed' : ''}"><span class="kp-tk-num" aria-hidden="true">${i + 1}</span><div><h3>${esc(it.title)}</h3>${open && !open.includes(i) ? (plainText(it.html) ? `<button class="kp-btn kp-sec kp-tk-open" data-tk-open="${i}" aria-expanded="false">${T('aufdecken')}</button>` : '') : body(it)}</div></li>`).join('')}</ol>
-      ${b.print !== false ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tk-print="${b.id}">${icon('book')} Als Merkkarte drucken oder speichern</button></div>` : ''}
+      ${b.print !== false ? `<div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-tk-print="${b.id}">${icon('book')} ${esc(T('tkDrucken'))}</button></div>` : ''}
     </div>`;
   }
 
@@ -6058,7 +6201,7 @@ function kursPlayer(course, opts) {
     // Eingeklappt: Quellen werden selten gelesen und machen sonst jede Seite laenger; eine Fussnote klappt sie auf
     const list = (b.items || []).filter(s => String(s).trim());
     return `<details class="kp-sources">
-      <summary class="kp-sources-title">${esc(b.title || 'Quellen')} (${list.length})</summary>
+      <summary class="kp-sources-title">${esc(b.title || T('quellenTitel'))} (${list.length})</summary>
       <ol>${list.map((s, i) => `<li id="kp-src-${i + 1}" tabindex="-1">${esc(s).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')}</li>`).join('')}</ol>
     </details>`;
   }
@@ -6157,7 +6300,7 @@ function kursPlayer(course, opts) {
   }
   // Fehlt die Videodatei, steht der Sprechtext da; in der Vorschau mit dem Hinweis „Video folgt“
   function videoDummy(say, poster, cls) {
-    if (!plainText(say)) return `<div class="kp-photo-empty ${cls || ''}">${icon('play')}<span>Noch kein Video</span></div>`;
+    if (!plainText(say)) return `<div class="kp-photo-empty ${cls || ''}">${icon('play')}<span>${esc(T('nochKeinVideo'))}</span></div>`;
     return `<div class="kp-video-dummy ${cls || ''}">${poster ? `<img src="${esc(res(poster))}" alt="">` : ''}<div class="kp-vd-in"><span class="kp-vd-lb">${icon('play')} ${T(opts.preview ? 'videoFolgt' : 'sprechtext')}</span>
       <blockquote>„${esc(plainText(say))}“</blockquote>${opts.preview ? `<small>${T('videoFolgtHinweis')}</small>` : ''}</div></div>`;
   }
@@ -6322,7 +6465,7 @@ function kursPlayer(course, opts) {
     return `<div class="kp-bn-ask" data-bn-ask="${b.id}">
       <p class="kp-bn-q" id="${qid}">${esc(plainText(a.question))}</p>
       <div class="kp-bn-opts" role="radiogroup" aria-labelledby="${qid}">${opts.map((o, i) => `<label class="kp-bn-opt"><input type="radio" name="bn-${b.id}" value="${i}"${v === i ? ' checked' : ''}${v != null ? ' disabled' : ''}><span>${esc(plainText(o.text))}</span></label>`).join('')}</div>
-      ${v == null ? `<div class="kp-bn-act"><button type="button" class="kp-btn kp-bn-ok" data-bn-ok="${b.id}" disabled>${esc(a.button || 'OK')} <span aria-hidden="true">›</span></button></div>`
+      ${v == null ? `<div class="kp-bn-act"><button type="button" class="kp-btn kp-bn-ok" data-bn-ok="${b.id}" disabled>${esc(a.button || T('okKnopf'))} <span aria-hidden="true">›</span></button></div>`
         : `<p class="kp-bn-reply" data-bn-reply role="status">${esc(reply || T('danke'))}</p>`}
     </div>`;
   }
@@ -6884,6 +7027,202 @@ function kursPlayer(course, opts) {
     const n = pts.filter((pt, i) => { const d = pt.target ? pageIndexById(pt.target) : -1; return d >= 0 ? state.visited.has(d) : !!seen[i]; }).length;
     return T('m3dTeile').replace('{n}', n).replace('{z}', pts.length);
   }
+  // ---------- Scribble-Video live im Kurs (Baustein scribble, 02.11.2026) ----------
+  // Der Renderer (js/scribble.js) zeichnet die .scribble.json Bild für Bild auf eine Leinwand, wie werkzeuge/scribble.mjs beim Rendern.
+  // Ton je Szene (doc.scenes[].audio als assets/…), Untertitel als Zeile unter dem Bild, Text zum Nachlesen, Vollbild.
+  // Renderer, Fotohände und Schriften liefert scorm.js als window.SCRIBBLE_RT (nur bei Kursen mit diesem Baustein),
+  // Figuren und Symbole stehen gekürzt im Baustein (b.lib). Erledigt: alle Szenen gesehen oder der Text zum Nachlesen geöffnet.
+  const scrRt = {};
+  const scrDoc = b => (b && b.doc && Array.isArray(b.doc.scenes) && b.doc.scenes.length ? b.doc : null);
+  const scrClock = s => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  const SCR_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>';
+  const SCR_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>';
+  const SCR_PREV = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6zM19 5.5v13L9.5 12z" fill="currentColor"/></svg>';
+  const SCR_NEXT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2zM5 5.5v13l9.5-6.5z" fill="currentColor"/></svg>';
+  function renderScribble(b) {
+    const d = scrDoc(b);
+    const head = b.eyebrow || b.title ? `<div class="kp-sec-head">${eyebrow(b.eyebrow)}${b.title ? `<h2 class="kp-sec-title">${accent(b.title)}</h2>` : ''}</div>` : '';
+    const intro = plainText(b.intro) ? `<div class="kp-scr-intro">${res(b.intro)}</div>` : '';
+    if (!d) return `<div class="kp-scr kp-scr-none">${head}${intro}${opts.preview ? `<div class="kp-scr-empty">${esc(T('scrFolgt'))}</div>` : ''}</div>`;
+    const n = d.scenes.length, cc = b.captions !== false;
+    const read = d.scenes.map(sc => (plainText(sc.narration) ? `<li>${esc(sc.narration)}</li>` : '')).join('');
+    const ai = d.stimme && d.stimme.synthetisch ? `<span class="kp-ai-voice" title="${esc(T('kiStimme'))}">${esc(T('kiStimmeKurz'))}<span class="kp-sr"> · ${esc(T('kiStimme'))}</span></span>` : '';
+    return `<div class="kp-scr" data-scr="${b.id}">
+      ${head}${intro}
+      <div class="kp-scr-player">
+      <div class="kp-scr-stage" data-scr-stage>
+        <canvas class="kp-scr-canvas" data-scr-canvas width="1600" height="900" role="img" aria-label="${esc((b.title ? plainTitle(b.title) + '. ' : '') + T('scrBild'))}"></canvas>
+        <button type="button" class="kp-scr-big" data-scr-big hidden>${SCR_PLAY}<span>${esc(T('scrStart'))}</span></button>
+        <p class="kp-scr-load" data-scr-load>${esc(T('scrLaden'))}</p>
+        <p class="kp-scr-cap" data-scr-cap aria-hidden="true" hidden></p>
+      </div>
+      <div class="kp-scr-bar">
+        <button type="button" class="kp-scr-btn kp-scr-main" data-scr-toggle aria-label="${esc(T('scrAbspielen'))}" title="${esc(T('scrAbspielen'))}" disabled>${SCR_PLAY}</button>
+        <button type="button" class="kp-scr-btn" data-scr-step data-dir="-1" aria-label="${esc(T('scrVorige'))}" title="${esc(T('scrVorige'))}" disabled>${SCR_PREV}</button>
+        <button type="button" class="kp-scr-btn" data-scr-step data-dir="1" aria-label="${esc(T('scrNaechste'))}" title="${esc(T('scrNaechste'))}" disabled>${SCR_NEXT}</button>
+        <input type="range" class="kp-scr-seek" data-scr-seek min="0" max="1000" step="1" value="0" aria-label="${esc(T('scrStelle'))}" disabled>
+        <span class="kp-scr-time" data-scr-time>0:00</span>
+        <span class="kp-scr-scene" data-scr-scene aria-live="polite">${esc(T('scrSzene').replace('{n}', 1).replace('{m}', n))}</span>
+        <button type="button" class="kp-scr-btn kp-scr-txt" data-scr-cc aria-pressed="${cc}">${esc(T('scrUntertitel'))}</button>
+        ${vidFsOk() ? `<button type="button" class="kp-scr-btn" data-scr-full aria-label="${esc(T('vollbild'))}" title="${esc(T('vollbild'))}">${icon('expand')}</button>` : ''}
+        ${ai}
+      </div>
+      </div>
+      <details class="kp-scr-read" data-scr-read><summary>${esc(T('scrNachlesen'))}</summary><ol>${read}</ol></details>
+    </div>`;
+  }
+  // Figuren und Symbole des Bausteins zu den globalen Tafeln des Renderers legen (mehrere Scribbles teilen sie)
+  function scrMergeLib(lib) {
+    if (!lib) return;
+    if (lib.peeps) { const P = window.OPEN_PEEPS = window.OPEN_PEEPS || { pose: {}, face: {}, hair: {}, beard: {}, glasses: {} }; Object.keys(lib.peeps).forEach(k => { P[k] = Object.assign(P[k] || {}, lib.peeps[k]); }); }
+    if (lib.icons) window.STREAMLINE_FREEHAND = Object.assign(window.STREAMLINE_FREEHAND || {}, lib.icons);
+  }
+  let scrFontsP = null;
+  function scrFonts() {
+    if (scrFontsP) return scrFontsP;
+    const F = (window.SCRIBBLE_RT || {}).fonts || {};
+    const add = (fam, url, w) => { try { const f = new FontFace(fam, `url(${url})`, { weight: w }); document.fonts.add(f); return f.load().catch(() => null); } catch (e) { return Promise.resolve(null); } };
+    scrFontsP = Promise.all([F.caveat ? add('Caveat', F.caveat, '400 700') : null, F.inter ? add('Inter', F.inter, '100 900') : null]);
+    return scrFontsP;
+  }
+  const scrImg = src => new Promise(r => { if (!src) return r(null); const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = src; });
+  const scrDur = src => new Promise(r => { let fin = false; const done = v => { if (!fin) { fin = true; r(v); } }; const a = new Audio(); a.preload = 'metadata'; a.onloadedmetadata = () => done(isFinite(a.duration) ? a.duration : 0); a.onerror = () => done(0); setTimeout(() => done(0), 6000); a.src = src; });
+  // Bild- und Tonquellen im Dokument auf die Dateien des Kurses umstellen
+  function scrResolve(d) {
+    const c = JSON.parse(JSON.stringify(d));
+    c.style = Object.assign({}, c.style, { subtitles: false });
+    (c.scenes || []).forEach(sc => { if (sc.audio) sc.audio = res(sc.audio); (sc.elements || []).forEach(el => { if (el.src) el.src = res(el.src); }); });
+    if (c.style.logo && typeof c.style.logo === 'object' && c.style.logo.src) c.style.logo = Object.assign({}, c.style.logo, { src: res(c.style.logo.src) });
+    return c;
+  }
+  async function setupScribble(box) {
+    if (box.dataset.ready) return;
+    box.dataset.ready = '1';
+    const b = findBlock(box.dataset.scr), d = b && scrDoc(b);
+    const load = box.querySelector('[data-scr-load]');
+    const fail = () => { box.classList.add('kp-scr-fail'); if (load) load.textContent = T('scrOhne'); };
+    if (!d || typeof ScribbleScene !== 'function') return fail();
+    const rt = scrRt[b.id] = { b, box, t: 0, playing: false, audio: null, audioScene: -1, seen: new Set((state.self[b.id] || {}).s || []), played: {} };
+    mediaTimers.push({ stop: () => scrPause(rt) });
+    try {
+      await scrFonts();
+      scrMergeLib(b.lib);
+      const doc = scrResolve(d);
+      const durations = await Promise.all(doc.scenes.map(sc => (sc.audio ? scrDur(sc.audio) : Promise.resolve(0))));
+      const H = (window.SCRIBBLE_RT || {}).hand || {};
+      const assets = {};
+      const custom = d.style && d.style.hand && typeof d.style.hand === 'object' && d.style.hand.src;
+      if (custom) { const im = await scrImg(res(d.style.hand.src)); if (im) assets.hand = { img: im, tip: d.style.hand.tip || [0, 0], scale: d.style.hand.scale || 0.75 }; doc.style.hand = 'foto'; }
+      else if (d.style && d.style.hand === false) { /* ohne Hand */ }
+      else for (const [k, key] of [['stift', 'hand'], ['zeig', 'zeig'], ['flach', 'flach']]) { const h = H[k]; const im = h && await scrImg(h.src); if (im) assets[key] = { img: im, tip: h.tip, scale: h.scale }; }
+      rt.scene = await new ScribbleScene(doc, typeof SCRIBBLE_SYMBOLS !== 'undefined' ? SCRIBBLE_SYMBOLS : {}, durations, assets).prepare();
+      rt.doc = doc;
+    } catch (e) { return fail(); }
+    if (!box.isConnected) return;
+    rt.canvas = box.querySelector('[data-scr-canvas]');
+    rt.ctx = rt.canvas.getContext('2d');
+    rt.total = rt.scene.tl.total;
+    const sizeIt = () => { const w = Math.min(1920, Math.round(rt.canvas.clientWidth * Math.min(2, window.devicePixelRatio || 1))) || 1280; if (Math.abs(rt.canvas.width - w) > 8) { rt.canvas.width = w; rt.canvas.height = Math.round(w * 9 / 16); } scrDraw(rt); };
+    if (typeof ResizeObserver === 'function') { rt.ro = new ResizeObserver(sizeIt); rt.ro.observe(rt.canvas); }
+    // Standbild vor dem Start: das Ende der ersten Szene (dort steht schon etwas auf der Tafel)
+    rt.t = (state.self[b.id] || {}).at || 0;
+    rt.poster = !rt.t;
+    sizeIt();
+    if (load) load.hidden = true;
+    box.classList.add('kp-scr-ready');
+    box.querySelectorAll('[data-scr-toggle], [data-scr-step], [data-scr-seek]').forEach(el => { el.disabled = false; });
+    const big = box.querySelector('[data-scr-big]'); if (big) big.hidden = false;
+    scrUi(rt);
+  }
+  function scrSceneAt(rt, t) { const sc = rt.scene.tl.scenes; let i = sc.findIndex(s => t < s.t1); return i < 0 ? sc.length - 1 : i; }
+  function scrDraw(rt) {
+    if (!rt.scene || !rt.ctx) return;
+    const t = rt.poster ? Math.max(0, rt.scene.tl.scenes[0].t1 - 0.05) : rt.t;
+    try { rt.scene.draw(rt.ctx, Math.min(t, rt.total - 0.001), rt.canvas.width, rt.canvas.height); } catch (e) { /* Zeichnen fehlgeschlagen: Standbild bleibt */ }
+    const cap = rt.box.querySelector('[data-scr-cap]');
+    if (cap) {
+      const on = rt.b.captions !== false && rt.box.querySelector('[data-scr-cc]').getAttribute('aria-pressed') === 'true';
+      const cue = !rt.poster && on ? (rt.scene.cues || []).find(c => rt.t >= c.t0 && rt.t < c.t1) : null;
+      cap.hidden = !cue; if (cue && cap.textContent !== cue.text) cap.textContent = cue.text;
+    }
+  }
+  function scrUi(rt) {
+    const box = rt.box, i = scrSceneAt(rt, rt.t), n = rt.scene.tl.scenes.length;
+    const tg = box.querySelector('[data-scr-toggle]');
+    if (tg) { tg.innerHTML = rt.playing ? SCR_PAUSE : SCR_PLAY; const l = T(rt.playing ? 'scrPause' : 'scrAbspielen'); tg.setAttribute('aria-label', l); tg.title = l; }
+    const sk = box.querySelector('[data-scr-seek]');
+    if (sk && document.activeElement !== sk) sk.value = Math.round(rt.t / rt.total * 1000);
+    if (sk) sk.setAttribute('aria-valuetext', `${scrClock(rt.t)} / ${scrClock(rt.total)}`);
+    const tm = box.querySelector('[data-scr-time]'); if (tm) tm.textContent = `${scrClock(rt.t)} / ${scrClock(rt.total)}`;
+    const sc = box.querySelector('[data-scr-scene]'); const txt = T('scrSzene').replace('{n}', i + 1).replace('{m}', n); if (sc && sc.textContent !== txt) sc.textContent = txt;
+    box.classList.toggle('kp-scr-playing', rt.playing);
+  }
+  // Ton der laufenden Szene an die Zeit anlegen (beim Start, nach dem Springen, beim Szenenwechsel)
+  function scrAudio(rt) {
+    const i = scrSceneAt(rt, rt.t), s = rt.scene.tl.scenes[i], src = rt.doc.scenes[i].audio;
+    if (rt.audioScene === i && rt.audio && !rt.audio.paused) return;
+    if (rt.audio) { rt.audio.pause(); rt.audio = null; }
+    rt.audioScene = i;
+    if (!src || !rt.playing) return;
+    const a = new Audio(src);
+    a.volume = audioPrefs.vol;
+    const off = rt.t - s.t0;
+    a.addEventListener('loadedmetadata', () => { if (off < a.duration) { a.currentTime = Math.max(0, off); if (rt.playing && rt.audio === a) a.play().catch(() => {}); } }, { once: true });
+    rt.audio = a;
+  }
+  function scrTick(rt, now) {
+    if (!rt.playing) return;
+    const dt = Math.min(0.25, (now - rt.last) / 1000); rt.last = now;
+    const i0 = scrSceneAt(rt, rt.t);
+    rt.t = Math.min(rt.total, rt.t + dt);
+    rt.played[i0] = (rt.played[i0] || 0) + dt;
+    const s0 = rt.scene.tl.scenes[i0];
+    if (rt.played[i0] >= s0.len * 0.8) scrSeen(rt, i0);
+    if (scrSceneAt(rt, rt.t) !== i0) scrAudio(rt);
+    scrDraw(rt); scrUi(rt);
+    if (rt.t >= rt.total) { scrSeen(rt, rt.scene.tl.scenes.length - 1); scrPause(rt); rt.t = rt.total; scrUi(rt); return; }
+    rt.raf = requestAnimationFrame(x => scrTick(rt, x));
+  }
+  function scrPlay(rt) {
+    if (!rt.scene || rt.playing) return;
+    Object.values(scrRt).forEach(o => { if (o !== rt) scrPause(o); });
+    stopSound();
+    if (rt.t >= rt.total - 0.05) rt.t = 0;
+    rt.poster = false; rt.playing = true; rt.last = performance.now(); rt.audioScene = -1;
+    const big = rt.box.querySelector('[data-scr-big]'); if (big) big.hidden = true;
+    scrAudio(rt); scrUi(rt);
+    rt.raf = requestAnimationFrame(x => scrTick(rt, x));
+  }
+  function scrPause(rt) {
+    if (!rt) return;
+    rt.playing = false; cancelAnimationFrame(rt.raf);
+    if (rt.audio) { rt.audio.pause(); rt.audio = null; }
+    rt.audioScene = -1;
+    if (rt.scene) { scrUi(rt); scrSave(rt); }
+  }
+  function scrSeek(rt, t) {
+    rt.poster = false;
+    rt.t = Math.max(0, Math.min(rt.total, t));
+    if (rt.playing) { rt.audioScene = -1; scrAudio(rt); rt.last = performance.now(); }
+    scrDraw(rt); scrUi(rt);
+  }
+  function scrSeen(rt, i) {
+    if (rt.seen.has(i)) return;
+    rt.seen.add(i);
+    scrSave(rt);
+    if (rt.seen.size >= rt.scene.tl.scenes.length) scrFinish(rt.b);
+  }
+  function scrSave(rt) {
+    const st = state.self[rt.b.id] = Object.assign({}, state.self[rt.b.id] || {});
+    st.s = [...rt.seen].sort((x, y) => x - y);
+    st.at = rt.t >= rt.total - 0.5 ? 0 : Math.round(rt.t * 10) / 10;
+  }
+  function scrFinish(b) {
+    const st = state.self[b.id] = Object.assign({}, state.self[b.id] || {});
+    if (st.done) return;
+    st.done = true;
+    updateConditions(); renderFooter(); report();
+  }
   function renderModell3d(b) {
     const st = state.self[b.id] || {}, pts = m3dPts(b), seen = st.seen || {}, cur = st.cur == null ? -1 : Number(st.cur);
     const doneAt = (pt, i) => { const d = pt.target ? pageIndexById(pt.target) : -1; return d >= 0 ? state.visited.has(d) : !!seen[i]; };
@@ -7236,6 +7575,17 @@ function kursPlayer(course, opts) {
     st.place[i] = ci;
     state.self[b.id] = st;
     refreshBlock(box ? box.closest('[data-sortcats]') : root.querySelector(`[data-sortcats="${b.id}"]`), renderSort(b));
+    // Ohne Maus (UX-Prüfung 07.11.2026, WCAG 2.4.3): nach dem Neuzeichnen steht der Fokus auf dem nächsten offenen Kärtchen,
+    // sind alle zugeordnet auf „Zuordnung prüfen“; eine Ansage nennt, wohin das Kärtchen gewandert ist
+    const nb = root.querySelector(`[data-sortcats="${b.id}"]`);
+    if (nb && box && box.matches && box.matches('[data-sort-to]')) {
+      const next = nb.querySelector('.kp-sort-pool [data-sort-item] [data-sort-to]:not([disabled])') || nb.querySelector('[data-sort-check]:not([disabled])') || nb.querySelector(`[data-sort-item="${i}"] [data-sort-to]:not([disabled])`);
+      if (next) next.focus({ preventScroll: true });
+      const it = (b.items || [])[i], cat = (b.categories || [])[ci];
+      let say = nb.querySelector('[data-sort-say]');
+      if (!say) { say = document.createElement('span'); say.className = 'kp-sr'; say.setAttribute('data-sort-say', ''); say.setAttribute('role', 'status'); nb.appendChild(say); }
+      say.textContent = T('sortAbgelegt').replace('{k}', plainText((it && it.text) || '')).replace('{c}', typeof cat === 'object' ? cat.title : (cat || ''));
+    }
   }
   // Liste mit Auswahl (sortcats.look „liste“, Vorbild Rise-Übung „Prepare to raise a concern“, 30.10.2026): je Punkt eine Zeile mit
   // Auswahlfeld „Bereich wählen“, ein Prüfknopf für alle. Richtige Zeilen rasten ein, falsche bleiben änderbar; beim zweiten
@@ -7315,23 +7665,23 @@ function kursPlayer(course, opts) {
       const right = st.done && st.place[i] != null && it.cat === catAt(st.place[i]);
       return `<li class="kp-sort-item ${st.done ? (right ? 'kp-right' : 'kp-wrong') : ''}" draggable="${st.done ? 'false' : 'true'}" data-sort-item="${i}" data-block="${b.id}" tabindex="0">
         ${ablage ? `<span class="kp-sort-grip" aria-hidden="true">${icon('move')}</span>` : ''}${pic}<span class="kp-sort-text">${esc(it.text)}</span>
-        ${st.done ? (right ? '<b aria-label="richtig">✔</b>' : `<b aria-label="falsch">✘ <span class="kp-sort-fix">${esc(it.cat)}</span></b>`) : `<span class="kp-sort-move">${cats.map((c, ci) => `<button data-sort-to="${ci}" data-item="${i}" data-block="${b.id}" title="Nach „${esc(c.title)}“" ${inCat === ci ? 'disabled' : ''}>${ci + 1}</button>`).join('')}</span>`}
+        ${st.done ? (right ? '<b aria-label="richtig">✔</b>' : `<b aria-label="falsch">✘ <span class="kp-sort-fix">${esc(it.cat)}</span></b>`) : `<span class="kp-sort-move">${cats.map((c, ci) => `<button type="button" data-sort-to="${ci}" data-item="${i}" data-block="${b.id}" aria-label="${esc(T('stapelIn').replace('{c}', c.title))}: ${esc(plainText(it.text || ''))}" title="${esc(T('stapelIn').replace('{c}', c.title))}" ${inCat === ci ? 'disabled' : ''}>${ci + 1}</button>`).join('')}</span>`}
       </li>`;
     };
     const boxes = cats.map((c, ci) => `<div class="kp-sort-cat" data-sort-cat="${ci}" data-block="${b.id}">
       <p class="kp-sort-cat-title"><span class="kp-num" aria-hidden="true">${ci + 1}</span>${esc(c.title)}</p>
-      <ul>${order.filter(i => st.place[i] === ci).map(i => chip(i, ci)).join('') || `<li class="kp-sort-empty">${ablage ? '' : 'Noch nichts zugeordnet'}</li>`}</ul></div>`).join('');
+      <ul>${order.filter(i => st.place[i] === ci).map(i => chip(i, ci)).join('') || `<li class="kp-sort-empty">${ablage ? '' : T('sortNochNichts')}</li>`}</ul></div>`).join('');
     const score = st.done ? items.filter((it, i) => st.place[i] != null && it.cat === catAt(st.place[i])).length : 0;
     return `<div class="kp-sortcats${ablage ? ' kp-sort-ablage' : ''}${bilder ? ' kp-sort-bilder' : ''}" data-sortcats="${b.id}" style="--n:${Math.max(1, cats.length)}">
       ${b.title ? `<h2 class="kp-q">${accent(b.title)}</h2>` : ''}
       ${b.intro ? `<div class="kp-text" style="margin-bottom:12px">${res(b.intro)}</div>` : ''}
-      <p class="kp-sort-hint">${esc(b.hint || 'Zieh die Karten in die passende Spalte. Mit der Tastatur: Karte anwählen und die Nummer der Spalte drücken.')}</p>
-      <div class="kp-sort-pool"><ul>${open.map(i => chip(i, null)).join('') || `<li class="kp-sort-empty">${ablage ? '' : 'Alles zugeordnet'}</li>`}</ul></div>
+      <p class="kp-sort-hint">${esc(b.hint || T('sortHinweis'))}</p>
+      <div class="kp-sort-pool"><ul>${open.map(i => chip(i, null)).join('') || `<li class="kp-sort-empty">${ablage ? '' : T('allesZugeordnet')}</li>`}</ul></div>
       <div class="kp-sort-cats">${boxes}</div>
       ${st.done
-        ? `<div class="kp-feedback ${score === items.length ? 'ok' : 'neutral'}" role="status">${score} von ${items.length} richtig zugeordnet.${score === items.length ? '' : ' Die richtige Spalte steht jetzt hinter den falschen Karten.'}</div>
-           <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-sort-reset="${b.id}">Noch einmal</button></div>`
-        : `<div class="kp-quiz-actions"><button class="kp-btn" data-sort-check="${b.id}" ${open.length ? 'disabled' : ''}>${esc(b.checkLabel || (ablage ? 'OK' : 'Zuordnung prüfen'))}</button></div>`}
+        ? `<div class="kp-feedback ${score === items.length ? 'ok' : 'neutral'}" role="status">${esc(T('sortErgebnis').replace('{n}', score).replace('{m}', items.length))}${score === items.length ? '' : ' ' + esc(T('sortFalschHinweis'))}</div>
+           <div class="kp-quiz-actions"><button class="kp-btn kp-sec" data-sort-reset="${b.id}">${T('nochEinmal')}</button></div>`
+        : `<div class="kp-quiz-actions"><button class="kp-btn" data-sort-check="${b.id}" ${open.length ? 'disabled' : ''}>${esc(b.checkLabel || (ablage ? 'OK' : T('sortPruefen')))}</button>${open.length && !ablage ? `<span class="kp-sort-open" role="status">${esc(open.length === 1 ? T('sortOffenEins') : T('sortOffen').replace('{n}', open.length))}</span>` : ''}</div>`}
     </div>`;
   }
 
@@ -7519,7 +7869,7 @@ function kursPlayer(course, opts) {
         <div class="kp-mkc-side kp-on-dark">${eyebrow(b.eyebrow || T('mkcNeu'))}<span class="kp-mkc-tag">${T('mkcFrage')}</span><p class="kp-mkc-q">${esc(plainText(b.front))}</p>${o ? stand : ''}</div>
         <div class="kp-mkc-main"><div class="kp-mkc-card">${o
           ? `<div class="kp-mkc-face kp-mkc-back" tabindex="-1"><span class="kp-mkc-tag">${T('mkcAntwort')}</span><div class="kp-text">${res(b.back || '')}</div></div>`
-          : `<div class="kp-mkc-face kp-mkc-cover"><span class="kp-mkc-cover-ico" aria-hidden="true">${icon('flip')}</span><p class="kp-mkc-small">${esc(b.hint || T('mkcHinweis'))}</p><button type="button" class="kp-btn" data-mkc-flip="${b.id}">${T('mkcUmdrehen')}</button></div>`}</div></div>
+          : `<div class="kp-mkc-face kp-mkc-cover">${b.coverIcon === '' ? '' : `<span class="kp-mkc-cover-ico" aria-hidden="true">${icon(b.coverIcon || 'flip')}</span>`}<p class="kp-mkc-small">${esc(b.hint || T('mkcHinweis'))}</p><button type="button" class="kp-btn" data-mkc-flip="${b.id}">${T('mkcUmdrehen')}</button></div>`}</div></div>
       </div>`;
     }
     return `<div class="kp-mkc${o ? ' is-open' : ''}" data-mkc="${b.id}">
@@ -8615,6 +8965,13 @@ function kursPlayer(course, opts) {
         : '<p class="kp-lock">Noch keine Datei hinterlegt.</p>'}</div>`;
   }
 
+  // Relative Helligkeit einer #hex-Farbe nach WCAG (0 schwarz, 1 weiß)
+  function hexLum(h) {
+    const m = String(h || '').match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    if (!m) return 1;
+    const c = m.slice(1).map(x => { const v = parseInt(x, 16) / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
   // Das eigene Bild eines Bausteins (fuer die Kulisse): Bild, Titelbild, Poster, erste Suchbild-Runde
   // Textfarbe eines Bausteins: Hauptfarbe, Akzentfarbe, Weiß, Schriftfarbe oder eine eigene Farbe als #hex
   function blockInk(v, dark) {
@@ -8769,7 +9126,7 @@ function kursPlayer(course, opts) {
   // Karten „Die Situation“ (page.moment) und „Dein Schritt“ (page.move), im Lektionskopf und in jedem Stil unter dem Seitentitel
   function slCards(p) {
     const card = (cls, ico, label, text) => (plainText(text) ? `<div class="kp-sl-mini kp-sl-mini-${cls}"><p class="kp-sl-label">${icon(ico)}${esc(label)}</p><p class="kp-sl-mtext">${esc(text)}</p></div>` : '');
-    const c = card('moment', 'pin', T('slSituation'), p.moment) + card('move', 'arrow-ur', T('slSchritt'), p.move);
+    const c = card('moment', ICONS[p.momentIcon] ? p.momentIcon : 'pin', T('slSituation'), p.moment) + card('move', ICONS[p.moveIcon] ? p.moveIcon : 'arrow-ur', T('slSchritt'), p.move);
     return c ? `<div class="kp-sl-cards">${c}</div>` : '';
   }
   function slHero(p, at, n) {
@@ -8786,7 +9143,7 @@ function kursPlayer(course, opts) {
     const pills = !badge && at === 0 && n > 2
       ? `<span class="kp-sl-pill">${icon('clock')} ${esc(T('slRund').replace('{n}', estimateMinutes()))}</span><span class="kp-sl-pill">${icon('lines')} ${esc(T('slLektionen').replace('{n}', n))}</span>${graded().length ? `<span class="kp-sl-pill">${icon('check')} ${esc(T('slAbschluss'))}</span>` : ''}`
       : `<span class="kp-sl-pill kp-ml-lesson">${esc(T('lektionVon').replace('{n}', at + 1).replace('{m}', n))}</span><span class="kp-sl-pill">${icon('clock')} ${min} ${T('minAbk')}</span>`;
-    return `${slPrevBar(at, microLessons())}<header class="kp-page-head kp-ml-chapstart kp-sl-hero kp-on-dark${img ? ' kp-sl-hero-img' : ''}${badge ? '' : ' kp-sl-hero-plain'}"${img ? ` style="--kp-slbg:url('${esc(res(img))}')${focus ? `;--kp-slpos:${esc(focus)}` : ''}"` : ''}>
+    return `${slPrevBar(at, microLessons())}<header class="kp-page-head kp-ml-chapstart kp-sl-hero kp-on-dark${img ? ' kp-sl-hero-img' : ' kp-sl-hero-noimg'}${badge ? '' : ' kp-sl-hero-plain'}"${img ? ` style="--kp-slbg:url('${esc(res(img))}')${focus ? `;--kp-slpos:${esc(focus)}` : ''}"` : ''}>
       ${badge}${logo}
       <div class="kp-sl-hero-in">
         ${eye}<p class="kp-sl-pills">${pills}</p>
@@ -8807,10 +9164,10 @@ function kursPlayer(course, opts) {
   // Folie „Zahl“: der erste dieser Bausteine steht groß links, alles andere rechts
   const ZAHL_TYPES = ['bignumber', 'statement', 'image', 'anim', 'lottie'];
   // Bausteine, die in der Folie „Wechsel“ als Bild neben dem Text stehen
-  const PIC_TYPES = ['image', 'media', 'vstatements', 'ivideo', 'lottie', 'anim', 'vscene', 'modell3d'];
+  const PIC_TYPES = ['image', 'media', 'vstatements', 'ivideo', 'lottie', 'anim', 'vscene', 'modell3d', 'scribble'];
   // b.slot 'unten' gilt nur auf der geteilten Folie: der Baustein steht unter Text und Bühne über die ganze Breite (Vorbild Rise
   // „Arbeitsschutz für alle“: Kernsatz unter Einleitung und Personenkarten); auf anderen Folien zählt er zur Bühne
-  const slotOf = b => (b.slot === 'text' ? 'text' : b.slot === 'buehne' ? 'stage' : b.slot === 'unten' ? 'below' : SPLIT_TEXT.includes(b.type) && !(b.type === 'table' && b.look === 'ausfuellen') ? 'text' : 'stage');
+  const slotOf = b => (b.slot === 'text' ? 'text' : (b.slot === 'buehne' || b.slot === 'stage') ? 'stage' : b.slot === 'unten' ? 'below' : SPLIT_TEXT.includes(b.type) && !(b.type === 'table' && b.look === 'ausfuellen') ? 'text' : 'stage');
   function arrangeOf(p) {
     if (!set.screen || !p) return '';
     const blocks = p.blocks || [];
@@ -8822,7 +9179,7 @@ function kursPlayer(course, opts) {
     // Ein Hintergrundbild der ganzen Folie ohne eigene Wahl: Inhalt mittig darauf (Vorbild: Kapitelwahl über der Küche)
     if (p.bgImage && p.bgImage.src && !p.arrange) return 'mitte';
     if (p.arrange === 'stapel') return bleed ? '' : 'fit';
-    const unsuited = blocks.some(b => SPLIT_NO.includes(b.type) || b.cover || (b.type === 'branch' && ['handy', 'laptop', 'karte'].includes(b.look)) || (b.type === 'quiz' && b.look === 'notizen') || (b.type === 'dialog' && b.stage) || (b.design && (b.design.bg || ['wide', 'full', 'half'].includes(b.design.width))));
+    const unsuited = blocks.some(b => SPLIT_NO.includes(b.type) || b.cover || (b.type === 'branch' && ['handy', 'laptop', 'karte'].includes(b.look)) || (b.type === 'quiz' && b.look === 'notizen') || (b.type === 'dialog' && b.stage) || (b.design && (b.design.bg || ['wide', 'full', 'half', 'third', 'twothird'].includes(b.design.width))));
     // Eine „Kurz gefragt“-Sprechblase liegt über der Seite und belegt keinen Platz auf der Folie
     const slots = blocks.filter(b => !(b.type === 'kurzfrage' && kfBubble(b))).map(slotOf);
     if (!unsuited && slots.includes('text') && slots.includes('stage')) return 'geteilt';
@@ -8834,6 +9191,14 @@ function kursPlayer(course, opts) {
   // mittigen Bildschirmseite füllt die ganze Folie, Titel weiß oben auf der unscharfen Kulisse, kein leerer Streifen darunter
   // Dunkle Folie (Vorbild Rise „Mit Struktur zum Ziel“): page.tone 'dunkel' auf einer Folie ohne eigene Aufteilung färbt die ganze Fläche dunkel
   function darkSlide(p) { return !!(p && !p.result && p.tone === 'dunkel' && ['fit', ''].includes(arrangeOf(p)) && !(p.blocks || []).some(b => b.type === 'hero')); }
+  // Eigene Farbe der Folie (page.bgColor, Rechtsklick „Hintergrund“ in „Direkt bearbeiten“, Kerstin 11.11.2026): füllt die ganze Fläche
+  // hinter den Bausteinen. Nur auf Folien ohne eigene Aufteilung und ohne Titelbereich, die bringen ihre Flächen selbst mit.
+  function pageFillOk(p) { return !!p && !p.result && ['fit', '', 'geteilt'].includes(arrangeOf(p)) && !(p.blocks || []).some(b => b.type === 'hero'); }
+  function pageFill(p) { const v = p && !p.result ? String(p.bgColor || '') : ''; return /^#[0-9a-f]{6}$/i.test(v) && pageFillOk(p) ? v : ''; }
+  // Eigene Schriftfarbe für den Kopf der Folie (page.ink: Dachzeile, Titel, Lesezeit), Werte wie design.ink am Baustein
+  function headInk(p) { return p ? blockInk(p.ink, darkSlide(p) || pageFillDark(p)) : ''; }
+  // Auf einer dunklen Farbe wird die Schrift weiß (dieselben Regeln wie die dunkle Folie)
+  function pageFillDark(p) { const v = pageFill(p); if (!v) return false; const lf = hexLum(v), lt = hexLum(/^#[0-9a-f]{6}$/i.test(theme.text || '') ? theme.text : '#1f2d33'); return 1.05 / (lf + 0.05) > (Math.max(lf, lt) + 0.05) / (Math.min(lf, lt) + 0.05); }
   // Infofolie baut sich auf (page.einflug): Kopf, Absätze, Listenpunkte, Karten und Bilder fliegen nacheinander ein.
   // Nur beim Zeichnen der Seite, nicht beim Neuzeichnen eines Bausteins; unter „Bewegung reduzieren“ steht alles sofort (CSS).
   const EI_TEXT = '.kp-text:not(.kp-text .kp-text, .kp-card .kp-text, details .kp-text, .kp-fig-quote *)';
@@ -8903,7 +9268,7 @@ function kursPlayer(course, opts) {
     // Maskottchen steht am Anfang jedes Kapitels neben dem Titel, mit der Haltung dieser Seite
     const masc = mascotCast() && !p.result && chapterList().some(c => c.pages[0] === pages.indexOf(p)) ? mascotHtml(p.mascotPose, 'kp-mascot-head') : '';
     const side = masc ? `<div class="kp-head-side">${masc}${cring}</div>` : cring;
-    const head = p.hideTitle ? '' : lessons && scrollLook() && lesAt >= 0 ? slHero(p, lesAt, lessons.length) : `<header class="kp-page-head${firstWide ? ' kp-head-wide' : ''}${chAt >= 0 || lessons ? ' kp-ml-chapstart' : ''}${side ? ' kp-has-chring' : ''}">${num}${wbCrumb(p)}${pageDays(p)}${eyebrow(p.eyebrow)}<h1>${accent(p.title)}</h1>${chAt >= 0 && !lessons && p.chapter && plainTitle(p.title) !== p.chapter ? `<p class="kp-ml-chap">${esc(p.chapter)}</p>` : ''}${read}${slCards(p)}${side}</header>`;
+    const head = p.hideTitle ? '' : lessons && scrollLook() && lesAt >= 0 ? slHero(p, lesAt, lessons.length) : `<header class="kp-page-head${firstWide ? ' kp-head-wide' : ''}${chAt >= 0 || lessons ? ' kp-ml-chapstart' : ''}${side ? ' kp-has-chring' : ''}${headInk(p) ? ' kp-own-headink' : ''}"${headInk(p) ? ` style="--kp-head-ink:${headInk(p)}"` : ''}>${num}${wbCrumb(p)}${pageDays(p)}${eyebrow(p.eyebrow)}<h1>${accent(p.title)}</h1>${chAt >= 0 && !lessons && p.chapter && plainTitle(p.title) !== p.chapter ? `<p class="kp-ml-chap">${esc(p.chapter)}</p>` : ''}${read}${slCards(p)}${side}</header>`;
     let blocked = false; // hinter einer Weiter-Sperre bleibt der Rest der Seite verborgen
     // Direkt bearbeiten im Editor (opts.showAll): alles steht offen, verborgene Teile tragen nur einen Vermerk
     let gated = false;
@@ -8932,6 +9297,29 @@ function kursPlayer(course, opts) {
       if (bgMove) cls.push('kp-bgm', 'kp-bgm-' + look.bgMotion);
       if (look.bg === 'dark' || (look.bg === 'image' && ['dark', 'primary'].includes(look.overlay))) cls.push('kp-on-dark');
       const styles = [];
+      // Eigene Füllfarbe (Menüband „Fülleffekt“): dunkle Farben bekommen helle Schrift
+      const fill = look.bg !== 'fill' ? '' : /^#[0-9a-f]{6}$/i.test(look.fill || '') ? look.fill : '#E3EEFB';
+      if (fill) {
+        styles.push('--kp-fill:' + fill);
+        // Weiß oder die Schriftfarbe des Designs, je nachdem, was auf der Füllfarbe mehr Kontrast hat
+        const lf = hexLum(fill), lt = hexLum(/^#[0-9a-f]{6}$/i.test(theme.text || '') ? theme.text : '#1f2d33');
+        if (1.05 / (lf + 0.05) > (Math.max(lf, lt) + 0.05) / (Math.min(lf, lt) + 0.05)) cls.push('kp-on-dark');
+      }
+      if (['linie', 'haupt', 'akzent'].includes(look.outline)) cls.push('kp-ol-' + look.outline);
+      else if (/^#[0-9a-f]{6}$/i.test(look.outline || '')) { cls.push('kp-ol-eigen'); styles.push('--kp-ol:' + look.outline); }
+      // Füllung der Form (design.shapeFill): der Kasten um den Baustein, getrennt von der Fläche des Abschnitts (design.bg).
+      // Ohne Abschnittsfläche ist der Baustein selbst die Form, mit Fläche sein Innenkasten. Die Schrift richtet sich nach der Form.
+      if (/^#[0-9a-f]{6}$/i.test(look.shapeFill || '')) {
+        styles.push('--kp-shape-fill:' + look.shapeFill);
+        const lf = hexLum(look.shapeFill), lt = hexLum(/^#[0-9a-f]{6}$/i.test(theme.text || '') ? theme.text : '#1f2d33');
+        const dk = 1.05 / (lf + 0.05) > (Math.max(lf, lt) + 0.05) / (Math.min(lf, lt) + 0.05);
+        for (let k = cls.indexOf('kp-on-dark'); k >= 0; k = cls.indexOf('kp-on-dark')) cls.splice(k, 1);
+        cls.push('kp-form-fill', dk ? 'kp-form-dark' : 'kp-form-light');
+        if (dk) cls.push('kp-on-dark');
+      }
+      // Eigene Farben für die Kästen im Baustein (Karten, Antworten, Akkordeon …): Füllung, Rahmen, Schrift
+      [['boxFill', 'bg'], ['boxLine', 'line'], ['boxInk', 'ink']].forEach(([k, n]) => { if (/^#[0-9a-f]{6}$/i.test(look[k] || '')) { cls.push('kp-box-' + n); styles.push(`--kp-box-${n}:${look[k]}`); } });
+      if ([2, 3].includes(Number(look.cols))) cls.push('kp-cols-' + Number(look.cols));
       if (look.bg === 'image' && look.bgImage && look.bgImage.src) {
         styles.push(`--kp-bgimg:url('${esc(res(look.bgImage.src))}')`);
         if (look.bgImage.focus) styles.push(`--kp-bgpos:${esc(look.bgImage.focus)}`);
@@ -8946,7 +9334,9 @@ function kursPlayer(course, opts) {
       // Textfarbe, Ausrichtung und Größe des ganzen Bausteins (aus „Direkt bearbeiten“ oder dem Reiter Gestaltung)
       const ink = blockInk(look.ink, cls.includes('kp-on-dark') || ['primary', 'dark', 'image'].includes(look.bg));
       if (ink) { cls.push('kp-own-ink'); styles.push(`--kp-ink-own:${ink}`); }
+      if (/^#[0-9a-f]{6}$/i.test(look.iconInk || '')) { cls.push('kp-own-ico'); styles.push(`--kp-ico-own:${look.iconInk}`); }
       if (['center', 'right'].includes(look.align)) cls.push('kp-al-' + look.align);
+      if (['center', 'bottom'].includes(look.valign)) cls.push('kp-va-' + look.valign);
       const scale = Number(look.scale);
       if (scale && scale !== 1 && scale >= 0.7 && scale <= 1.6) { cls.push('kp-own-scale'); styles.push(`--kp-scale:${scale}`); }
       const style = styles.length ? ` style="${styles.join(';')}"` : '';
@@ -8959,23 +9349,36 @@ function kursPlayer(course, opts) {
       const inner = b.type === 'sources' ? renderBlock(b) : footnotes(renderBlock(b));
       return `<section class="${cls.join(' ')}" data-block="${b.id}"${hasCond(b) ? ' data-cond="1"' + (conditionMet(b.showIf) || opts.showAll ? '' : ' hidden') : ''}${later ? ` data-ie-why="${esc(later)}"` : ''}${style}${lang}>${bgMove ? '<span class="kp-bgmove" aria-hidden="true"></span>' : ''}${decor}<div class="kp-block-inner">${band}${narrationButton(b)}${inner}</div>${shape}</section>`;
     });
-    // Zwei halbbreite Blöcke nebeneinander: aufeinanderfolgende werden zu einer Reihe gebündelt
-    const out = [];
-    (p.blocks || []).forEach((b, i) => {
-      const half = ((b.design || {}).width === 'half') && !(blocked && i > 0);
-      const prev = out[out.length - 1];
-      if (half && prev && prev.row && prev.n < 2) { prev.html += parts[i]; prev.n++; }
-      else out.push(half ? { row: true, n: 1, html: parts[i] } : { row: false, html: parts[i] });
-    });
+    // Raster (01.11.2026): Bausteine mit Spaltenbreite (⅓, ½, ⅔ von sechs Rasterspalten) stehen nebeneinander. Aufeinanderfolgende
+    // werden zu einer Reihe gebündelt, bis sechs Spalten oder drei Bausteine voll sind; am Handy rutscht alles untereinander.
+    const COL_SPAN = { third: 2, half: 3, twothird: 4 };
+    const colOf = i => (!(blocked && i > 0) && COL_SPAN[((p.blocks[i] || {}).design || {}).width]) || 0;
+    const packRows = idxs => {
+      const res = [];
+      let row = null;
+      idxs.forEach(i => {
+        const s = colOf(i);
+        // design.rowStart: hier beginnt eine neue Reihe, auch wenn in der vorigen noch Platz wäre
+        if (s && row && !((p.blocks[i].design || {}).rowStart) && row.sum + s <= 6 && row.n < 3) { row.html += parts[i]; row.sum += s; row.n++; return; }
+        if (s) { row = { html: parts[i], sum: s, n: 1 }; res.push(row); return; }
+        row = null;
+        res.push({ html: parts[i] });
+      });
+      return res.map(x => (x.sum ? `<div class="kp-row">${x.html}</div>` : x.html)).join('');
+    };
+    const allIdx = (p.blocks || []).map((b, i) => i);
+    const allRows = () => packRows(allIdx);
     // Ohne Test gibt es keine Ergebnisseite: die Empfehlung steht dann auf der letzten Seite
     const isLast = !pages.some(x => x.result) && pages.indexOf(p) === pages.length - 1;
     if (slide) {
       // Folie mit Vollbild: „mitte“ legt Titel und Bausteine als Karten mittig auf das Bild, „welle“ stellt sie auf eine
       // geschwungene Fläche rechts (bzw. links), das Bild bleibt daneben als Szene sichtbar
       const bgFocus = f => (f && typeof f === 'object' ? `${+f.x || 50}% ${+f.y || 50}%` : f); // {x, y} aus älteren Dateien, sonst Text wie „50% 30%“
-      const bg = p.bgImage && p.bgImage.src ? `--kp-slidebg:url('${esc(res(p.bgImage.src))}');${p.bgImage.focus ? `--kp-bgpos:${esc(bgFocus(p.bgImage.focus))};` : ''}` : '';
+      // Bildidee für das Foto der Folie (KI-Bauplan, 02.11.2026): in der Vorschau steht ein Platzhalter mit der Idee, im Kurs bleibt die Fläche leer
+      const bgIdea = !(p.bgImage && p.bgImage.src) && opts.preview && p.bgImage && plainText(p.bgImage.idea) ? slideIdeaSvg(p.bgImage, /^(uebung|mitte)/.test(arrange)) : '';
+      const bg = p.bgImage && p.bgImage.src ? `--kp-slidebg:url('${esc(res(p.bgImage.src))}');${p.bgImage.focus ? `--kp-bgpos:${esc(bgFocus(p.bgImage.focus))};` : ''}` : bgIdea ? `--kp-slidebg:url('${bgIdea}');` : '';
       // Zeichnung (SVG) statt Foto: in den Fotofeldern von Muster, Verlauf, Rahmen und Kopfband ganz zeigen statt anschneiden (Prüfung 19.10.2026)
-      const bgDraw = bg && /\.svg(\?|$)|^data:image\/svg/i.test(String(p.bgImage.src)) ? ' kp-bg-drawing' : '';
+      const bgDraw = bgIdea ? ' kp-bg-idea' : bg && /\.svg(\?|$)|^data:image\/svg/i.test(String(p.bgImage.src)) ? ' kp-bg-drawing' : '';
       const kind = arrange.replace(/-(links|hell)$/, '');
       const flip = /-links$/.test(arrange);
       // Muster (Vorbild „Fragen gezielt einsetzen“): links eine Fläche in der Hauptfarbe mit großen Zeichen in Sprechblasen
@@ -8983,17 +9386,17 @@ function kursPlayer(course, opts) {
       if (kind === 'muster') {
         const ch = [...String(p.pattern || '?!').replace(/\s+/g, '')].slice(0, 6);
         const cells = Array.from({ length: 12 }, (x, k) => `<i>${esc(ch[k % ch.length] || '?')}</i>`).join('');
-        return `<div class="kp-slide kp-slide-muster${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-muster-feld" aria-hidden="true">${cells}</div><div class="kp-muster-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-muster-karte">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+        return `<div class="kp-slide kp-slide-muster${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-muster-feld" aria-hidden="true">${cells}</div><div class="kp-muster-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-muster-karte">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       // Verlauf (Vorbild „Das Warum und die Alternative ermitteln“): das Foto steht links und läuft weich in den Grund aus,
       // Titel und Text rechts daneben ohne Karte, gern als Ich-Erzählung der Person im Bild
       if (kind === 'verlauf') {
-        return `<div class="kp-slide kp-slide-verlauf${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-verlauf-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-verlauf-text">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+        return `<div class="kp-slide kp-slide-verlauf${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-verlauf-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-verlauf-text">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       // Rahmen (Vorbild Business-Präsentation „Our Philosophy“): das Foto steht in einem versetzten Linienrahmen, eine weiße
       // Karte mit Titel und allen Bausteinen überlappt es von der Seite
       if (kind === 'rahmen') {
-        return `<div class="kp-slide kp-slide-rahmen${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-rahmen-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-rahmen-karte">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+        return `<div class="kp-slide kp-slide-rahmen${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-rahmen-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-rahmen-karte">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       // Szene (Vorbild illustrierte Storyline-Kurse, „Setz jetzt deine Kopfhörer auf“): die Illustration aus page.bgImage füllt
       // die Folie, bis zu zwei Figuren aus page.figures stehen links und rechts im Bild, alle Bausteine hängen als Schild
@@ -9027,7 +9430,7 @@ function kursPlayer(course, opts) {
         if (z - a > 7) { a = Math.max(a, Math.min(idx - 3, z - 7)); z = a + 7; }
         const maxOk = unlockedUpTo(), tabs = [];
         for (let i = a; i <= z; i++) tabs.push(`<button type="button" class="kp-ordner-tab${i === idx ? ' current' : ''}${state.visited.has(i) && i !== idx ? ' seen' : ''}" data-goto="${i}" ${set.gating && i > maxOk ? 'disabled' : ''} ${i === idx ? 'aria-current="page"' : ''} aria-label="${esc(plainTitle(pages[i].title || '') || String(i + 1))}">${i - a + 1}</button>`);
-        return `<div class="kp-slide kp-slide-ordner${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><div class="kp-ordner"><nav class="kp-ordner-tabs" aria-label="${esc(T('seitenImKapitel'))}">${tabs.join('')}</nav><div class="kp-slide-panel kp-ordner-sheet">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div></div>`;
+        return `<div class="kp-slide kp-slide-ordner${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><div class="kp-ordner"><nav class="kp-ordner-tabs" aria-label="${esc(T('seitenImKapitel'))}">${tabs.join('')}</nav><div class="kp-slide-panel kp-ordner-sheet">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div></div>`;
       }
       // Wechsel (Vorbild LUCYDATE „Wie wirke ich auf dich?“): je zwei Bausteine bilden einen Abschnitt über die ganze Breite,
       // das Bild (Foto, Video) steht abwechselnd rechts und links, der Grund wechselt zwischen getönt und hell. Abschnitte,
@@ -9095,7 +9498,7 @@ function kursPlayer(course, opts) {
       // Fotoband („Anne fragt nach“ in „Was sagt die Forschung über Kreativität?“): das Foto über die ganze Folie, oben links eine
       // weiße, leicht durchscheinende Karte mit Titel und Text, die Personen im Bild bleiben frei
       if (kind === 'fotoband') {
-        return `<div class="kp-slide kp-slide-fotoband${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel kp-fb-card">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+        return `<div class="kp-slide kp-slide-fotoband${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel kp-fb-card">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       // Schachbrett (Teammeetings verbessern, Kognitive Flexibilität): Fotos und Stimmen im Raster 2 × 2 ohne Lücke, Foto | Zitat,
       // darunter Zitat | Foto; Zitatfelder in der Hauptfarbe, die nach unten heller wird
@@ -9121,8 +9524,9 @@ function kursPlayer(course, opts) {
         return `<div class="kp-slide kp-slide-zweifarb${flip ? ' kp-slide-flip' : ''}${p.tone === 'farbe' ? ' kp-zf-farbe' : ''}"><div class="kp-zf-hell">${left.filter(i => bl[i]).map(i => parts[i]).join('')}</div><div class="kp-slide-panel kp-zf-dunkel kp-on-dark">${head}${right.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       if (kind === 'uebung') {
-        const txt = [], stg = [];
-        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? txt : stg).push(parts[i]));
+        const ti = [], si = [];
+        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? ti : si).push(i));
+        const txt = ti.length ? [packRows(ti)] : [], stg = [packRows(si)];
         // page.tone 'dunkel' (Vorbild bildungsinnovator „Führen mit Zielvereinbarungen“): das Kopfband in der dunklen Hauptfarbe,
         // Titel links, Einleitung rechts, die Übung darunter auf hellem Grund
         const dark = p.tone === 'dunkel';
@@ -9131,7 +9535,7 @@ function kursPlayer(course, opts) {
       // Bild + Übung (Prüfung 19.10.2026, Vorbilder bildungsinnovator „Schneller ohne Stress“ und „Dialog- und Konfliktfähigkeit“):
       // das Foto füllt die halbe Folie bis an alle Ränder, daneben Titel, Text und Übung auf der dunklen Hauptfarbe
       if (kind === 'bilduebung') {
-        return `<div class="kp-slide kp-slide-bilduebung${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-bilduebung-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-bilduebung-panel kp-on-dark">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+        return `<div class="kp-slide kp-slide-bilduebung${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' + bgDraw : ''}"><div class="kp-bilduebung-foto"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}></div><div class="kp-slide-panel kp-bilduebung-panel kp-on-dark">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       // Vergleich: Titel oben, darunter zwei Spalten mit einer Trennlinie (Vorher/Nachher, Richtig/Falsch, zwei Rollen);
       // der erste Baustein steht links, der zweite rechts, weitere darunter über die ganze Breite
@@ -9158,8 +9562,9 @@ function kursPlayer(course, opts) {
         return `<div class="kp-slide kp-slide-zahl${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}><div class="kp-zahl-big">${big >= 0 ? parts[big] : ''}</div><div class="kp-zahl-text">${head}${rest.map(i => parts[i]).join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
       if (kind === 'kreis' || kind === 'buehne' || kind === 'plakat') {
-        const txt = [], stg = [];
-        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? txt : stg).push(parts[i]));
+        const ti = [], si = [];
+        (p.blocks || []).forEach((b, i) => (slotOf(b) === 'text' ? ti : si).push(i));
+        const txt = ti.length ? [packRows(ti)] : [], stg = si.length ? [packRows(si)] : [];
         // Plakat (Vorbild PUMA): dunkles Foto über die ganze Folie, riesiger Titel in kursiven Versalien links, die Übung rechts
         if (kind === 'plakat') return `<div class="kp-slide kp-slide-plakat kp-on-dark${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel">${head}${txt.join('')}${isLast ? nextCourseCard() : ''}</div><div class="kp-plakat-stage">${stg.join('')}</div></div>`;
         if (kind === 'kreis') {
@@ -9173,11 +9578,12 @@ function kursPlayer(course, opts) {
         const stageBg = bg || (own ? `--kp-slidebg:url('${esc(res(own))}');` : '');
         return `<div class="kp-slide kp-slide-buehne${hell ? ' kp-buehne-hell' : ''}${bg ? ' kp-has-bg' : ''}"><div class="kp-buehne-top${hell ? '' : ' kp-on-dark'}">${head}${txt.join('')}</div><div class="kp-buehne-stage${own ? ' kp-buehne-ambient kp-on-dark' : ''}"${stageBg ? ` style="${stageBg}"` : ''}>${stg.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
       }
-      return `<div class="kp-slide kp-slide-${kind}${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel${kind === 'karte' ? ' kp-on-dark' : ''}">${head}${parts.join('')}${isLast ? nextCourseCard() : ''}</div></div>`;
+      return `<div class="kp-slide kp-slide-${kind}${flip ? ' kp-slide-flip' : ''}${bg ? ' kp-has-bg' : ''}"${bg ? ` style="${bg}"` : ''}${bg && p.bgImage.alt ? ` role="img" aria-label="${esc(p.bgImage.alt)}"` : ''}><div class="kp-slide-panel${kind === 'karte' ? ' kp-on-dark' : ''}">${head}${allRows()}${isLast ? nextCourseCard() : ''}</div></div>`;
     }
     if (split) {
-      const txt = [], stg = [], unten = [];
-      (p.blocks || []).forEach((b, i) => { const s = slotOf(b); (s === 'text' ? txt : s === 'below' ? unten : stg).push(parts[i]); });
+      const ti = [], si = [], ui = [];
+      (p.blocks || []).forEach((b, i) => { const s = slotOf(b); (s === 'text' ? ti : s === 'below' ? ui : si).push(i); });
+      const txt = ti.length ? [packRows(ti)] : [], stg = si.length ? [packRows(si)] : [], unten = ui.length ? [packRows(ui)] : [];
       // Ein Foto ohne Geräterahmen allein auf der Bühne füllt die Fläche randlos
       const onStage = (p.blocks || []).filter(b => slotOf(b) === 'stage');
       // Zeichnungen (SVG) bleiben eingepasst, damit nichts abgeschnitten wird (Vorbild: Normen-Stapel auf grauer Fläche)
@@ -9185,7 +9591,7 @@ function kursPlayer(course, opts) {
       const vbg = fill ? '' : videoBackdrop(onStage);
       return `<div class="kp-split${arrange === 'geteilt-links' ? ' kp-split-flip' : ''}${unten.length ? ' kp-has-unten' : ''}"><div class="kp-split-text">${head}${txt.join('')}${isLast && !unten.length ? nextCourseCard() : ''}</div><div class="kp-split-stage${fill ? ' kp-stage-fill' : ''}${vbg ? ' kp-stage-video kp-on-dark' : ''}"${vbg && vbg !== 'none' ? ` style="${vbg}"` : ''}>${stg.join('')}</div>${unten.length ? `<div class="kp-split-unten">${unten.join('')}${isLast ? nextCourseCard() : ''}</div>` : ''}</div>`;
     }
-    const body = head + out.map(x => (x.row ? `<div class="kp-row">${x.html}</div>` : x.html)).join('') + (isLast ? nextCourseCard() : '');
+    const body = head + allRows() + (isLast ? nextCourseCard() : '');
     const vbg = arrange === 'fit' ? videoBackdrop(p.blocks) : '';
     return arrange === 'fit' ? `<div class="kp-fit${vbg ? ' kp-fit-video' : ''}${vbg && set.screen ? ' kp-on-dark' : ''}"${vbg && vbg !== 'none' ? ` style="${vbg}"` : ''}>${body}</div>` : body;
   }
@@ -9207,11 +9613,11 @@ function kursPlayer(course, opts) {
   }
   // Übung ohne Fragen (wie isTaskBlock im Editor): Kernaussagen nur zum Aufdecken, Karten nur mit Aufdeckzeile usw.
   function isExercise(b) {
-    return !(b.type === 'quiz' || b.type === 'pool' || b.type === 'pretest' || b.type === 'review' || !INTERACTIVE_DONE.includes(b.type) || (b.type === 'takeaways' && (!b.recall || b.look === 'zeilen')) || (b.type === 'cards' && !cardsRv(b).length) || (b.type === 'bignumber' && !bnAsk(b)) || (b.type === 'accordion' && b.look !== 'nummern') || (b.type === 'sequence' && (b.look !== 'szene' || (b.steps || []).length < 2)) || (b.type === 'table' && b.look !== 'ausfuellen') || (b.type === 'debrief' && b.look !== 'karte') || ((b.type === 'lottie' || b.type === 'anim') && stepCount(b) < 2));
+    return !(b.type === 'quiz' || b.type === 'pool' || b.type === 'pretest' || b.type === 'review' || !INTERACTIVE_DONE.includes(b.type) || (b.type === 'takeaways' && (!b.recall || b.look === 'zeilen')) || (b.type === 'cards' && !cardsRv(b).length) || (b.type === 'bignumber' && !bnAsk(b)) || (b.type === 'accordion' && b.look !== 'nummern') || (b.type === 'sequence' && (b.look !== 'szene' || (b.steps || []).length < 2)) || (b.type === 'table' && b.look !== 'ausfuellen') || (b.type === 'debrief' && b.look !== 'karte') || ((b.type === 'lottie' || b.type === 'anim') && stepCount(b) < 2) || (b.type === 'scribble' && !scrDoc(b)));
   }
   // Aufgabe auf der Seite, Fragen eingeschlossen (die Lernbuch-Karte soll sie nicht verdecken)
   const isTaskHere = b => ['quiz', 'pool', 'pretest', 'review'].includes(b.type) || isExercise(b);
-  const INTERACTIVE_DONE = ['sequence', 'table', 'sprechen', 'debrief', 'lottie', 'anim', 'accordion', 'modell3d', 'mappe', 'videopaar', 'bildschirm', 'schloss', 'wahlbrett', 'markieren', 'merkkarte', 'kartenstapel', 'formular', 'interaktion', 'fragen', 'ueberdich', 'kurzfrage', 'branch', 'dialog', 'selfcheck', 'reflection', 'actionplan', 'ivideo', 'mission', 'game', 'simulation', 'casebank', 'triage', 'promptbuild', 'findtext', 'hotspots', 'checklist', 'sortcats', 'flipcards', 'glossquiz', 'predict', 'process', 'album', 'levers', 'chat', 'matrix', 'takeaways', 'aufdecken', 'cards', 'bignumber', 'team', 'pyramide', 'venn'];
+  const INTERACTIVE_DONE = ['sequence', 'scribble', 'table', 'sprechen', 'debrief', 'lottie', 'anim', 'accordion', 'modell3d', 'mappe', 'videopaar', 'bildschirm', 'schloss', 'wahlbrett', 'markieren', 'merkkarte', 'kartenstapel', 'formular', 'interaktion', 'fragen', 'ueberdich', 'kurzfrage', 'branch', 'dialog', 'selfcheck', 'reflection', 'actionplan', 'ivideo', 'mission', 'game', 'simulation', 'casebank', 'triage', 'promptbuild', 'findtext', 'hotspots', 'checklist', 'sortcats', 'flipcards', 'glossquiz', 'predict', 'process', 'album', 'levers', 'chat', 'matrix', 'takeaways', 'aufdecken', 'cards', 'bignumber', 'team', 'pyramide', 'venn'];
 
   // Ergebnisring: Kreis füllt sich bis zum Prozentwert (Animation über stroke-dashoffset, unter „Bewegung reduzieren“ steht er sofort)
   function scoreRing(pct, passed) {
@@ -9253,7 +9659,7 @@ function kursPlayer(course, opts) {
   function renderResult() {
     const s = score();
     if (s.open) {
-      return `<div class="kp-result"><h1>Fast geschafft</h1><p>Es ${s.open === 1 ? 'ist noch 1 Testfrage' : 'sind noch ' + s.open + ' Testfragen'} offen. ${esc(T('fragenZurueck'))}</p></div>`;
+      return `<div class="kp-result"><h1>${T('fastGeschafft')}</h1><p>${esc(s.open === 1 ? T('testfrageOffen') : T('testfragenOffen').replace('{n}', s.open))} ${esc(T('fragenZurueck'))}</p></div>`;
     }
     const passed = s.pct >= passScore;
     // Je Lernziel: Balken, Anzahl richtiger Fragen und Sprung ins Kapitel, in dem das Ziel behandelt wird
@@ -9303,8 +9709,8 @@ function kursPlayer(course, opts) {
       <p>${s.got} von ${s.max} Punkten · Bestehensgrenze ${passScore} %</p>${prevHtml}${triesHtml}
       <div class="kp-feedback ${passed ? 'ok' : 'no'}" role="status">${passed ? (name ? `${T('bestandenName').replace('{n}', esc(name))}` : T('bestanden')) : T('nichtBestanden')}</div>
       <div class="kp-quiz-actions" style="justify-content:center">
-        ${passed ? '' : triesLeft ? '<button class="kp-btn" data-retry-all>Test wiederholen</button>' : `<p class="kp-hint" data-tries-out>${esc(T('keineVersuche').replace('{n}', maxTries))}</p>`}
-        ${passed && certPage >= 0 ? `<button class="kp-btn" data-goto="${certPage}">Zum Zertifikat</button>` : ''}
+        ${passed ? '' : triesLeft ? `<button class="kp-btn" data-retry-all>${T('testWiederholen')}</button>` : `<p class="kp-hint" data-tries-out>${esc(T('keineVersuche').replace('{n}', maxTries))}</p>`}
+        ${passed && certPage >= 0 ? `<button class="kp-btn" data-goto="${certPage}">${T('zumZertifikat')}</button>` : ''}
         ${set.exitButton ? `<button class="kp-btn kp-sec" data-exit>${T('kursBeenden')}</button>` : ''}
       </div>${goalBack()}${wegHtml()}${doneHtml}${objHtml}${calib}${confRev}
       ${planCard(certBlock())}<div class="kp-review">${review}</div>${nextCourseCard()}</div>`;
@@ -9396,7 +9802,7 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     const lesson = i => {
       const cur = i === state.current, done = scDone().includes(i);
       const locked = set.gating && i > maxOk;
-      return `<li class="kp-sl-item${cur ? ' current' : ''}${done ? ' done' : ''}"><button type="button" data-goto="${i}" ${locked ? 'disabled' : ''} ${cur ? 'aria-current="page"' : ''}><span class="kp-sl-ico" aria-hidden="true">${testPages.has(i) ? icon('question') : icon('lines')}</span><span class="kp-sl-name">${esc(plainTitle(pages[i].title || ''))}</span><span class="kp-sl-state" data-sl-ring="${i}">${scRing(cur ? scFrac : 0, done)}</span><span class="kp-sr">${done ? T('mlAbgeschlossen') : ''}</span></button></li>`;
+      return `<li class="kp-sl-item${cur ? ' current' : ''}${done ? ' done' : ''}"><button type="button" data-goto="${i}" ${locked ? 'disabled' : ''} ${cur ? 'aria-current="page"' : ''}><span class="kp-sl-ico" aria-hidden="true">${icon(ICONS[pages[i].icon] ? pages[i].icon : testPages.has(i) ? 'question' : 'lines')}</span><span class="kp-sl-name">${esc(plainTitle(pages[i].title || ''))}</span><span class="kp-sl-state" data-sl-ring="${i}">${scRing(cur ? scFrac : 0, done)}</span><span class="kp-sr">${done ? T('mlAbgeschlossen') : ''}</span></button></li>`;
     };
     // Kapitelname als Abschnitt nur, wenn er mehr als eine Lektion zusammenfasst oder anders heißt als die einzige Lektion
     // Die Seite mit dem Mediennachweis steht nur unten als „Weitere Informationen“, nicht zusätzlich in der Liste
@@ -9486,6 +9892,9 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
   }
   // Weiter-Sperre in den Lektionen zum Scrollen: die Seite bleibt, wo sie war, schon gezeigte Abschnitte fahren nicht noch einmal herein
   let keepScroll = null, keepShown = null;
+  // Ausgeblendeter Seitentitel (UX-Prüfung 07.11.2026, WCAG 1.3.1): unsichtbar als h1 vor dem Inhalt, sonst begann die Folie mit h2 oder h3.
+  // Bewusst vor <main> und nicht darin: Regeln wie „.kp-main > .kp-block:first-child“ (randlose Abschnitte, Titelfolie) hängen am ersten Kind
+  function srPageTitle(p) { return p && p.hideTitle && String(p.title || '').trim() ? `<h1 class="kp-sr" data-sr-title>${plainTitle(p.title)}</h1>` : ''; }
   function render(moveFocus) {
     doneSeen = null;
     // Laufende Videos, Töne und Zeitgeber der vorigen Seite beenden
@@ -9541,16 +9950,18 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     const bar = navPos === 'oben' ? `${header}${prog}` : '';
     const sideBar = navPos === 'oben' ? footHtml
       : `<div class="kp-navbar" id="kp-navbar">${prog}<div class="kp-navrow">${header}${theme.style === 'micro' && navPos === 'links' ? (scrollLook() ? scrollSide() : microSide()) : ''}${scrollLook() ? '' : footHtml}</div></div>`;
+    document.body.style.background = pageFill(p);
     root.innerHTML = `
       <a class="kp-skip" href="#kp-main">${T('zumInhalt')}</a>
       ${bar}
       ${set.layout === 'scroll' || scrollLook() ? '<div class="kp-readbar" aria-hidden="true"><b></b></div>' : ''}
-      <main class="kp-main ${p.animation ? 'fx-' + p.animation : ''}${(arrangeOf(p) === 'fit' ? ' kp-fit-main' : arrangeOf(p) ? ' kp-split-main' : '')}${soloBleed(p) ? ' kp-solo-main' : ''}${soloFill(p) ? ' kp-fill-main kp-fill-' + soloFill(p) : ''}${kinoPage(p) ? ' kp-kino-main' : ''}${darkSlide(p) ? ' kp-dunkel-main kp-on-dark' : ''}${p.einflug ? ' kp-einflug' : ''}${set.slideNav && !coverPage(p) ? ' kp-has-pagenav' : ''}" id="kp-main" tabindex="-1">${pageLogo(p) || qChipHtml(p) ? `<div class="kp-page-top">${qChipHtml(p)}${pageLogo(p)}</div>` : ''}${renderPage(p)}${slideCredit(p)}${pageNavHtml(p)}${scrollLook() && navPos !== 'oben' ? footHtml : ''}</main>
+      ${srPageTitle(p)}
+      <main class="kp-main ${p.animation ? 'fx-' + p.animation : ''}${(arrangeOf(p) === 'fit' ? ' kp-fit-main' : arrangeOf(p) ? ' kp-split-main' : '')}${soloBleed(p) ? ' kp-solo-main' : ''}${soloFill(p) ? ' kp-fill-main kp-fill-' + soloFill(p) : ''}${kinoPage(p) ? ' kp-kino-main' : ''}${pageFill(p) ? ' kp-eigen-main' + (pageFillDark(p) ? ' kp-dunkel-main kp-on-dark' : '') : darkSlide(p) ? ' kp-dunkel-main kp-on-dark' : ''}${p.einflug ? ' kp-einflug' : ''}${set.slideNav && !coverPage(p) ? ' kp-has-pagenav' : ''}" id="kp-main" tabindex="-1"${pageFillOk(p) ? ' data-fill-ok' : ''}${pageFill(p) ? ` style="--kp-page-fill:${pageFill(p)}"` : ''}>${pageLogo(p) || qChipHtml(p) ? `<div class="kp-page-top">${qChipHtml(p)}${pageLogo(p)}</div>` : ''}${renderPage(p)}${slideCredit(p)}${pageNavHtml(p)}${scrollLook() && navPos !== 'oben' ? footHtml : ''}</main>
       ${sideBar}
       ${chrome.hideHeader && chrome.hideFooter ? '' : `<button class="kp-nav-toggle" data-nav-toggle aria-controls="kp-navbar" aria-expanded="${!navShut}" aria-label="${esc(T(navShut ? 'leisteAuf' : 'leisteZu'))}" title="${esc(T(navShut ? 'leisteAuf' : 'leisteZu'))}">${icon('chev')}</button>`}
       ${chrome.hideHeader || chrome.header || !aiInHead ? aiMarkHtml('kp-ai-fixed') : ''}
       <div class="kp-backdrop" data-close-drawer></div>
-      <aside class="kp-drawer" id="kp-drawer" aria-label="Seitenleiste"></aside>
+      <aside class="kp-drawer" id="kp-drawer" aria-label="Seitenleiste" inert></aside>
       ${opts.review ? reviewPanelHtml() : ''}
       <div class="kp-kf-dock" data-kf-dock aria-live="polite"></div>`;
     kfOpen = null; kfTried = new Set(); kfPlanned = new Set(); wbOpen = {}; hfUi = {};
@@ -9560,10 +9971,11 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     updateClues();
     kfPops();
     measureNav();
+    embedCheck();
     if (set.tour === true && !opts.preview && !opts.renderer && !tourSeen() && !reducedMotion()) { const tm = setTimeout(startTour, 1100); mediaTimers.push(tm); }
-    // Lernbuch-Karte auf der ersten Seite, einmal je Browser; die Bedienhilfe wartet dann, bis sie geschlossen ist (Tour startet erst beim nächsten Öffnen)
+    // Lernbuch-Karte auf der ersten Seite, einmal je Browser; die Bedienhilfe wartet dann, bis sie geschlossen ist (startTour() merkt sich tourAfterLbw)
     // Steht auf der ersten Seite eine Aufgabe, würde die Karte sie verdecken: dann erst auf der nächsten Seite ohne Aufgabe
-    if ((state.current === 0 || lbwWait) && set.lernbuchIntro !== false && !opts.renderer && !opts.review && !opts.showAll && hasLernbuch() && !lbwSeen()) {
+    if ((state.current === 0 || lbwWait) && set.lernbuchIntro !== false && !opts.renderer && !opts.review && !opts.showAll && opts.lbwAuto !== false && hasLernbuch() && !lbwSeen()) {
       if ((pages[state.current].blocks || []).some(isTaskHere)) { if (state.current === 0) lbwWait = true; }
       else { lbwWait = false; const tm = setTimeout(lernbuchWelcome, 700); mediaTimers.push(tm); }
     }
@@ -9734,6 +10146,17 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     // Bildschirmseiten: Bei der Leiste oben steht die Navigation unter dem Inhalt und zählt für die Seitenhöhe mit
     const fuss = navPos === 'oben' ? root.querySelector('[data-footer]:not([hidden])') : null;
     st.setProperty('--kp-footh', fuss ? Math.round(fuss.getBoundingClientRect().height) + 'px' : '0px');
+    // Fokus nicht verdeckt (WCAG 2.4.11, Analyse 10.11.2026): eine eigene Fußzeile, die per CSS am Rand klebt, und das Dock der
+    // Begleitfigur, wenn es am Handy die ganze Breite einnimmt, zählen für den Abstand beim Rollen zum Fokus mit
+    const fixedFoot = fuss && /sticky|fixed/.test(getComputedStyle(fuss).position);
+    st.setProperty('--kp-fixfooth', fixedFoot ? Math.round(fuss.getBoundingClientRect().height) + 'px' : '0px');
+    const dock = root.querySelector('[data-kf-dock]');
+    const dockH = () => {
+      const r = dock && dock.isConnected ? dock.getBoundingClientRect() : null;
+      st.setProperty('--kp-dockh', r && r.height && r.width > document.documentElement.clientWidth * 0.6 ? Math.round(r.height) + 'px' : '0px');
+    };
+    dockH();
+    if (dock && typeof ResizeObserver === 'function' && measureNav.dock !== dock) { measureNav.dock = dock; if (measureNav.dro) measureNav.dro.disconnect(); measureNav.dro = new ResizeObserver(dockH); measureNav.dro.observe(dock); }
     // Pillen im Inhalt (settings.slideNav) zählen für die Bildschirmhöhe mit, sonst ragt jede Bildschirmseite um ihre Höhe hinaus
     // (in der Flex-Spalte einer „fit“-Seite ist margin-top: auto und liefe als gebrauchter Wert in die Hunderte, dort zählt nur die Höhe)
     const pn = root.querySelector('.kp-pagenav');
@@ -9801,8 +10224,13 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
       if (b) { s.innerHTML = renderBlock(b); s.querySelectorAll('[data-dmap-box]').forEach(setupDmap); }
     });
     // Fokus auf die Rückmeldung, damit Screenreader sie vorlesen
-    const fb = fresh.querySelector && fresh.querySelector('.kp-feedback, .kp-saved, .kp-q');
-    if (fb) { fb.tabIndex = -1; fb.focus({ preventScroll: true }); }
+    // Rangfolge statt Dokumentreihenfolge: die Frage steht im Baustein vor der Rückmeldung und bekam sonst den Fokus
+    const fb = fresh.querySelector && (fresh.querySelector('.kp-feedback') || fresh.querySelector('.kp-saved') || fresh.querySelector('.kp-q'));
+    if (fb) {
+      fb.tabIndex = -1; fb.focus({ preventScroll: true });
+      const r = fb.getBoundingClientRect();
+      if (fb.matches('.kp-feedback') && (r.bottom > innerHeight || r.top < 0)) try { fb.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' }); } catch (e) { /* alte Browser */ }
+    }
     updateConditions();
     renderFooter();
     report();
@@ -9901,6 +10329,7 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
       case 'accordion': { const n = (b.items || []).length; return b.look === 'nummern' && alle(n, (b.items || []).every((x, i) => (st.open || []).includes(i))); }
       case 'team': { if (b.look === 'karussell') { const n = (b.members || []).length; return alle(n, n > 1 && (b.members || []).every((m, i) => (st.seen || []).includes(i))); } if (b.look !== 'aufklappen') return false; const ms = (b.members || []).map((m, i) => i).filter(i => plainText((b.members[i] || {}).html)); return alle(ms.length, ms.every(i => (st.open || []).includes(i))); }
       case 'modell3d': return m3dDone(b);
+      case 'scribble': return !!(state.self[b.id] || {}).done;
       // Animation in Schritten: erledigt, wenn jeder Schritt einmal gezeigt wurde
       case 'lottie': case 'anim': { const n = stepCount(b), seen = Array.isArray(st.seen) ? st.seen : []; return alle(n, Array.from({ length: n }, (x, i) => i).every(i => seen.includes(i))); }
       case 'aufdecken': return (b.stops || []).length > 0 && (b.stops || []).every((x, i) => (st.seen || {})[i]);
@@ -9979,6 +10408,18 @@ addEventListener('load',h);addEventListener('DOMContentLoaded',function(){h();if
     if (neu) renderFooter();
     root.querySelectorAll('[data-meters-live]').forEach(el => { el.outerHTML = meterPanel(null, true); });
     updateClues();
+    embedCheck();
+  }
+  // Eingebettet als Rise-Code-Block oder Storyline-Webobjekt (opts.embed, Articulate-Paket): sind alle Aufgaben der letzten Seite
+  // erledigt, meldet der Kurs das dem umgebenden Fenster einmal mit { type: 'complete' } (so erkennt Rise den Abschluss für „Continue“)
+  var embedSent = false; // var: render() kann vor dieser Zeile laufen
+  function embedCheck() {
+    if (!opts.embed || embedSent || typeof window === 'undefined' || window.parent === window) return;
+    if (state.current !== pages.length - 1) return;
+    const p = pages[state.current];
+    if (!p || !(p.blocks || []).filter(isTaskHere).every(b => blockDone(b))) return;
+    embedSent = true;
+    try { window.parent.postMessage({ type: 'complete' }, '*'); } catch (e) { /* ohne Elternfenster */ }
   }
   // Anzeige der Szenario-Werte; mit Wirkung einer Entscheidung (eff) zeigt sie die Veränderung
   function meterPanel(eff, live) {
@@ -10229,6 +10670,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     });
     setupEinflug(scope);
     setupSwipes(scope);
+    setupVideoTrim(scope);
     liveIllus(scope);
     fitTitles(scope);
     setupExtras(scope);
@@ -10248,6 +10690,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     scope.querySelectorAll('[data-ivideo]').forEach(setupVideo);
     scope.querySelectorAll('[data-lottie]').forEach(setupLottie);
     scope.querySelectorAll('[data-m3d]').forEach(setupModell3d);
+    scope.querySelectorAll('[data-scr]').forEach(setupScribble);
     scope.querySelectorAll('[data-pano]:not(.kp-pano-failed)').forEach(setupPano);
     lottieFigs(scope);
     scope.querySelectorAll('[data-mission]').forEach(setupMission);
@@ -10433,7 +10876,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
   function notesBody() {
     const all = notesAll();
     const others = pages.map((p, pi) => ({ pi, t: String(all[p.id] || '').trim() })).filter(x => x.pi !== state.current && x.t);
-    return `<p class="kp-label kp-notes-page">${T('notizZuSeite')}: ${esc(plainTitle(pages[state.current].title || ''))}</p>
+    return `<p class="kp-label kp-notes-page">${T('notizZuSeite')}: <span data-kp-page="${state.current}">${esc(plainTitle(pages[state.current].title || ''))}</span></p>
       <textarea class="kp-notes" data-notes aria-label="${esc(T('notizZuSeite'))}" placeholder="${esc(T('notizLeer'))}">${esc(noteFor(state.current))}</textarea>
       <p class="kp-label">${esc(T('notizHinweis'))}</p>
       ${others.length || all._ ? `<p class="kp-label kp-notes-page">${T('notizAndere')}</p>${all._ ? `<div class="kp-lb-entry"><span class="kp-lb-q">${T('notizAllgemein')}</span><p>${esc(all._).replace(/\n/g, '<br>')}</p></div>` : ''}${others.map(x => `<div class="kp-lb-entry"><span class="kp-lb-q">${esc(plainTitle(pages[x.pi].title || ''))}</span><p>${esc(x.t).replace(/\n/g, '<br>')}</p><button type="button" class="kp-lb-go" data-goto="${x.pi}">${T('zurSeite')} ${x.pi + 1}</button></div>`).join('')}` : ''}`;
@@ -10460,6 +10903,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
   function startTour() {
     const d = window.driver && (window.driver.js ? window.driver.js.driver : window.driver.driver);
     if (!d) return false;
+    if (document.querySelector('.kp-lbw:not(.out)')) { tourAfterLbw = true; return false; }
     closeDrawer();
     const steps = tourSteps();
     if (!steps.length) return false;
@@ -10468,9 +10912,11 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       nextBtnText: T('weiter'), prevBtnText: T('zurueck'), doneBtnText: T('tourFertig'), progressText: '{{current}} ' + T('von') + ' {{total}}', popoverClass: 'kp-tour', steps }).drive();
     return true;
   }
+  // Schalter im Inhaltsverzeichnis: Symbol, Name und der Zustand als Pille (an/aus); der Name bleibt gleich, aria-pressed trägt den Zustand
+  function tocSwitch(ic, label, on) { return `${icon(ic)} <span>${label}</span><span class="kp-sw-state" aria-hidden="true">${T(on ? 'an' : 'aus')}</span>`; }
   function openDrawer(which) {
     const d = root.querySelector('#kp-drawer');
-    const titles = { toc: 'Kursinhalt', notes: 'Meine Notizen', glossary: 'Glossar', search: T('suchen'), trainer: T('trTitel'), lernbuch: T('lernbuch') };
+    const titles = { toc: T('kursinhalt'), notes: T('meineNotizen'), glossary: T('glossar'), search: T('suchen'), trainer: T('trTitel'), lernbuch: T('lernbuch') };
     let body = '';
     if (which === 'lernbuch') {
       body = lernbuchBody();
@@ -10491,7 +10937,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
         const mark = state.visited.has(i) ? '✓' : '·';
         return out + `<button class="kp-toc-item ${i === state.current ? 'current' : ''}" data-goto="${i}" ${locked ? 'disabled' : ''} ${i === state.current ? 'aria-current="page"' : ''}><span class="kp-toc-state" aria-hidden="true">${mark}</span><span>${plainTitle(p.title)}</span></button>`;
       }).join('');
-      body += '<p style="margin-top:18px"><button class="kp-btn kp-sec" data-print>Zusammenfassung drucken</button></p>';
+      body += `<p style="margin-top:18px"><button class="kp-btn kp-sec" data-print>${T('zusammenfassungDrucken')}</button></p>`;
       // Am Handy sind die weiteren Knöpfe der Kopfzeile hier erreichbar (die Kopfzeile bleibt einzeilig)
       const extra = [];
       const hub = pages.findIndex(x => (x.blocks || []).some(b => b.type === 'chapters'));
@@ -10505,17 +10951,26 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       const lb = lernbuchEntries().length;
       if (hasLernbuch()) body = `<div class="kp-toc-fs"><button class="kp-btn kp-sec kp-lb-open" data-drawer="lernbuch">${T('lernbuch')}${lb ? ` (${lb})` : ''}</button></div>` + body;
       body = goalCard('kp-goal-toc') + body;
-      if (set.tour === true && window.driver) body = `<div class="kp-toc-fs"><button class="kp-btn kp-sec" data-tour>${icon('question')} ${T('tour')}</button></div>` + body;
-      if (!opts.renderer) body = `<div class="kp-toc-fs"><button class="kp-btn kp-sec" data-calm aria-pressed="${calmOn()}">${icon('pause')} ${T(calmOn() ? 'ruhigAn' : 'ruhigAus')}</button></div>` + body;
-      if (soundsAllowed()) body = `<div class="kp-toc-fs"><button class="kp-btn kp-sec" data-sounds aria-pressed="${soundsOn()}">${icon(soundsOn() ? 'volume' : 'mute')} ${T(soundsOn() ? 'klangAn' : 'klangAus')}</button></div>` + body;
-      if (fsEnabled()) body = `<div class="kp-toc-fs">${fsButton()}</div>` + body;
+      // Einstellungen unter der Kapitelliste als schmale Schalter mit Zustand (UX-Prüfung 02.11.2026: fünf große Knöpfe
+      // standen vor dem Inhalt, bei 768 px Höhe blieben sieben Seiten sichtbar, und „Klänge an“ ließ offen, ob Zustand oder Aktion)
+      const sets = [];
+      if (fsEnabled()) sets.push(fsButton());
+      if (soundsAllowed()) sets.push(`<button class="kp-toc-sw" data-sounds aria-pressed="${soundsOn()}">${tocSwitch(soundsOn() ? 'volume' : 'mute', T('klaenge'), soundsOn())}</button>`);
+      if (!opts.renderer) sets.push(`<button class="kp-toc-sw" data-calm aria-pressed="${calmOn()}">${tocSwitch('pause', T('ruhigAus'), calmOn())}</button>`);
+      if (set.tour === true && window.driver) sets.push(`<button class="kp-toc-sw" data-tour>${icon('question')} <span>${T('tour')}</span></button>`);
+      if (sets.length) body += `<div class="kp-toc-set" role="group" aria-label="${esc(T('tocEinstellungen'))}"><div class="kp-toc-chapter">${T('tocEinstellungen')}</div>${sets.join('')}</div>`;
       if (set.exitButton) body += `<div class="kp-toc-fs kp-toc-exit"><button class="kp-btn kp-sec" data-exit>${T('kursBeenden')}</button></div>`;
     } else if (which === 'notes') {
       body = notesBody();
     } else {
       body = (course.glossary || []).map(g => `<div class="kp-glossar-term">${esc(g.term)}</div><div class="kp-glossar-def">${esc(g.definition)}</div>`).join('');
     }
+    // Wer das Verzeichnis geöffnet hat, bekommt den Fokus beim Schließen zurück (WCAG 2.4.3)
+    const ae = document.activeElement;
+    if (ae && ae !== document.body && !d.contains(ae)) drawerOpener = ae;
+    d.dataset.which = which;
     d.innerHTML = `<div class="kp-drawer-head"><span>${titles[which]}</span><button data-close-drawer aria-label="Schließen">×</button></div><div class="kp-drawer-body">${body}</div>`;
+    d.inert = false;
     d.classList.add('open');
     root.querySelector('.kp-backdrop').classList.add('open');
     root.querySelectorAll('[data-dz-menu]').forEach(m => m.setAttribute('aria-expanded', String(which === 'toc')));
@@ -10619,10 +11074,20 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     root.querySelectorAll('[data-fullscreen]').forEach(b => { b.innerHTML = fsLabel(); b.setAttribute('aria-pressed', String(fsActive())); });
   }));
 
+  // Geschlossen ist das Verzeichnis inert: es liegt nur verschoben neben dem Bild, Tab darf nicht hineinlaufen.
+  // Stand der Fokus darin, geht er zurück auf den Knopf, der es geöffnet hat (sonst auf den Menüknopf).
+  let drawerOpener = null;
   function closeDrawer() {
     const d = root.querySelector('#kp-drawer');
     if (!d || !d.classList.contains('open')) return;
+    const had = d.contains(document.activeElement);
     d.classList.remove('open');
+    d.inert = true;
+    if (had) {
+      const back = drawerOpener && drawerOpener.isConnected && !d.contains(drawerOpener) ? drawerOpener : root.querySelector('[data-dz-menu], .kp-head [data-drawer="toc"], [data-drawer="toc"]');
+      if (back) back.focus({ preventScroll: true });
+    }
+    drawerOpener = null;
     root.querySelector('.kp-backdrop').classList.remove('open');
     root.querySelectorAll('[data-dz-menu]').forEach(m => m.setAttribute('aria-expanded', 'false'));
   }
@@ -10697,6 +11162,24 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     return given.length ? given.sort((x, y) => x - y) : null;
   }
 
+  // „Antwort prüfen“ ohne Antwort: ein Satz direkt unter dem Knopf statt Stille (UX-Prüfung 07.11.2026, WCAG 3.3.1);
+  // verschwindet, sobald etwas gewählt oder eingegeben wird, der Fokus bleibt auf dem Knopf
+  function emptyAnswerMsg(q, box, btn) {
+    const key = { fill: 'leerLuecke', numeric: 'leerZahl', match: 'leerZuordnen', pins: 'leerPins', claims: 'leerAussagen' }[q.kind] || 'leerAuswahl';
+    let m = box.querySelector('[data-empty-msg]');
+    if (!m) {
+      m = document.createElement('p');
+      m.className = 'kp-empty-msg';
+      m.setAttribute('data-empty-msg', '');
+      m.setAttribute('role', 'status');
+      const row = btn.closest('.kp-quiz-actions') || btn;
+      row.insertAdjacentElement('afterend', m);
+      const clear = () => { m.remove(); box.removeEventListener('input', clear); box.removeEventListener('change', clear); };
+      box.addEventListener('input', clear); box.addEventListener('change', clear);
+    }
+    m.textContent = T(key);
+  }
+
   // Einschätzung vorher: nur Übungsfragen; bewertete Fragen behalten die Abfrage nach der Antwort, die Punkte ändern sich nie
   function confBefore(q, isGraded) {
     if (set.confidence !== 'vorher' || isGraded || q.kind === 'hotspot' || /~resume$/.test(q.id)) return false;
@@ -10762,6 +11245,85 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     document.body.appendChild(a);
     a.click();
     setTimeout(() => a.remove(), 500);
+  }
+
+  // Vorschau im Editor (Direkt bearbeiten): Bedientexte und ihre Schlüssel für die Zuordnung, Fenster des Kurses zum Bearbeiten öffnen
+  // („Alle Folien“ → Lernbuch-Karte, Lernbuch, Bedienhilfe, Meilenstein, Wiedereinstieg, Menü). Nie im Paket.
+  if (opts.preview && typeof window !== 'undefined') {
+    window.kpUiKeys = Object.keys(UI_DE);
+    window.kpUiText = k => T(k);
+    // Wie der Player eine Datei auflöst (SVG-Grafiken kommen umgefärbt an): „Direkt bearbeiten“ findet so das Bild zum Feld
+    window.kpRes = v => { const r = res(v); return [r, ILLU_LIVE.get(r)].filter(Boolean); };
+    // Direkt einspielen statt neu laden (Kerstin 08.11.2026: „wenn ich etwas anpasse, nicht ruckeln, sondern sich direkt anpassen“):
+    // Der Editor gibt den geänderten Kurs; geänderte Folien und Dateien werden übernommen und nur die aktuelle Folie neu gezeichnet.
+    // Scrollstand, offenes Seitenfenster (Lernbuch, Menü, Notizen) und Fenster am body (Lernbuch-Karte) bleiben, nichts fährt noch einmal herein.
+    // Ändert sich, was beim Start fest berechnet wird (Design, Einstellungen, Leiste, CSS, Figuren, Glossar, Sprachen, Zahl und Folge der Folien,
+    // neue Bausteinarten mit eigenen Bibliotheken), liefert kpHot false und der Editor lädt wie bisher neu.
+    window.kpPage = () => state.current;
+    window.kpHot = (data, o) => {
+      o = o || {};
+      const no = why => { window.kpHotWhy = why; return false; };
+      // Folien, die der Player selbst anhängt (Ergebnis „_result“), stehen am Ende und bleiben
+      const own = pages.filter(p => !/^_/.test(String(p.id || ''))).length;
+      if (!data || !Array.isArray(data.pages) || data.pages.length !== own) return no('Folienzahl ' + (data && data.pages ? data.pages.length : '-') + ' statt ' + own);
+      // Bedientexte, KI-Hinweis und Kurstitel ändert „Direkt bearbeiten“ ohne Neuladen: sie zählen nicht als feste Einstellung und werden übernommen
+      const LIVE = ['uiTexts', 'aiNotice'];
+      // Namen und Rollen der Figuren, Begriffe und Erklärungen im Glossar liest der Player beim Zeichnen: auch sie ohne Neuladen
+      const TXT = { cast: ['name', 'role'], glossary: ['term', 'definition'] };
+      const bare = (k, v) => Array.isArray(v) && TXT[k] ? v.map(x => x && typeof x === 'object' ? Object.assign({}, x, Object.fromEntries(TXT[k].map(f => [f, null]))) : x) : v;
+      const cmp = (k, v) => JSON.stringify(v == null ? null : (k === 'settings' ? Object.assign({}, v, Object.fromEntries(LIVE.map(x => [x, null]))) : bare(k, v)));
+      const FIX = ['theme', 'settings', 'chrome', 'css', 'cast', 'glossary', 'languages', 'lang', 'meters', 'objectives', 'missionTheme', 'series'];
+      const differ = FIX.filter(k => cmp(k, data[k]) !== cmp(k, course[k]));
+      if (differ.length) return no('fest: ' + differ.join(', '));
+      if (data.pages.some((p, i) => !p || !pages[i] || p.id !== pages[i].id)) return no('Folgen der Folien');
+      const typesOf = list => new Set(list.flatMap(p => (p.blocks || []).map(b => b.type)));
+      const had = typesOf(pages);
+      if ([...typesOf(data.pages)].some(t => !had.has(t))) return no('neue Bausteinart');
+      const ds = data.settings || {};
+      Object.keys(uiOwn).forEach(k => delete uiOwn[k]);
+      Object.assign(uiOwn, ds.uiTexts && typeof ds.uiTexts === 'object' ? ds.uiTexts : {});
+      [course.settings, set].forEach(x => { if (x) LIVE.forEach(k => { if (k !== 'uiTexts') x[k] = ds[k]; }); });
+      course.title = data.title;
+      Object.keys(TXT).forEach(k => { if (Array.isArray(data[k])) course[k] = data[k]; });
+      // Kopien für die Wiederholung neu aus den geänderten Fragen ziehen
+      Object.keys(reviewCopies).forEach(k => delete reviewCopies[k]);
+      // data.assets === null: Dateien unverändert (der Editor schickt sie dann nicht mit)
+      if (data.assets !== null) {
+        (data.assets || []).forEach(a => { if (a && a.name) assetMap['assets/' + a.name] = a.src; });
+        course.assets = data.assets;
+      }
+      data.pages.forEach((p, i) => { course.pages[i] = p; pages[i] = p; });
+      try { buildItems(); } catch (e) { return no('Fragen: ' + e.message); }
+      const target = o.page != null && o.page >= 0 && o.page < pages.length ? o.page : state.current;
+      const same = target === state.current;
+      const dr = root.querySelector('#kp-drawer.open'), drWhich = dr && dr.dataset.which;
+      if (same) { keepScroll = window.scrollY; keepShown = new Set([...root.querySelectorAll('#kp-main [data-block]')].map(x => x.dataset.block)); }
+      state.current = target;
+      render(false);
+      // Nichts noch einmal hereinfahren lassen: Seitenanimation, Einflug und gestaffelte Listen stehen sofort
+      const main = root.querySelector('#kp-main');
+      if (main && same) [...main.classList].filter(c => /^fx-/.test(c)).forEach(c => main.classList.remove(c));
+      if (same) root.querySelectorAll('.kp-einflug').forEach(x => x.classList.remove('kp-einflug'));
+      if (same) root.querySelectorAll('.fx-reveal').forEach(x => x.classList.add('fx-in', 'fx-now'));
+      if (drWhich && same) openDrawer(drWhich);
+      return true;
+    };
+    window.kpShow = what => {
+      closeDrawer();
+      document.querySelectorAll('.kp-lbw, .kp-milestone, .kp-resume').forEach(x => x.remove());
+      if (what === 'lernbuchKarte') { lernbuchWelcome(); return !!document.querySelector('.kp-lbw'); }
+      if (what === 'lernbuch') { openDrawer('lernbuch'); return true; }
+      if (what === 'menue') { openDrawer('toc'); return true; }
+      if (what === 'tour') return startTour();
+      if (what === 'meilenstein') {
+        const list = chapterList(true).filter(c => c.name);
+        const ch = (pages[state.current] || {}).chapter || (list[0] || {}).name;
+        if (!ch) return false;
+        milestoneCard(ch); return true;
+      }
+      if (what === 'wiedereinstieg') { showResume(state.current); return true; }
+      return false;
+    };
   }
 
   // Level-Spiele melden ihr Ergebnis per postMessage; nur Nachrichten aus den eigenen Spielrahmen zählen
@@ -11367,14 +11929,14 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     const calmBtn = t.closest('[data-calm]');
     if (calmBtn) {
       const on = !calmOn(); setCalmOn(on);
-      calmBtn.setAttribute('aria-pressed', String(on)); calmBtn.innerHTML = `${icon('pause')} ${T(on ? 'ruhigAn' : 'ruhigAus')}`;
+      calmBtn.setAttribute('aria-pressed', String(on)); calmBtn.innerHTML = tocSwitch('pause', T('ruhigAus'), on);
       toast(T(on ? 'ruhigAnHinweis' : 'ruhigAusHinweis'));
       return;
     }
     const sb = t.closest('[data-sounds]');
     if (sb) {
       const on = !soundsOn(); setSoundsOn(on);
-      sb.setAttribute('aria-pressed', String(on)); sb.innerHTML = `${icon(on ? 'volume' : 'mute')} ${T(on ? 'klangAn' : 'klangAus')}`;
+      sb.setAttribute('aria-pressed', String(on)); sb.innerHTML = tocSwitch(on ? 'volume' : 'mute', T('klaenge'), on);
       if (on) { klangLast = 0; uiSound('klick'); }
       return;
     }
@@ -11404,7 +11966,8 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
         const c = box.querySelector('[data-regal-count]'); if (c) c.textContent = T('regalGenau').replace('{n}', regalPick(found.q));
         return;
       }
-      if (a == null || needsConf(found.q, box)) return;
+      if (a == null) { emptyAnswerMsg(found.q, box, check); return; }
+      if (needsConf(found.q, box)) return;
       const whyEl = box.querySelector(`[data-why="${found.q.id}"]`);
       if (whyEl) {
         const v = whyEl.value.trim();
@@ -11418,8 +11981,15 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       const found = findQuestion(retry.dataset.retryOne);
       delete state.answers[found.q.id];
       delete state.conf[found.q.id];
+      delete solShown[found.q.id];
       state.seen[found.q.id] = Date.now();
       return refreshBlock(retry.closest('[data-quiz]'), renderQuiz(found.q, found.graded));
+    }
+    const showSol = t.closest('[data-show-sol]');
+    if (showSol) {
+      const found = findQuestion(showSol.dataset.showSol);
+      solShown[found.q.id] = true;
+      return refreshBlock(showSol.closest('[data-quiz]'), renderQuiz(found.q, found.graded));
     }
     // settings.exitButton: Stand melden, beim LMS abmelden, Fenster schließen (geht nur, wenn das LMS es geöffnet hat)
     if (t.closest('[data-exit]')) {
@@ -11838,6 +12408,24 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
       if (mv && mv.loaded) { if (mv.paused) { mv.autoRotate = false; mv.play(); } else mv.pause(); }
       const on = !!(mv && !mv.paused);
       m3dAnim.setAttribute('aria-pressed', String(on)); m3dAnim.textContent = (on ? '❚❚ ' : '▶ ') + T(on ? 'm3dAnimStop' : 'm3dAnimStart');
+      return;
+    }
+    // Scribble-Video: Abspielen, Szenen, Untertitel, Vollbild
+    const scrBtn = t.closest('[data-scr-toggle], [data-scr-big], [data-scr-step], [data-scr-cc], [data-scr-full]');
+    if (scrBtn && scrBtn.closest('[data-scr]')) {
+      const box = scrBtn.closest('[data-scr]'), rt = scrRt[box.dataset.scr];
+      if (scrBtn.matches('[data-scr-cc]')) { const on = scrBtn.getAttribute('aria-pressed') !== 'true'; scrBtn.setAttribute('aria-pressed', String(on)); if (rt) scrDraw(rt); return; }
+      if (scrBtn.matches('[data-scr-full]')) { const el = box.querySelector('[data-scr-stage]'); try { if (document.fullscreenElement) document.exitFullscreen(); else if (el.requestFullscreen) el.requestFullscreen(); else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen(); } catch (e) { /* kein Vollbild */ } return; }
+      if (!rt || !rt.scene) return;
+      if (scrBtn.matches('[data-scr-step]')) {
+        const sc = rt.scene.tl.scenes, i = scrSceneAt(rt, rt.t), dir = Number(scrBtn.dataset.dir);
+        // zurück: an den Anfang der Szene, nach mehr als zwei Sekunden darin; sonst zur vorigen
+        const j = dir < 0 ? (rt.t - sc[i].t0 > 2 ? i : Math.max(0, i - 1)) : Math.min(sc.length - 1, i + 1);
+        scrSeek(rt, sc[j].t0 + 0.01);
+        return;
+      }
+      if (rt.playing) scrPause(rt); else scrPlay(rt);
+      if (scrBtn.matches('[data-scr-big]')) { const tg = box.querySelector('[data-scr-toggle]'); if (tg) tg.focus(); }
       return;
     }
     const m3dReset = t.closest('[data-m3d-reset]');
@@ -12525,6 +13113,19 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
   });
   // Team „aufklappen“: aufgeklappte Personen merken (toggle steigt nicht auf, deshalb Capture), nichts neu zeichnen
   // Akkordeon mit Nummern: geöffnete Einträge merken, die anderen schließen, Nummer und Zähler nachziehen
+  // Scribble-Video: Text zum Nachlesen geöffnet gilt wie angesehen (Alternative zum Video, WCAG 1.2.1)
+  root.addEventListener('toggle', e => {
+    const d = e.target && e.target.matches && e.target.matches('details[data-scr-read]') ? e.target : null;
+    if (!d || !d.open) return;
+    const b = findBlock(d.closest('[data-scr]').dataset.scr);
+    if (b) { (state.self[b.id] = Object.assign({}, state.self[b.id] || {})).read = true; scrFinish(b); }
+  }, true);
+  root.addEventListener('input', e => {
+    const sk = e.target && e.target.matches && e.target.matches('[data-scr-seek]') ? e.target : null;
+    if (!sk) return;
+    const rt = scrRt[sk.closest('[data-scr]').dataset.scr];
+    if (rt && rt.scene) scrSeek(rt, Number(sk.value) / 1000 * rt.total);
+  });
   root.addEventListener('toggle', e => {
     const d = e.target && e.target.matches && e.target.matches('details[data-acc]') ? e.target : null;
     if (!d || !d.open) return;
@@ -13078,7 +13679,7 @@ g.kp-ip-drehen{transform-origin:50% 50%;animation:kp-ip-drehen 12s linear infini
     box.className = 'kp-resume' + (rq.length ? ' kp-resume-wide' : '');
     box.innerHTML = `<div class="kp-resume-box" role="dialog" aria-modal="true" aria-label="${T('willkommenZurueck')}">
       <h2 style="margin-top:0">${firstName() ? T('willkommenZurueckName').replace('{n}', esc(firstName())) : T('willkommenZurueck')}</h2>
-      <p>${T('zuletztAuf')} ${loc + 1}: „${esc(pages[loc].title)}“.</p>
+      <p>${T('zuletztAuf')} ${loc + 1}: „<span data-kp-page="${loc}">${esc(pages[loc].title)}</span>“.</p>
       ${lastOwnWords(loc)}${goalCard('kp-goal-resume')}
       ${dueResumeHtml()}
       ${rq.length ? `<div class="kp-resume-review"><p class="kp-label">${T('kurzWiederholen')}</p><p class="kp-resume-hint">${T('kurzWiederholenHinweis')}</p>${rq.map(q => renderQuiz(q, false)).join('')}</div>` : ''}
