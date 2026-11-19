@@ -446,3 +446,5 @@ iframe:focus, iframe:focus-visible { outline: none; }
 .help h3 a:hover { text-decoration: underline; text-underline-offset: 4px; }
 .help .more { display: inline-block; margin-top: 14px; }
 
+/* Zwei helle Abschnitte direkt nacheinander: nur ein Abstand dazwischen */
+.light + .light { padding-top: 0; }
