@@ -474,11 +474,30 @@ a.row-doc:hover img { transform: rotate(0) scale(1.03); }
 @media (max-width: 900px) { .row { grid-template-columns: 1fr; } .row.flip .row-ex { order: 0; } }
 
 /* Punkt-Illustrationen aus dem Spektrum-Design (19.11.2026) */
-.funnel { margin: clamp(20px, 2.4vw, 32px) 0 4px; opacity: .85; }
-.funnel img { display: block; width: 100%; height: auto; }
 .partner { grid-template-columns: 140px 1fr auto; }
 .partner-art { width: 100%; height: auto; opacity: .95; }
 @media (max-width: 900px) { .partner { grid-template-columns: 1fr; } .partner-art { width: 110px; } }
 .about-facts .has-art { grid-template-columns: 190px 1fr 84px; align-items: start; }
 .fact-art { width: 84px; height: auto; opacity: .75; margin-top: -4px; }
 @media (max-width: 700px) { .about-facts .has-art { grid-template-columns: 1fr 64px; } .about-facts .has-art dt { grid-column: 1 / -1; } .fact-art { width: 64px; } }
+
+/* Beispielkurse auf hellem Grund (19.11.2026) */
+.light .case { background: #fff; color: var(--ink); border-color: var(--line); }
+.light .case small { color: var(--muted); }
+.light .case i { border-color: var(--line); }
+.light .case:hover, .light .case[aria-pressed="true"] { border-color: var(--ink); }
+.light .stage { background: #fff; color: var(--ink); border-color: var(--line); }
+.light .stage-bar { border-bottom-color: var(--line); }
+.light .stage-new { color: var(--ink); }
+.light .dev { border-color: var(--line); }
+.light .dev button { color: var(--muted); }
+.light .dev button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+.light .view { background: var(--sand); }
+.light .view.phone iframe { box-shadow: 0 0 0 9px var(--ink); }
+.light .note, .light .vnote { color: var(--muted); }
+.light .vcard { background: #fff; color: var(--ink); border-color: var(--line); }
+.light .vcard p { color: var(--muted); }
+.light.vids { background: var(--paper); border-top: 1px solid var(--line); padding-top: clamp(56px, 7vw, 96px); }
+.light .poster { color: var(--on-night); }
+.light .poster .btn { background: var(--on-night); border-color: var(--on-night); color: var(--ink); }
+.light .poster .btn:hover { background: var(--blue); border-color: var(--blue); }
